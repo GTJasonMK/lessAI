@@ -1051,7 +1051,7 @@ p {
 .modal-overlay {
   position: fixed;
   inset: 0;
-  z-index: 80;
+  z-index: 120;
   display: flex;
   align-items: center;
   justify-content: center;
@@ -1072,6 +1072,76 @@ p {
   box-shadow: var(--panel-shadow);
   background:
     linear-gradient(135deg, rgba(255, 255, 255, 0.94), rgba(255, 250, 241, 0.96));
+}
+
+/* ── Confirm Dialog ───────────────────────────────────── */
+
+.dialog-card {
+  width: min(640px, 100%);
+  max-height: min(520px, calc(100vh - 44px));
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  border: var(--border);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--panel-shadow);
+  background:
+    linear-gradient(135deg, rgba(255, 255, 255, 0.96), rgba(255, 250, 241, 0.98));
+}
+
+.dialog-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 16px 18px 10px;
+}
+
+.dialog-header-title {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.dialog-header h2 {
+  margin: 0;
+  font-size: clamp(1.1rem, 1.25vw, 1.25rem);
+}
+
+.dialog-body {
+  flex: 1;
+  min-height: 0;
+  padding: 0 18px 16px;
+  overflow: auto;
+}
+
+.dialog-message {
+  margin: 0;
+  padding: 14px;
+  border: var(--border);
+  border-radius: var(--radius-md);
+  background: rgba(255, 255, 255, 0.72);
+  white-space: pre-wrap;
+  line-height: 1.65;
+}
+
+.dialog-footer {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 12px;
+  padding: 12px 18px 16px;
+  border-top: 1px solid rgba(20, 20, 20, 0.12);
+  background: rgba(255, 250, 241, 0.86);
+}
+
+.dialog-footer-actions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 10px;
+  flex-wrap: wrap;
 }
 
 .modal-header {
@@ -1158,6 +1228,21 @@ p {
   border: var(--border);
   border-radius: var(--radius-lg);
   background: rgba(255, 255, 255, 0.75);
+}
+
+/* 设置弹窗：隐藏滚动条（依然可滚动） */
+.settings-nav,
+.settings-content,
+.prompt-preview {
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+}
+
+.settings-nav::-webkit-scrollbar,
+.settings-content::-webkit-scrollbar,
+.prompt-preview::-webkit-scrollbar {
+  width: 0;
+  height: 0;
 }
 
 .settings-page {
@@ -1266,6 +1351,9 @@ p {
   border: var(--border);
   border-radius: var(--radius-md);
   background: rgba(255, 255, 255, 0.65);
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
 }
 
 .editor-field {
@@ -1772,6 +1860,36 @@ p {
   box-shadow: 0 0 0 2px rgba(23, 68, 207, 0.22);
 }
 
+.doc-chunk.is-running {
+  background: rgba(134, 93, 255, 0.12);
+  box-shadow: inset 0 0 0 1px rgba(134, 93, 255, 0.32);
+  animation: docChunkRunningPulse 1.25s ease-in-out infinite;
+}
+
+.doc-chunk.is-active.is-running {
+  box-shadow:
+    0 0 0 2px rgba(23, 68, 207, 0.22),
+    inset 0 0 0 1px rgba(134, 93, 255, 0.35);
+}
+
+@keyframes docChunkRunningPulse {
+  0% {
+    background: rgba(134, 93, 255, 0.1);
+  }
+  50% {
+    background: rgba(134, 93, 255, 0.16);
+  }
+  100% {
+    background: rgba(134, 93, 255, 0.1);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .doc-chunk.is-running {
+    animation: none;
+  }
+}
+
 .doc-chunk.is-proposed {
   background: rgba(239, 193, 34, 0.14);
 }
@@ -2061,7 +2179,10 @@ p {
 }
 
 .assistant-inline-actions {
-  grid-template-columns: repeat(3, minmax(0, 1fr));
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
 }
 
 .assistant-note {

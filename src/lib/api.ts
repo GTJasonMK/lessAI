@@ -26,6 +26,10 @@ export async function loadSession(sessionId: string) {
   return invoke<DocumentSession>("load_session", { sessionId });
 }
 
+export async function resetSession(sessionId: string) {
+  return invoke<DocumentSession>("reset_session", { sessionId });
+}
+
 export async function startRewrite(sessionId: string, mode: RewriteMode) {
   return invoke<DocumentSession>("start_rewrite", { sessionId, mode });
 }

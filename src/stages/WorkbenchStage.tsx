@@ -22,6 +22,7 @@ import type {
   DocumentSession,
   EditSuggestion,
   RewriteMode,
+  RewriteProgress,
 } from "../lib/types";
 import type { SessionStats } from "../lib/helpers";
 import type { ReviewView } from "../lib/constants";
@@ -59,6 +60,7 @@ type CopyState = "idle" | "copying" | "done" | "error";
 interface WorkbenchStageProps {
   settings: AppSettings;
   currentSession: DocumentSession | null;
+  liveProgress: RewriteProgress | null;
   currentStats: SessionStats | null;
   activeChunk: ChunkTask | null;
   activeChunkIndex: number;
@@ -74,6 +76,7 @@ interface WorkbenchStageProps {
   onResume: () => void;
   onCancel: () => void;
   onFinalizeDocument: () => void;
+  onResetSession: () => void;
   onApplySuggestion: (suggestionId: string) => void;
   onDismissSuggestion: (suggestionId: string) => void;
   onDeleteSuggestion: (suggestionId: string) => void;
@@ -84,6 +87,7 @@ interface WorkbenchStageProps {
 export const WorkbenchStage = memo(function WorkbenchStage({
   settings,
   currentSession,
+  liveProgress,
   currentStats,
   activeChunk,
   activeChunkIndex,
@@ -99,6 +103,7 @@ export const WorkbenchStage = memo(function WorkbenchStage({
   onResume,
   onCancel,
   onFinalizeDocument,
+  onResetSession,
   onApplySuggestion,
   onDismissSuggestion,
   onDeleteSuggestion,
@@ -171,7 +176,7 @@ export const WorkbenchStage = memo(function WorkbenchStage({
     if (currentStats.pendingGeneration === 0) {
       return "全部片段已生成，可在右侧审阅并导出";
     }
-    return settings.rewriteMode === "auto" ? "自动串行生成并应用" : "生成下一条修改对";
+    return settings.rewriteMode === "auto" ? "自动批处理生成并应用" : "生成下一条修改对";
   }, [
     currentSession,
     currentStats,
@@ -210,6 +215,27 @@ export const WorkbenchStage = memo(function WorkbenchStage({
     () => groupSuggestionsByChunk(currentSession?.suggestions ?? []),
     [currentSession?.suggestions]
   );
+
+  const runningIndexSet = useMemo(() => {
+    if (!currentSession) return new Set<number>();
+    if (!liveProgress) return new Set<number>();
+    if (liveProgress.sessionId !== currentSession.id) return new Set<number>();
+    return new Set(liveProgress.runningIndices);
+  }, [currentSession, liveProgress]);
+
+  const optimisticManualRunningIndex = useMemo(() => {
+    if (!currentSession) return null;
+    if (busyAction === "retry-chunk") {
+      return currentSession.chunks[activeChunkIndex]?.index ?? null;
+    }
+    if (busyAction !== "start-manual") {
+      return null;
+    }
+    const target = currentSession.chunks.find(
+      (chunk) => chunk.status === "idle" || chunk.status === "failed"
+    );
+    return target?.index ?? null;
+  }, [activeChunkIndex, busyAction, currentSession]);
 
   const copyText = useMemo(() => {
     if (!currentSession) return null;
@@ -371,6 +397,27 @@ export const WorkbenchStage = memo(function WorkbenchStage({
 
                     <button
                       type="button"
+                      className="icon-button"
+                      onClick={onResetSession}
+                      aria-label="重置该文档记录（不修改原文件）"
+                      title="重置该文档记录（不修改原文件）"
+                      disabled={
+                        !currentSession ||
+                        rewriteRunning ||
+                        rewritePaused ||
+                        busyAction === "reset-session" ||
+                        (anyBusy && busyAction !== "reset-session")
+                      }
+                    >
+                      {busyAction === "reset-session" ? (
+                        <LoaderCircle className="spin" />
+                      ) : (
+                        <RotateCcw />
+                      )}
+                    </button>
+
+                    <button
+                      type="button"
                       className={`icon-button ${hasAppliedEdits ? "is-danger" : ""}`}
                       onClick={onFinalizeDocument}
                       aria-label="覆盖原文件并清理记录"
@@ -454,6 +501,11 @@ export const WorkbenchStage = memo(function WorkbenchStage({
                       const classes = [
                         "doc-chunk",
                         chunk.index === activeChunkIndex ? "is-active" : "",
+                        chunk.status === "running" ||
+                        runningIndexSet.has(chunk.index) ||
+                        chunk.index === optimisticManualRunningIndex
+                          ? "is-running"
+                          : "",
                         chunk.status === "failed" ? "is-failed" : "",
                         documentView === "markup" && summary.applied ? "is-applied" : "",
                         documentView === "markup" && !summary.applied && summary.proposed

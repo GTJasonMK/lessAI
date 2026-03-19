@@ -6,7 +6,7 @@ import {
   useRef,
   useState
 } from "react";
-import { confirm, open, save } from "@tauri-apps/plugin-dialog";
+import { open, save } from "@tauri-apps/plugin-dialog";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import {
   Copy,
@@ -29,6 +29,7 @@ import {
   loadSettings,
   openDocument,
   pauseRewrite,
+  resetSession,
   resumeRewrite,
   retryChunk,
   saveSettings,
@@ -38,6 +39,7 @@ import {
 import type {
   AppSettings,
   DocumentSession,
+  PromptTemplate,
   ProviderCheckResult,
   RewriteMode,
   RewriteProgress,
@@ -59,6 +61,8 @@ import { useNotice } from "./hooks/useNotice";
 import { useBusyAction } from "./hooks/useBusyAction";
 import { useTauriEvents } from "./hooks/useTauriEvents";
 import { StatusBadge } from "./components/StatusBadge";
+import type { ConfirmModalOptions } from "./components/ConfirmModal";
+import { ConfirmModal } from "./components/ConfirmModal";
 import { SettingsModal } from "./components/SettingsModal";
 import { WorkbenchStage } from "./stages/WorkbenchStage";
 
@@ -86,9 +90,30 @@ export default function App() {
   const [providerStatus, setProviderStatus] =
     useState<ProviderCheckResult | null>(null);
   const [liveProgress, setLiveProgress] = useState<RewriteProgress | null>(null);
+  const [confirmDialog, setConfirmDialog] = useState<ConfirmModalOptions | null>(null);
 
   const { notice, showNotice, dismissNotice } = useNotice();
   const { busyAction, withBusy } = useBusyAction();
+
+  const confirmResolverRef = useRef<((value: boolean) => void) | null>(null);
+
+  const requestConfirm = useCallback((options: ConfirmModalOptions) => {
+    return new Promise<boolean>((resolve) => {
+      // 若外部逻辑同时触发多次确认弹窗，后者覆盖前者；前者默认视为取消。
+      if (confirmResolverRef.current) {
+        confirmResolverRef.current(false);
+      }
+      confirmResolverRef.current = resolve;
+      setConfirmDialog(options);
+    });
+  }, []);
+
+  const handleConfirmResult = useCallback((value: boolean) => {
+    const resolve = confirmResolverRef.current;
+    confirmResolverRef.current = null;
+    setConfirmDialog(null);
+    resolve?.(value);
+  }, []);
 
   // 使用 ref 持有最新值，供事件回调读取，避免闭包捕获旧状态
   const currentSessionRef = useRef(currentSession);
@@ -306,7 +331,7 @@ export default function App() {
           preserveSuggestion: true
         });
         if (refreshed.status === "completed") {
-          showNotice("success", "自动串行已完成，当前文稿可以直接导出。");
+          showNotice("success", "自动批处理已完成，当前文稿可以直接导出。");
         }
       }
     },
@@ -362,9 +387,9 @@ export default function App() {
   );
 
   const handleUpdateNumberSetting = useCallback(
-    (key: "timeoutMs" | "temperature", value: string) => {
+    (key: "timeoutMs" | "temperature" | "maxConcurrency", value: string) => {
       const parsed =
-        key === "timeoutMs"
+        key === "timeoutMs" || key === "maxConcurrency"
           ? Number.parseInt(value, 10)
           : Number.parseFloat(value);
 
@@ -378,7 +403,9 @@ export default function App() {
         [key]:
           key === "timeoutMs"
             ? Math.max(1_000, parsed)
-            : Math.max(0, Math.min(2, parsed))
+            : key === "maxConcurrency"
+              ? Math.max(1, Math.min(8, parsed))
+              : Math.max(0, Math.min(2, parsed))
       }));
     },
     []
@@ -406,6 +433,33 @@ export default function App() {
     },
     []
   );
+
+  const handleUpsertCustomPrompt = useCallback((template: PromptTemplate) => {
+    setSettings((current) => {
+      const existingIndex = current.customPrompts.findIndex(
+        (item) => item.id === template.id
+      );
+      const nextPrompts =
+        existingIndex >= 0
+          ? current.customPrompts.map((item) =>
+              item.id === template.id ? template : item
+            )
+          : [...current.customPrompts, template];
+
+      return { ...current, customPrompts: nextPrompts };
+    });
+  }, []);
+
+  const handleDeleteCustomPrompt = useCallback((templateId: string) => {
+    setSettings((current) => {
+      const nextPrompts = current.customPrompts.filter(
+        (item) => item.id !== templateId
+      );
+      const nextPresetId =
+        current.promptPresetId === templateId ? "humanizer_zh" : current.promptPresetId;
+      return { ...current, customPrompts: nextPrompts, promptPresetId: nextPresetId };
+    });
+  }, []);
 
   const handleSaveSettings = useCallback(async () => {
     try {
@@ -508,7 +562,7 @@ export default function App() {
         applySessionState(updated, activeChunkIndexRef.current, {
           preferredSuggestionId: activeSuggestionIdRef.current
         });
-        showNotice("info", "自动串行已启动，系统会连续处理并自动应用结果。");
+        showNotice("info", "自动批处理已启动，系统会后台连续处理并自动应用结果。");
       } catch (error) {
         if (mode === "manual" && session) {
           try {
@@ -786,11 +840,12 @@ export default function App() {
         : "未生成：0"
     ];
 
-    const ok = await confirm(hints.join("\n"), {
+    const ok = await requestConfirm({
       title: "覆盖原文件并清理记录",
-      kind: "warning",
+      message: hints.join("\n"),
       okLabel: "覆盖并清理",
-      cancelLabel: "取消"
+      cancelLabel: "取消",
+      variant: "danger"
     });
 
     if (!ok) return;
@@ -829,6 +884,56 @@ export default function App() {
       showNotice("error", `写回失败：${readableError(error)}`);
     }
   }, [applySessionState, closeSettings, showNotice, withBusy]);
+
+  // ── Reset Session：清空记录 + 重新切块（不修改原文件） ─────
+
+  const handleResetSession = useCallback(async () => {
+    const session = currentSessionRef.current;
+    if (!session) {
+      showNotice("warning", "当前没有可重置的文档。");
+      return;
+    }
+
+    if (session.status === "running" || session.status === "paused") {
+      showNotice("warning", "文档正在执行自动任务，请先取消后再重置记录。");
+      return;
+    }
+
+    const stats = getSessionStats(session);
+    const hints = [
+      "该操作会删除该文档的全部历史记录（修改对、进度），并从原文件重新创建会话。",
+      "不会修改原文件内容。",
+      "",
+      `文件：${formatDisplayPath(session.documentPath)}`,
+      `当前记录：修改对 ${stats.suggestionsTotal}，已应用 ${stats.chunksApplied}/${stats.total}`,
+      stats.suggestionsProposed > 0
+        ? `待审阅：${stats.suggestionsProposed}（会一起删除）`
+        : "待审阅：0",
+      stats.pendingGeneration > 0
+        ? `未生成：${stats.pendingGeneration}（会一起删除）`
+        : "未生成：0"
+    ];
+
+    const ok = await requestConfirm({
+      title: "重置该文档记录",
+      message: hints.join("\n"),
+      okLabel: "重置记录",
+      cancelLabel: "取消",
+      variant: "danger"
+    });
+
+    if (!ok) return;
+
+    try {
+      const rebuilt = await withBusy("reset-session", () => resetSession(session.id));
+      applySessionState(rebuilt, selectDefaultChunkIndex(rebuilt));
+      setReviewView("diff");
+      setLiveProgress(null);
+      showNotice("success", "已重置记录，并重新从原文件创建会话。");
+    } catch (error) {
+      showNotice("error", `重置失败：${readableError(error)}`);
+    }
+  }, [applySessionState, showNotice, withBusy]);
 
   // ── 渲染 ─────────────────────────────────────────────
 
@@ -909,8 +1014,11 @@ export default function App() {
                 currentSession &&
                 liveProgress.sessionId === currentSession.id ? (
                   <span className="context-chip">
-                    进行中 {liveProgress.currentChunk + 1}/
-                    {liveProgress.totalChunks}
+                    进度 {liveProgress.completedChunks}/{liveProgress.totalChunks}
+                    {liveProgress.inFlight > 0 ? ` · 进行中 ${liveProgress.inFlight}` : ""}
+                    {liveProgress.maxConcurrency > 1
+                      ? ` · 并发 ${liveProgress.maxConcurrency}`
+                      : ""}
                   </span>
                 ) : null}
               </div>
@@ -1020,6 +1128,7 @@ export default function App() {
             <WorkbenchStage
               settings={settings}
               currentSession={currentSession}
+              liveProgress={liveProgress}
               currentStats={currentStats}
               activeChunk={activeChunk}
               activeChunkIndex={activeChunkIndex}
@@ -1035,6 +1144,7 @@ export default function App() {
               onResume={() => void handleResume()}
               onCancel={() => void handleCancel()}
               onFinalizeDocument={() => void handleFinalizeDocument()}
+              onResetSession={() => void handleResetSession()}
               onApplySuggestion={handleApplySuggestion}
               onDismissSuggestion={handleDismissSuggestion}
               onDeleteSuggestion={handleDeleteSuggestion}
@@ -1054,11 +1164,24 @@ export default function App() {
             onUpdateChunkPreset={handleUpdateChunkPreset}
             onUpdateRewriteMode={handleUpdateRewriteMode}
             onUpdatePromptPresetId={handleUpdatePromptPresetId}
+            onUpsertCustomPrompt={handleUpsertCustomPrompt}
+            onDeleteCustomPrompt={handleDeleteCustomPrompt}
+            onConfirm={requestConfirm}
             onTestProvider={handleTestProvider}
             onSaveSettings={handleSaveSettings}
           />
         </main>
       </div>
+
+      <ConfirmModal
+        open={confirmDialog != null}
+        title={confirmDialog?.title ?? ""}
+        message={confirmDialog?.message ?? ""}
+        okLabel={confirmDialog?.okLabel}
+        cancelLabel={confirmDialog?.cancelLabel}
+        variant={confirmDialog?.variant}
+        onResult={handleConfirmResult}
+      />
 
       <div className="window-resize-layer" aria-hidden="true">
         <button

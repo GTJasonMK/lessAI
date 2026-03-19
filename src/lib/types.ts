@@ -1,10 +1,16 @@
 export type ChunkPreset = "clause" | "sentence" | "paragraph";
 export type RewriteMode = "manual" | "auto";
-export type PromptPresetId = "aigc_v1" | "humanizer_zh";
+export type PromptPresetId = "aigc_v1" | "humanizer_zh" | (string & {});
 export type ChunkStatus = "idle" | "running" | "done" | "failed";
 export type DiffType = "unchanged" | "insert" | "delete";
 export type RunningState = "idle" | "running" | "paused" | "completed" | "cancelled" | "failed";
 export type SuggestionDecision = "proposed" | "applied" | "dismissed";
+
+export interface PromptTemplate {
+  id: string;
+  name: string;
+  content: string;
+}
 
 export interface AppSettings {
   baseUrl: string;
@@ -14,7 +20,9 @@ export interface AppSettings {
   temperature: number;
   chunkPreset: ChunkPreset;
   rewriteMode: RewriteMode;
+  maxConcurrency: number;
   promptPresetId: PromptPresetId;
+  customPrompts: PromptTemplate[];
 }
 
 export interface DiffSpan {
@@ -59,10 +67,13 @@ export interface DocumentSession {
 
 export interface RewriteProgress {
   sessionId: string;
-  currentChunk: number;
+  completedChunks: number;
+  inFlight: number;
+  runningIndices: number[];
   totalChunks: number;
   mode: RewriteMode;
   runningState: RunningState;
+  maxConcurrency: number;
 }
 
 export interface ProviderCheckResult {

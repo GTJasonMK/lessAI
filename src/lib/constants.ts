@@ -61,7 +61,9 @@ export const DEFAULT_SETTINGS: AppSettings = {
   temperature: 0.8,
   chunkPreset: "sentence",
   rewriteMode: "manual",
-  promptPresetId: "humanizer_zh"
+  maxConcurrency: 2,
+  promptPresetId: "humanizer_zh",
+  customPrompts: []
 };
 
 // ── 选项配置 ─────────────────────────────────────────────
@@ -82,7 +84,7 @@ export const MODE_OPTIONS: ReadonlyArray<{
   hint: string;
 }> = [
   { value: "manual", label: "人工把关", hint: "逐段生成，等待你审核" },
-  { value: "auto", label: "自动串行", hint: "连续生成并自动接受结果" }
+  { value: "auto", label: "自动批处理", hint: "后台连续生成，可按并发数提速" }
 ];
 
 export const REVIEW_VIEW_OPTIONS: ReadonlyArray<{

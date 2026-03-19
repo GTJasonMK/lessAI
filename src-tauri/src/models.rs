@@ -11,8 +11,28 @@ pub struct AppSettings {
     pub temperature: f32,
     pub chunk_preset: ChunkPreset,
     pub rewrite_mode: RewriteMode,
+    #[serde(default = "default_max_concurrency")]
+    pub max_concurrency: usize,
+    #[serde(default = "default_prompt_preset_id")]
+    pub prompt_preset_id: String,
     #[serde(default)]
-    pub prompt_preset_id: PromptPresetId,
+    pub custom_prompts: Vec<PromptTemplate>,
+}
+
+fn default_max_concurrency() -> usize {
+    2
+}
+
+fn default_prompt_preset_id() -> String {
+    "humanizer_zh".to_string()
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PromptTemplate {
+    pub id: String,
+    pub name: String,
+    pub content: String,
 }
 
 impl Default for AppSettings {
@@ -25,21 +45,10 @@ impl Default for AppSettings {
             temperature: 0.8,
             chunk_preset: ChunkPreset::Sentence,
             rewrite_mode: RewriteMode::Manual,
-            prompt_preset_id: PromptPresetId::default(),
+            max_concurrency: default_max_concurrency(),
+            prompt_preset_id: default_prompt_preset_id(),
+            custom_prompts: Vec::new(),
         }
-    }
-}
-
-#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
-#[serde(rename_all = "snake_case")]
-pub enum PromptPresetId {
-    AigcV1,
-    HumanizerZh,
-}
-
-impl Default for PromptPresetId {
-    fn default() -> Self {
-        Self::HumanizerZh
     }
 }
 
@@ -156,10 +165,13 @@ pub struct ProviderCheckResult {
 #[serde(rename_all = "camelCase")]
 pub struct RewriteProgress {
     pub session_id: String,
-    pub current_chunk: usize,
+    pub completed_chunks: usize,
+    pub in_flight: usize,
+    pub running_indices: Vec<usize>,
     pub total_chunks: usize,
     pub mode: RewriteMode,
     pub running_state: RunningState,
+    pub max_concurrency: usize,
 }
 
 #[derive(Debug, Clone, Serialize)]
