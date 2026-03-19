@@ -21,6 +21,10 @@
   <img alt="Bundles" src="https://github.com/GTJasonMK/lessAI/actions/workflows/tauri-bundles.yml/badge.svg" />
 </p>
 
+<p align="center">
+  <img src="docs/images/workbench.png" width="980" alt="LessAI 工作台界面预览" />
+</p>
+
 ---
 
 ## ✨ 简介
@@ -42,6 +46,45 @@ LessAI 是一个基于 **Tauri 2** 的桌面端中文改写工作台：把“改
 - 视图：原文 / 改写后 / Diff（含修订标记）
 - 持久化：会话 JSON 落盘，支持断点续跑
 - Finalize：将已应用结果写回原文件，并清空该文档会话记录
+
+## 📊 效果展示（朱雀 AI 检测对比）
+
+以下为示例截图，仅代表当时测试内容、提示词与检测模型下的结果，**不构成任何保证**。
+检测工具与评分规则可能随时间变化，请以你的实际场景测试为准。
+
+### 偏理测试（技术类）
+
+<table>
+  <tr>
+    <th align="center">使用前</th>
+    <th align="center">使用后</th>
+  </tr>
+  <tr>
+    <td align="center">
+      <img src="docs/images/zhuque-tech-before.png" width="420" alt="偏理测试：使用前（朱雀 AI 检测）" />
+    </td>
+    <td align="center">
+      <img src="docs/images/zhuque-tech-after.png" width="420" alt="偏理测试：使用后（朱雀 AI 检测）" />
+    </td>
+  </tr>
+</table>
+
+### 偏文测试（随笔类）
+
+<table>
+  <tr>
+    <th align="center">使用前</th>
+    <th align="center">使用后</th>
+  </tr>
+  <tr>
+    <td align="center">
+      <img src="docs/images/zhuque-essay-before.png" width="420" alt="偏文测试：使用前（朱雀 AI 检测）" />
+    </td>
+    <td align="center">
+      <img src="docs/images/zhuque-essay-after.png" width="420" alt="偏文测试：使用后（朱雀 AI 检测）" />
+    </td>
+  </tr>
+</table>
 
 ## 🚀 使用指南（从 0 到写回）
 
