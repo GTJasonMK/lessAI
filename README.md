@@ -24,6 +24,9 @@ Windows 也可以直接双击：
 
 建议先用仓库自带的 `test.txt` 走一遍完整流程。
 
+Windows 常见报错（如 `EACCES ... node_modules\\.ignored_*`、`tauri` 缺失、`'sh' 不是内部或外部命令`）：
+- 见 `docs/windows-troubleshooting.md`
+
 ## 打包与发布
 
 本地打包：
