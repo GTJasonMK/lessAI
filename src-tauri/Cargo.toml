@@ -10,6 +10,7 @@ tauri-build = { version = "2", features = [] }
 
 [dependencies]
 chrono = { version = "0.4", features = ["serde"] }
+quick-xml = "0.38"
 reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
@@ -19,6 +20,7 @@ tauri-plugin-process = "2"
 tauri-plugin-updater = "2"
 tokio = { version = "1", features = ["rt", "time"] }
 uuid = { version = "1", features = ["serde", "v4", "v5"] }
+zip = { version = "4.6.1", default-features = false, features = ["deflate"] }
 
 [features]
 default = ["custom-protocol"]

@@ -1,4 +1,5 @@
 export type ChunkPreset = "clause" | "sentence" | "paragraph";
+export type SegmentationMode = "rules" | "aiFallback";
 export type RewriteMode = "manual" | "auto";
 export type PromptPresetId = "aigc_v1" | "humanizer_zh" | (string & {});
 export type ChunkStatus = "idle" | "running" | "done" | "failed";
@@ -24,6 +25,7 @@ export interface AppSettings {
   timeoutMs: number;
   temperature: number;
   chunkPreset: ChunkPreset;
+  segmentationMode: SegmentationMode;
   rewriteMode: RewriteMode;
   maxConcurrency: number;
   promptPresetId: PromptPresetId;
@@ -40,6 +42,8 @@ export interface ChunkTask {
   sourceText: string;
   /** 片段后的拼接分隔符，用于导出时还原段落/句子边界 */
   separatorAfter: string;
+  /** 是否跳过 AI 改写（例如 Markdown fenced code block） */
+  skipRewrite: boolean;
   status: ChunkStatus;
   errorMessage: string | null;
 }

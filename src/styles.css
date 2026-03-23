@@ -572,6 +572,20 @@ p {
   min-width: 0;
 }
 
+.brand-logo {
+  display: block;
+  width: 56px;
+  height: 56px;
+  flex: 0 0 56px;
+  object-fit: contain;
+}
+
+.brand-logo.is-small {
+  width: 34px;
+  height: 34px;
+  flex-basis: 34px;
+}
+
 .brand-mark.is-small {
   width: 34px;
   height: 34px;
@@ -610,6 +624,9 @@ p {
 }
 
 .workspace-bar-view {
+  display: inline-block;
+  /* 固定槽位：避免 Workbench / Editor 等文案切换导致顶栏布局抖动 */
+  min-width: 112px;
   font-size: 0.76rem;
   font-weight: 700;
   letter-spacing: 0.14em;
@@ -743,6 +760,13 @@ p {
   color: #fff;
 }
 
+.icon-button.is-placeholder,
+.button.is-placeholder,
+.toolbar-button.is-placeholder {
+  visibility: hidden;
+  pointer-events: none;
+}
+
 .toolbar-button {
   height: 38px;
   display: inline-flex;
@@ -750,6 +774,8 @@ p {
   justify-content: center;
   gap: 10px;
   padding: 0 16px;
+  flex: 0 0 auto;
+  min-width: 150px;
   border: var(--border);
   border-radius: 999px;
   background: rgba(255, 255, 255, 0.78);
@@ -875,9 +901,59 @@ p {
 .workbench-doc-actionbar {
   display: flex;
   align-items: center;
-  justify-content: flex-end;
+  justify-content: space-between;
   gap: 12px;
-  flex-wrap: wrap;
+  flex-wrap: nowrap;
+}
+
+.workbench-doc-panel .panel-header {
+  flex-wrap: nowrap;
+  align-items: center;
+}
+
+.workbench-doc-panel .panel-action {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.workbench-review-panel .panel-header {
+  flex-wrap: nowrap;
+  align-items: center;
+}
+
+.workbench-review-panel .panel-action {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.workbench-review-panel .workbench-review-actionbar.workbench-action-row {
+  max-width: 100%;
+  display: grid;
+  grid-template-columns: 1fr auto;
+  align-items: center;
+  gap: 10px;
+  justify-content: stretch;
+}
+
+.workbench-review-panel .workbench-review-actionbar-status {
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: nowrap;
+  justify-self: start;
+}
+
+.workbench-review-panel .workbench-review-actionbar-buttons {
+  justify-self: end;
+  overflow-x: auto;
+  padding-bottom: 4px;
+  padding-right: 4px;
+  scrollbar-width: none;
+}
+
+.workbench-review-panel .workbench-review-actionbar-buttons::-webkit-scrollbar {
+  height: 0;
 }
 
 .workbench-doc-actionbar-left,
@@ -887,6 +963,94 @@ p {
   justify-content: flex-end;
   gap: 8px;
   flex-wrap: nowrap;
+}
+
+.workbench-doc-actionbar-left {
+  flex: 1 1 auto;
+  min-width: 0;
+  justify-content: flex-start;
+  overflow-x: auto;
+  padding-bottom: 4px;
+  padding-right: 4px;
+  scrollbar-width: none;
+}
+
+.workbench-doc-actionbar-left::-webkit-scrollbar {
+  height: 0;
+}
+
+.workbench-doc-actionbar-right {
+  flex: 0 0 auto;
+}
+
+.workbench-action-reel {
+  --slot-duration: 240ms;
+  --slot-ease: cubic-bezier(0.22, 0.8, 0.2, 1);
+  --slot-height: 46px;
+  height: var(--slot-height);
+  overflow-y: hidden;
+  /* 说明：当一个轴是 visible、另一个轴是 hidden/auto 时，
+     visible 会被浏览器按规范折算成 auto，从而出现横向滚动条。
+     Workbench 动作区不应显示滚动条，因此这里显式隐藏滚动条。 */
+  overflow-x: auto;
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+}
+
+.workbench-action-reel::-webkit-scrollbar {
+  height: 0;
+}
+
+.workbench-action-track {
+  display: grid;
+  grid-auto-rows: var(--slot-height);
+  transform: translateY(0);
+  transition: transform var(--slot-duration) var(--slot-ease);
+  will-change: transform;
+}
+
+.workbench-action-reel.is-editor .workbench-action-track {
+  transform: translateY(calc(-1 * var(--slot-height)));
+}
+
+.workbench-view-reel {
+  flex: 0 0 auto;
+}
+
+.workbench-doc-actionbar-left .workbench-action-row {
+  justify-content: flex-start;
+}
+
+.workbench-action-row {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+  flex-wrap: nowrap;
+}
+
+.workbench-action-row.is-editor {
+  visibility: hidden;
+  pointer-events: none;
+  transition: visibility 0s linear var(--slot-duration);
+}
+
+.workbench-action-row.is-normal {
+  visibility: visible;
+  pointer-events: auto;
+  transition: visibility 0s linear 0s;
+}
+
+.workbench-action-reel.is-editor .workbench-action-row.is-normal {
+  visibility: hidden;
+  pointer-events: none;
+  transition: visibility 0s linear var(--slot-duration);
+}
+
+.workbench-action-reel.is-editor .workbench-action-row.is-editor {
+  visibility: visible;
+  pointer-events: auto;
+  transition: visibility 0s linear 0s;
 }
 
 .workbench-doc-actionbar-left .switch-chip {
@@ -906,12 +1070,41 @@ p {
   background: rgba(255, 255, 255, 0.66);
 }
 
+.workbench-editor-editable {
+  min-height: 100%;
+  outline: none;
+  white-space: pre-wrap;
+  line-height: 1.92;
+}
+
+.workbench-editor-editable.is-empty::before {
+  content: attr(data-placeholder);
+  color: var(--muted);
+}
+
+.workbench-editor-editable:focus-visible {
+  box-shadow: none;
+}
+
 .workbench-tabbar {
   display: flex;
   align-items: center;
   justify-content: flex-end;
   gap: 10px;
   flex-wrap: wrap;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .workbench-action-track {
+    transition: none;
+  }
+
+  .workbench-action-row.is-editor,
+  .workbench-action-row.is-normal,
+  .workbench-action-reel.is-editor .workbench-action-row.is-editor,
+  .workbench-action-reel.is-editor .workbench-action-row.is-normal {
+    transition: none;
+  }
 }
 
 .workbench-tabbar .status-badge {
@@ -1151,7 +1344,15 @@ p {
   align-items: center;
   justify-content: flex-end;
   gap: 10px;
-  flex-wrap: wrap;
+  flex-wrap: nowrap;
+  overflow-x: auto;
+  padding-bottom: 4px;
+  padding-right: 4px;
+  scrollbar-width: none;
+}
+
+.dialog-footer-actions::-webkit-scrollbar {
+  height: 0;
 }
 
 .modal-header {
@@ -1313,7 +1514,15 @@ p {
   align-items: center;
   justify-content: flex-end;
   gap: 10px;
-  flex-wrap: wrap;
+  flex-wrap: nowrap;
+  overflow-x: auto;
+  padding-bottom: 4px;
+  padding-right: 4px;
+  scrollbar-width: none;
+}
+
+.modal-footer-actions::-webkit-scrollbar {
+  height: 0;
 }
 
 .queue-board,
@@ -1366,31 +1575,6 @@ p {
   gap: 12px;
 }
 
-.editor-field {
-  min-height: 0;
-  flex: 1;
-  display: flex;
-  flex-direction: column;
-}
-
-.editor-field textarea {
-  flex: 1;
-}
-
-.editor-textarea {
-  border: none;
-  background: transparent;
-  box-shadow: none;
-  padding: 0;
-  font-size: 1rem;
-  line-height: 1.92;
-  resize: none;
-}
-
-.editor-textarea:focus-visible {
-  box-shadow: none;
-}
-
 .segmented-grid {
   grid-template-columns: repeat(3, minmax(0, 1fr));
 }
@@ -1431,10 +1615,12 @@ p {
   justify-content: center;
   gap: 10px;
   padding: 0 16px;
+  flex: 0 0 auto;
   border: var(--border);
   border-radius: 999px;
   box-shadow: var(--panel-shadow-sm);
   font-weight: 700;
+  white-space: nowrap;
   transition:
     transform var(--transition),
     background-color var(--transition),
@@ -1880,17 +2066,27 @@ p {
 
 .review-switches {
   justify-content: flex-start;
-  flex-wrap: wrap;
+  flex-wrap: nowrap;
   flex-shrink: 0;
   padding: 0 22px;
+  overflow-x: auto;
+  padding-bottom: 4px;
+  padding-right: 4px;
+  scrollbar-width: none;
+}
+
+.review-switches::-webkit-scrollbar {
+  height: 0;
 }
 
 .switch-chip {
   width: auto;
   min-height: 42px;
   padding: 0 14px;
+  flex: 0 0 auto;
   border: var(--border);
   box-shadow: var(--panel-shadow-sm);
+  white-space: nowrap;
 }
 
 .switch-chip.is-active {
@@ -2000,15 +2196,6 @@ p {
   gap: 16px;
 }
 
-.editor-stage {
-  flex: 1;
-  min-height: 0;
-  display: grid;
-  grid-template-rows: auto minmax(0, 1fr);
-  gap: 16px;
-}
-
-.editor-toolbar,
 .assistant-card,
 .chunk-ribbon,
 .review-minimap,
@@ -2017,21 +2204,6 @@ p {
   box-shadow: var(--panel-shadow-sm);
 }
 
-.editor-toolbar {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 16px;
-  padding: 14px 18px;
-  border-radius: var(--radius-lg);
-  background: rgba(255, 250, 241, 0.92);
-}
-
-.editor-toolbar-main {
-  min-width: 0;
-}
-
-.editor-toolbar-main p,
 .assistant-head p,
 .editor-paper-eyebrow {
   margin: 0 0 6px;
@@ -2042,37 +2214,10 @@ p {
   color: var(--muted);
 }
 
-.editor-toolbar-main h3,
 .assistant-head h4,
 .editor-paper-header h3 {
   margin: 0;
   font-family: "Newsreader", Georgia, serif;
-}
-
-.editor-toolbar-main h3 {
-  font-size: clamp(1.35rem, 1.8vw, 1.7rem);
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.editor-toolbar-meta {
-  display: flex;
-  align-items: center;
-  justify-content: flex-end;
-  gap: 10px;
-  flex-wrap: wrap;
-}
-
-.editor-toolbar-action.button {
-  min-height: 38px;
-  padding: 0 14px;
-}
-
-.editor-toolbar-action.button svg {
-  width: 16px;
-  height: 16px;
 }
 
 .editor-chip {
@@ -2677,12 +2822,6 @@ p {
   .segmented-grid,
   .field-grid {
     grid-template-columns: 1fr;
-  }
-
-  .editor-toolbar {
-    display: flex;
-    flex-direction: column;
-    align-items: flex-start;
   }
 }
 

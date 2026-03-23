@@ -1,6 +1,7 @@
 import type {
   AppSettings,
   ChunkPreset,
+  SegmentationMode,
   RewriteMode
 } from "./types";
 
@@ -67,6 +68,7 @@ export const DEFAULT_SETTINGS: AppSettings = {
   timeoutMs: 45_000,
   temperature: 0.8,
   chunkPreset: "sentence",
+  segmentationMode: "rules",
   rewriteMode: "manual",
   maxConcurrency: 2,
   promptPresetId: "humanizer_zh",
@@ -92,6 +94,19 @@ export const MODE_OPTIONS: ReadonlyArray<{
 }> = [
   { value: "manual", label: "人工把关", hint: "逐段生成，等待你审核" },
   { value: "auto", label: "自动批处理", hint: "后台连续生成，可按并发数提速" }
+];
+
+export const SEGMENTATION_OPTIONS: ReadonlyArray<{
+  value: SegmentationMode;
+  label: string;
+  hint: string;
+}> = [
+  { value: "rules", label: "规则分块", hint: "本地快速切分，稳定且零额外调用" },
+  {
+    value: "aiFallback",
+    label: "AI 兜底",
+    hint: "规则切碎或硬切过多时，先让 AI 只重组分块索引"
+  }
 ];
 
 export const REVIEW_VIEW_OPTIONS: ReadonlyArray<{

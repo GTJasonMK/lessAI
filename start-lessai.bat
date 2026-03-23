@@ -46,6 +46,16 @@ echo [INFO] First launch may take a while because Rust will compile.
 echo [INFO] Close the app window or this terminal to stop it.
 echo(
 
+call :ensure_dev_port_free 1420
+set "EXIT_CODE=!ERRORLEVEL!"
+if not "%EXIT_CODE%"=="0" (
+  echo(
+  echo [ERROR] Dev server port 1420 is not available.
+  echo [HINT] Close the program using port 1420, or choose to terminate it when prompted.
+  pause
+  exit /b %EXIT_CODE%
+)
+
 call pnpm exec tauri dev
 set "EXIT_CODE=%ERRORLEVEL%"
 
@@ -121,6 +131,47 @@ if errorlevel 1 (
   exit /b !ERRORLEVEL!
 )
 
+exit /b 0
+
+:ensure_dev_port_free
+rem 确保 dev server 端口可用（Tauri 依赖固定 devUrl，端口被占用会直接启动失败）
+set "DEV_PORT=%~1"
+set "PIDS="
+
+for /f "tokens=5" %%p in ('netstat -ano ^| findstr /c:":%DEV_PORT%" ^| findstr /i "LISTENING"') do (
+  if "!PIDS!"=="" (
+    set "PIDS=%%p"
+  ) else (
+    set "PIDS=!PIDS! %%p"
+  )
+)
+
+if "!PIDS!"=="" (
+  exit /b 0
+)
+
+echo [WARN] Port %DEV_PORT% is already in use.
+echo [INFO] PID(s): !PIDS!
+for %%p in (!PIDS!) do (
+  for /f "usebackq delims=" %%l in (`tasklist /fi "PID eq %%p" /nh 2^>nul`) do (
+    if not "%%l"=="INFO: No tasks are running which match the specified criteria." (
+      echo [INFO] %%l
+    )
+  )
+)
+
+choice /c YN /n /m "Terminate these process(es) to continue? (Y/N) "
+if errorlevel 2 (
+  echo [INFO] Cancelled. Please close the program that is using port %DEV_PORT% and retry.
+  exit /b 1
+)
+
+for %%p in (!PIDS!) do (
+  taskkill /PID %%p /F >nul 2>nul
+)
+
+rem 给系统一点时间释放端口
+timeout /t 1 /nobreak >nul
 exit /b 0
 
 :cleanup_ignored_links

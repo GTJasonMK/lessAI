@@ -56,7 +56,9 @@ import {
   formatBytes,
   getLatestSuggestion,
   getSessionStats,
+  isDocxPath,
   isSettingsReady,
+  normalizeNewlines,
   readableError,
   sanitizeFileName,
   selectDefaultChunkIndex,
@@ -70,7 +72,7 @@ import type { ConfirmModalOptions } from "./components/ConfirmModal";
 import { ConfirmModal } from "./components/ConfirmModal";
 import { SettingsModal } from "./components/SettingsModal";
 import { WorkbenchStage } from "./stages/WorkbenchStage";
-import { EditorStage } from "./stages/EditorStage";
+import logoUrl from "../src-tauri/icons/lessai-logo.svg";
 
 type ResizeDirection =
   | "East"
@@ -144,6 +146,10 @@ export default function App() {
   const editorDirty = editorText !== editorBaselineText;
   const editorDirtyRef = useRef(editorDirty);
   editorDirtyRef.current = editorDirty;
+
+  const handleChangeEditorText = useCallback((value: string) => {
+    setEditorText(normalizeNewlines(value));
+  }, []);
 
   // ── 派生值（useMemo）────────────────────────────────
 
@@ -452,6 +458,14 @@ export default function App() {
     []
   );
 
+  const handleUpdateSegmentationMode = useCallback(
+    (value: AppSettings["segmentationMode"]) => {
+      setProviderStatus(null);
+      setSettings((current) => ({ ...current, segmentationMode: value }));
+    },
+    []
+  );
+
   const handleUpdateRewriteMode = useCallback(
     (value: AppSettings["rewriteMode"]) => {
       setProviderStatus(null);
@@ -703,7 +717,7 @@ export default function App() {
       const selection = await open({
         multiple: false,
         directory: false,
-        filters: [{ name: "Text", extensions: ["txt", "md"] }]
+        filters: [{ name: "Documents", extensions: ["txt", "md", "tex", "docx"] }]
       });
       if (!selection) return;
 
@@ -735,6 +749,14 @@ export default function App() {
       return;
     }
 
+    if (isDocxPath(session.documentPath)) {
+      showNotice(
+        "warning",
+        "docx 目前仅支持导入/改写/导出，暂不支持终稿编辑或写回覆盖。"
+      );
+      return;
+    }
+
     if (busyAction) {
       showNotice("warning", "当前有操作在执行，请稍后再试。");
       return;
@@ -748,7 +770,7 @@ export default function App() {
     const cleanSession =
       session.status === "idle" &&
       session.suggestions.length === 0 &&
-      session.chunks.every((chunk) => chunk.status === "idle");
+      session.chunks.every((chunk) => chunk.status === "idle" || chunk.skipRewrite);
 
     if (!cleanSession) {
       showNotice(
@@ -760,8 +782,9 @@ export default function App() {
 
     startTransition(() => {
       setStage("editor");
-      setEditorBaselineText(session.sourceText);
-      setEditorText(session.sourceText);
+      const normalized = normalizeNewlines(session.sourceText);
+      setEditorBaselineText(normalized);
+      setEditorText(normalized);
       setLiveProgress(null);
       setSettingsOpen(false);
     });
@@ -816,8 +839,9 @@ export default function App() {
         setLiveProgress(null);
 
         startTransition(() => {
-          setEditorBaselineText(updated.sourceText);
-          setEditorText(updated.sourceText);
+          const normalized = normalizeNewlines(updated.sourceText);
+          setEditorBaselineText(normalized);
+          setEditorText(normalized);
         });
 
         if (returnToWorkbench) {
@@ -1146,6 +1170,14 @@ export default function App() {
       return;
     }
 
+    if (isDocxPath(session.documentPath)) {
+      showNotice(
+        "warning",
+        "docx 暂不支持写回覆盖（会破坏文件结构）。请先“导出”为纯文本后再写回。"
+      );
+      return;
+    }
+
     if (session.status === "running" || session.status === "paused") {
       showNotice("warning", "文档正在执行自动任务，请先取消后再写回原文件。");
       return;
@@ -1294,11 +1326,7 @@ export default function App() {
             }}
           >
             <div className="workspace-bar-left">
-              <div className="brand-mark is-small" aria-hidden="true">
-                <span className="shape shape-red" />
-                <span className="shape shape-blue" />
-                <span className="shape shape-yellow" />
-              </div>
+              <img className="brand-logo is-small" src={logoUrl} alt="LessAI" />
               <div className="workspace-bar-brand">
                 <strong>LessAI</strong>
                 <span className="workspace-bar-view">
@@ -1439,49 +1467,43 @@ export default function App() {
           </div>
 
           <div className="workspace-stage">
-            {stage === "editor" && currentSession ? (
-              <EditorStage
-                session={currentSession}
-                text={editorText}
-                dirty={editorDirty}
-                busyAction={busyAction}
-                onChangeText={setEditorText}
-                onSave={() => void handleSaveEditor()}
-                onSaveAndBack={() =>
-                  void handleSaveEditor({ returnToWorkbench: true })
-                }
-                onDiscard={handleDiscardEditorChanges}
-                onBack={handleExitEditor}
-              />
-            ) : (
-              <WorkbenchStage
-                settings={settings}
-                currentSession={currentSession}
-                liveProgress={liveProgress}
-                currentStats={currentStats}
-                activeChunk={activeChunk}
-                activeChunkIndex={activeChunkIndex}
-                activeSuggestionId={activeSuggestionId}
-                reviewView={reviewView}
-                busyAction={busyAction}
-                onOpenDocument={handleOpenDocument}
-                onSelectChunk={handleSelectChunk}
-                onSelectSuggestion={handleSelectSuggestion}
-                onSetReviewView={setReviewView}
-                onStartRewrite={(mode) => void handleStartRewrite(mode)}
-                onPause={() => void handlePause()}
-                onResume={() => void handleResume()}
-                onCancel={() => void handleCancel()}
-                onFinalizeDocument={() => void handleFinalizeDocument()}
-                onResetSession={() => void handleResetSession()}
-                onApplySuggestion={handleApplySuggestion}
-                onDismissSuggestion={handleDismissSuggestion}
-                onDeleteSuggestion={handleDeleteSuggestion}
-                onRetry={handleRetry}
-                onOpenSettings={openSettings}
-                onEnterEditor={handleEnterEditor}
-              />
-            )}
+            <WorkbenchStage
+              settings={settings}
+              currentSession={currentSession}
+              liveProgress={liveProgress}
+              currentStats={currentStats}
+              activeChunk={activeChunk}
+              activeChunkIndex={activeChunkIndex}
+              activeSuggestionId={activeSuggestionId}
+              reviewView={reviewView}
+              busyAction={busyAction}
+              editorMode={stage === "editor"}
+              editorText={editorText}
+              editorDirty={editorDirty}
+              onOpenDocument={handleOpenDocument}
+              onSelectChunk={handleSelectChunk}
+              onSelectSuggestion={handleSelectSuggestion}
+              onSetReviewView={setReviewView}
+              onStartRewrite={(mode) => void handleStartRewrite(mode)}
+              onPause={() => void handlePause()}
+              onResume={() => void handleResume()}
+              onCancel={() => void handleCancel()}
+              onFinalizeDocument={() => void handleFinalizeDocument()}
+              onResetSession={() => void handleResetSession()}
+              onApplySuggestion={handleApplySuggestion}
+              onDismissSuggestion={handleDismissSuggestion}
+              onDeleteSuggestion={handleDeleteSuggestion}
+              onRetry={handleRetry}
+              onOpenSettings={openSettings}
+              onEnterEditor={handleEnterEditor}
+              onChangeEditorText={handleChangeEditorText}
+              onSaveEditor={() => void handleSaveEditor()}
+              onSaveEditorAndExit={() =>
+                void handleSaveEditor({ returnToWorkbench: true })
+              }
+              onDiscardEditorChanges={handleDiscardEditorChanges}
+              onExitEditor={handleExitEditor}
+            />
           </div>
 
           {notice ? (
@@ -1510,6 +1532,7 @@ export default function App() {
             onUpdateStringSetting={handleUpdateStringSetting}
             onUpdateNumberSetting={handleUpdateNumberSetting}
             onUpdateChunkPreset={handleUpdateChunkPreset}
+            onUpdateSegmentationMode={handleUpdateSegmentationMode}
             onUpdateRewriteMode={handleUpdateRewriteMode}
             onUpdatePromptPresetId={handleUpdatePromptPresetId}
             onUpsertCustomPrompt={handleUpsertCustomPrompt}

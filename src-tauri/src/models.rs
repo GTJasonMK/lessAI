@@ -12,6 +12,8 @@ pub struct AppSettings {
     pub timeout_ms: u64,
     pub temperature: f32,
     pub chunk_preset: ChunkPreset,
+    #[serde(default = "default_segmentation_mode")]
+    pub segmentation_mode: SegmentationMode,
     pub rewrite_mode: RewriteMode,
     #[serde(default = "default_max_concurrency")]
     pub max_concurrency: usize,
@@ -27,6 +29,10 @@ fn default_max_concurrency() -> usize {
 
 fn default_prompt_preset_id() -> String {
     "humanizer_zh".to_string()
+}
+
+fn default_segmentation_mode() -> SegmentationMode {
+    SegmentationMode::Rules
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -47,6 +53,7 @@ impl Default for AppSettings {
             timeout_ms: 45_000,
             temperature: 0.8,
             chunk_preset: ChunkPreset::Sentence,
+            segmentation_mode: default_segmentation_mode(),
             rewrite_mode: RewriteMode::Manual,
             max_concurrency: default_max_concurrency(),
             prompt_preset_id: default_prompt_preset_id(),
@@ -65,6 +72,13 @@ pub enum ChunkPreset {
     Sentence,
     #[serde(alias = "large")]
     Paragraph,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub enum SegmentationMode {
+    Rules,
+    AiFallback,
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
@@ -123,6 +137,8 @@ pub struct ChunkTask {
     pub index: usize,
     pub source_text: String,
     pub separator_after: String,
+    #[serde(default)]
+    pub skip_rewrite: bool,
     pub status: ChunkStatus,
     pub error_message: Option<String>,
 }

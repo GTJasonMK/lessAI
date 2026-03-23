@@ -2,7 +2,11 @@ import { memo, useEffect, useMemo, useState } from "react";
 import { ArrowUpCircle, Check, Orbit, Trash2, X } from "lucide-react";
 import type { AppSettings, PromptTemplate, ProviderCheckResult } from "../lib/types";
 import type { NoticeTone } from "../lib/constants";
-import { MODE_OPTIONS, PRESET_OPTIONS } from "../lib/constants";
+import {
+  MODE_OPTIONS,
+  PRESET_OPTIONS,
+  SEGMENTATION_OPTIONS
+} from "../lib/constants";
 import { PROMPT_PRESETS, makePromptPreview } from "../lib/promptPresets";
 import { isSettingsReady } from "../lib/helpers";
 import { ActionButton } from "./ActionButton";
@@ -39,6 +43,7 @@ interface SettingsModalProps {
     value: string
   ) => void;
   onUpdateChunkPreset: (value: AppSettings["chunkPreset"]) => void;
+  onUpdateSegmentationMode: (value: AppSettings["segmentationMode"]) => void;
   onUpdateRewriteMode: (value: AppSettings["rewriteMode"]) => void;
   onUpdatePromptPresetId: (value: AppSettings["promptPresetId"]) => void;
   onUpsertCustomPrompt: (value: PromptTemplate) => void;
@@ -58,6 +63,7 @@ export const SettingsModal = memo(function SettingsModal({
   onUpdateStringSetting,
   onUpdateNumberSetting,
   onUpdateChunkPreset,
+  onUpdateSegmentationMode,
   onUpdateRewriteMode,
   onUpdatePromptPresetId,
   onUpsertCustomPrompt,
@@ -348,6 +354,38 @@ export const SettingsModal = memo(function SettingsModal({
 
                 <div className="field-block">
                   <div className="field-line">
+                    <span>分块模式</span>
+                    <strong>
+                      {
+                        SEGMENTATION_OPTIONS.find(
+                          (item) => item.value === settings.segmentationMode
+                        )?.label
+                      }
+                    </strong>
+                  </div>
+                  <div className="segmented-grid">
+                    {SEGMENTATION_OPTIONS.map((option) => (
+                      <button
+                        key={option.value}
+                        type="button"
+                        className={`segment-card ${
+                          settings.segmentationMode === option.value ? "is-active" : ""
+                        }`}
+                        onClick={() => onUpdateSegmentationMode(option.value)}
+                      >
+                        <strong>{option.label}</strong>
+                        <span>{option.hint}</span>
+                      </button>
+                    ))}
+                  </div>
+                  <span className="workspace-hint">
+                    AI 兜底只会在开始执行前，对规则分块质量不足的干净文档做一次重分组；
+                    AI 只能返回索引分组，不能返回正文。
+                  </span>
+                </div>
+
+                <div className="field-block">
+                  <div className="field-line">
                     <span>默认执行模式</span>
                     <strong>
                       {MODE_OPTIONS.find((item) => item.value === settings.rewriteMode)
@@ -567,16 +605,18 @@ export const SettingsModal = memo(function SettingsModal({
               onClick={onCheckUpdate}
               variant="secondary"
             />
-            {page === "provider" ? (
-              <ActionButton
-                icon={Orbit}
-                label="测试连接"
-                busy={busyAction === "test-provider"}
-                disabled={Boolean(busyAction) && busyAction !== "test-provider"}
-                onClick={onTestProvider}
-                variant="secondary"
-              />
-            ) : null}
+            <ActionButton
+              icon={Orbit}
+              label="测试连接"
+              busy={busyAction === "test-provider"}
+              disabled={
+                page !== "provider" ||
+                (Boolean(busyAction) && busyAction !== "test-provider")
+              }
+              onClick={onTestProvider}
+              variant="secondary"
+              className={page === "provider" ? "" : "is-placeholder"}
+            />
             <ActionButton
               icon={Check}
               label="保存配置"

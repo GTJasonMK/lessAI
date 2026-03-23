@@ -1,5 +1,6 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
+mod adapters;
 mod models;
 mod rewrite;
 mod storage;
@@ -7,7 +8,7 @@ mod storage;
 use std::{
     collections::{HashMap, HashSet, VecDeque},
     fs,
-    path::PathBuf,
+    path::{Path, PathBuf},
     sync::{
         atomic::{AtomicBool, Ordering},
         Arc, Mutex,
@@ -17,7 +18,8 @@ use std::{
 use chrono::Utc;
 use models::{
     AppSettings, ChunkCompletedEvent, ChunkStatus, ChunkTask, DocumentSession, EditSuggestion,
-    RewriteFailedEvent, RewriteMode, RewriteProgress, RunningState, SessionEvent, SuggestionDecision,
+    RewriteFailedEvent, RewriteMode, RewriteProgress, RunningState, SegmentationMode, SessionEvent,
+    SuggestionDecision,
 };
 use tauri::{AppHandle, Emitter, Manager, State};
 use uuid::Uuid;
@@ -44,8 +46,8 @@ fn document_session_id(document_path: &str) -> String {
     // - 同一台机器上同一路径 => 同一个 id（用于恢复进度）
     // - 避免把路径直接当文件名（包含非法字符/过长）
     let namespace = Uuid::from_bytes([
-        0x6c, 0x65, 0x73, 0x73, 0x61, 0x69, 0x2d, 0x64, 0x6f, 0x63, 0x2d, 0x6e, 0x73, 0x2d,
-        0x30, 0x31,
+        0x6c, 0x65, 0x73, 0x73, 0x61, 0x69, 0x2d, 0x64, 0x6f, 0x63, 0x2d, 0x6e, 0x73, 0x2d, 0x30,
+        0x31,
     ]);
     Uuid::new_v5(&namespace, document_path.as_bytes()).to_string()
 }
@@ -72,6 +74,36 @@ fn with_session_lock<T>(
         .lock()
         .map_err(|_| "会话锁已损坏（可能是上次进程异常退出）。".to_string())?;
     f()
+}
+
+fn path_extension_lower(path: &Path) -> Option<String> {
+    path.extension()
+        .and_then(|value| value.to_str())
+        .map(|value| value.to_ascii_lowercase())
+}
+
+fn load_document_source_text(path: &Path) -> Result<String, String> {
+    match path_extension_lower(path).as_deref() {
+        Some("docx") => {
+            let bytes = fs::read(path).map_err(|error| error.to_string())?;
+            adapters::docx::DocxAdapter::extract_text(&bytes)
+        }
+        Some("doc") => {
+            Err("暂不支持 .doc（老版 Word 二进制格式）。请另存为 .docx 后再导入。".to_string())
+        }
+        _ => fs::read_to_string(path).map_err(|error| error.to_string()),
+    }
+}
+
+fn ensure_document_can_write_back(path: &str) -> Result<(), String> {
+    let ext = path_extension_lower(Path::new(path)).unwrap_or_default();
+    if ext == "docx" {
+        return Err(
+            "当前文件为 .docx：暂不支持写回覆盖（会破坏文件结构）。请使用“导出”为 .txt/.md 或另存为纯文本后再写回。"
+                .to_string(),
+        );
+    }
+    Ok(())
 }
 
 const MAX_MAX_CONCURRENCY: usize = 8;
@@ -111,6 +143,82 @@ fn emit_rewrite_progress(
         },
     )
     .map_err(|error| error.to_string())
+}
+
+fn build_chunk_tasks(chunks: Vec<rewrite::SegmentedChunk>) -> Vec<ChunkTask> {
+    chunks
+        .into_iter()
+        .enumerate()
+        .map(|(index, chunk)| ChunkTask {
+            index,
+            source_text: chunk.text,
+            separator_after: chunk.separator_after,
+            skip_rewrite: chunk.skip_rewrite,
+            status: if chunk.skip_rewrite {
+                ChunkStatus::Done
+            } else {
+                ChunkStatus::Idle
+            },
+            error_message: None,
+        })
+        .collect()
+}
+
+fn can_resegment_session(session: &DocumentSession) -> bool {
+    session.status == RunningState::Idle
+        && session.suggestions.is_empty()
+        && session.chunks.iter().all(|chunk| {
+            (chunk.skip_rewrite && chunk.status == ChunkStatus::Done)
+                || (!chunk.skip_rewrite
+                    && chunk.status == ChunkStatus::Idle
+                    && chunk.error_message.is_none())
+        })
+}
+
+fn chunk_layout_changed(current: &[ChunkTask], next: &[ChunkTask]) -> bool {
+    current.len() != next.len()
+        || current.iter().zip(next.iter()).any(|(left, right)| {
+            left.source_text != right.source_text
+                || left.separator_after != right.separator_after
+                || left.skip_rewrite != right.skip_rewrite
+        })
+}
+
+async fn prepare_session_for_rewrite(
+    app: &AppHandle,
+    state: &AppState,
+    session_id: &str,
+) -> Result<DocumentSession, String> {
+    let session = with_session_lock(state, session_id, || storage::load_session(app, session_id))?;
+    let settings = storage::load_settings(app)?;
+
+    if settings.segmentation_mode != SegmentationMode::AiFallback
+        || !can_resegment_session(&session)
+    {
+        return Ok(session);
+    }
+
+    let segmented =
+        rewrite::segment_text_for_rewrite(&settings, &session.source_text, settings.chunk_preset)
+            .await?;
+    let next_chunks = build_chunk_tasks(segmented);
+
+    if !chunk_layout_changed(&session.chunks, &next_chunks) {
+        return Ok(session);
+    }
+
+    with_session_lock(state, session_id, || {
+        let mut latest = storage::load_session(app, session_id)?;
+        if !can_resegment_session(&latest) {
+            return Ok(latest);
+        }
+
+        latest.normalized_text = rewrite::normalize_text(&latest.source_text);
+        latest.chunks = next_chunks.clone();
+        latest.updated_at = Utc::now();
+        storage::save_session(app, &latest)?;
+        Ok(latest)
+    })
 }
 
 #[tauri::command]
@@ -159,13 +267,15 @@ fn reset_session(
     with_session_lock(state.inner(), &session_id, || {
         let existing = storage::load_session(&app, &session_id)?;
 
-        if matches!(existing.status, RunningState::Running | RunningState::Paused) {
+        if matches!(
+            existing.status,
+            RunningState::Running | RunningState::Paused
+        ) {
             return Err("当前文档正在执行自动任务，请先暂停并取消后再重置。".to_string());
         }
 
         // 重置是“清空会话记录并重建切块”，不修改原文件。
-        let source_text =
-            fs::read_to_string(&existing.document_path).map_err(|error| error.to_string())?;
+        let source_text = load_document_source_text(Path::new(&existing.document_path))?;
         if source_text.trim().is_empty() {
             return Err("文档内容为空。".to_string());
         }
@@ -179,7 +289,12 @@ fn reset_session(
                 index,
                 source_text: chunk.text,
                 separator_after: chunk.separator_after,
-                status: ChunkStatus::Idle,
+                skip_rewrite: chunk.skip_rewrite,
+                status: if chunk.skip_rewrite {
+                    ChunkStatus::Done
+                } else {
+                    ChunkStatus::Idle
+                },
                 error_message: None,
             })
             .collect::<Vec<_>>();
@@ -236,12 +351,14 @@ fn save_document_edits(
     with_session_lock(state.inner(), &session_id_for_lock, move || {
         let existing = storage::load_session(&app, &session_id)?;
 
+        ensure_document_can_write_back(&existing.document_path)?;
+
         let clean_session = existing.status == RunningState::Idle
             && existing.suggestions.is_empty()
             && existing
                 .chunks
                 .iter()
-                .all(|chunk| chunk.status == ChunkStatus::Idle);
+                .all(|chunk| chunk.status == ChunkStatus::Idle || chunk.skip_rewrite);
 
         if !clean_session {
             return Err(
@@ -272,7 +389,12 @@ fn save_document_edits(
                 index,
                 source_text: chunk.text,
                 separator_after: chunk.separator_after,
-                status: ChunkStatus::Idle,
+                skip_rewrite: chunk.skip_rewrite,
+                status: if chunk.skip_rewrite {
+                    ChunkStatus::Done
+                } else {
+                    ChunkStatus::Idle
+                },
                 error_message: None,
             })
             .collect::<Vec<_>>();
@@ -337,8 +459,12 @@ fn open_document(
                     .iter()
                     .map(|chunk| format!("{}{}", chunk.source_text, chunk.separator_after))
                     .collect::<String>();
+                // Sentence/Clause 预设下，chunk.source_text 理论上不应包含换行：
+                // - 换行属于格式，应被保存在 separator_after 中以保证“拼回原文不漂移”
+                // - 例外：skip_rewrite chunk 允许包含多行（例如 Markdown fenced code block）
                 let has_inline_newlines = session.chunks.iter().any(|chunk| {
-                    chunk.source_text.contains('\n') || chunk.source_text.contains('\r')
+                    !chunk.skip_rewrite
+                        && (chunk.source_text.contains('\n') || chunk.source_text.contains('\r'))
                 });
 
                 // 迁移条件：
@@ -360,7 +486,12 @@ fn open_document(
                             index,
                             source_text: chunk.text,
                             separator_after: chunk.separator_after,
-                            status: ChunkStatus::Idle,
+                            skip_rewrite: chunk.skip_rewrite,
+                            status: if chunk.skip_rewrite {
+                                ChunkStatus::Done
+                            } else {
+                                ChunkStatus::Idle
+                            },
                             error_message: None,
                         })
                         .collect::<Vec<_>>();
@@ -375,7 +506,7 @@ fn open_document(
             return Ok(session);
         }
 
-        let source_text = fs::read_to_string(&canonical).map_err(|error| error.to_string())?;
+        let source_text = load_document_source_text(&canonical)?;
         if source_text.trim().is_empty() {
             return Err("文档内容为空。".to_string());
         }
@@ -389,7 +520,12 @@ fn open_document(
                 index,
                 source_text: chunk.text,
                 separator_after: chunk.separator_after,
-                status: ChunkStatus::Idle,
+                skip_rewrite: chunk.skip_rewrite,
+                status: if chunk.skip_rewrite {
+                    ChunkStatus::Done
+                } else {
+                    ChunkStatus::Idle
+                },
                 error_message: None,
             })
             .collect::<Vec<_>>();
@@ -427,9 +563,7 @@ async fn start_rewrite(
     session_id: String,
     mode: RewriteMode,
 ) -> Result<DocumentSession, String> {
-    let session = with_session_lock(state.inner(), &session_id, || {
-        storage::load_session(&app, &session_id)
-    })?;
+    let session = prepare_session_for_rewrite(&app, state.inner(), &session_id).await?;
 
     match mode {
         RewriteMode::Manual => run_manual_rewrite(&app, state.inner(), &session).await,
@@ -667,6 +801,8 @@ fn finalize_document(
             return Err("当前文档正在执行自动任务，请先暂停并取消后再写回原文件。".to_string());
         }
 
+        ensure_document_can_write_back(&session.document_path)?;
+
         let line_ending = rewrite::detect_line_ending(&session.source_text);
         let mut content = build_merged_text(&session);
         if !rewrite::has_trailing_spaces_per_line(&session.source_text) {
@@ -707,7 +843,9 @@ async fn run_manual_rewrite(
         .ok_or_else(|| "没有可继续处理的片段，当前文档可能已经全部完成。".to_string())?;
 
     process_chunk(app, state, &session.id, next_chunk, false).await?;
-    with_session_lock(state, &session.id, || storage::load_session(app, &session.id))
+    with_session_lock(state, &session.id, || {
+        storage::load_session(app, &session.id)
+    })
 }
 
 fn run_auto_rewrite(
@@ -727,7 +865,9 @@ fn run_auto_rewrite(
 
     session.status = RunningState::Running;
     session.updated_at = Utc::now();
-    with_session_lock(state.inner(), &session.id, || storage::save_session(&app, &session))?;
+    with_session_lock(state.inner(), &session.id, || {
+        storage::save_session(&app, &session)
+    })?;
 
     {
         let mut jobs = state
@@ -838,7 +978,8 @@ async fn run_auto_loop(
         return Ok(());
     }
 
-    let mut tasks: tokio::task::JoinSet<(usize, Result<String, String>)> = tokio::task::JoinSet::new();
+    let mut tasks: tokio::task::JoinSet<(usize, Result<String, String>)> =
+        tokio::task::JoinSet::new();
     let mut in_flight_indices = HashSet::<usize>::new();
 
     loop {
@@ -1062,7 +1203,8 @@ fn commit_chunk_success(
         if !rewrite::has_trailing_spaces_per_line(&chunk.source_text) {
             candidate_text = rewrite::strip_trailing_spaces_per_line(&candidate_text);
         }
-        let source_has_line_break = chunk.source_text.contains('\n') || chunk.source_text.contains('\r');
+        let source_has_line_break =
+            chunk.source_text.contains('\n') || chunk.source_text.contains('\r');
         if !source_has_line_break {
             candidate_text = rewrite::collapse_line_breaks_to_spaces(&candidate_text);
         }
@@ -1075,7 +1217,8 @@ fn commit_chunk_success(
 
         if decision == SuggestionDecision::Applied {
             for suggestion in latest.suggestions.iter_mut() {
-                if suggestion.chunk_index == index && suggestion.decision == SuggestionDecision::Applied
+                if suggestion.chunk_index == index
+                    && suggestion.decision == SuggestionDecision::Applied
                 {
                     suggestion.decision = SuggestionDecision::Dismissed;
                     suggestion.updated_at = now;
@@ -1151,7 +1294,11 @@ fn reset_running_chunks_to_idle(
     })
 }
 
-fn mark_session_cancelled(app: &AppHandle, state: &AppState, session_id: &str) -> Result<(), String> {
+fn mark_session_cancelled(
+    app: &AppHandle,
+    state: &AppState,
+    session_id: &str,
+) -> Result<(), String> {
     with_session_lock(state, session_id, || {
         let mut session = storage::load_session(app, session_id)?;
         session.status = RunningState::Cancelled;
@@ -1300,9 +1447,9 @@ fn main() {
         .setup(|app| {
             #[cfg(desktop)]
             {
-                if let Err(error) =
-                    app.handle()
-                        .plugin(tauri_plugin_updater::Builder::new().build())
+                if let Err(error) = app
+                    .handle()
+                    .plugin(tauri_plugin_updater::Builder::new().build())
                 {
                     eprintln!("[WARN] Updater plugin init failed: {error}");
                 }

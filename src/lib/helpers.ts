@@ -90,6 +90,10 @@ export function countCharacters(text: string) {
   return text.replace(/\s+/g, "").length;
 }
 
+export function normalizeNewlines(text: string) {
+  return text.replace(/\r\n/g, "\n").replace(/\r/g, "\n");
+}
+
 // ── 日期格式化（缓存 Intl.DateTimeFormat 实例） ──────────
 
 const zhDateFormatter = new Intl.DateTimeFormat("zh-CN", {
@@ -222,6 +226,10 @@ export function formatChunkStatus(
 
   if (chunk.status === "failed") {
     return "失败";
+  }
+
+  if (chunk.skipRewrite) {
+    return "跳过";
   }
 
   const summary = summarizeChunkSuggestions(chunkSuggestions);
@@ -378,6 +386,23 @@ export function formatDisplayPath(path: string) {
   return value;
 }
 
+// ── 扩展名判断（用于能力开关） ──────────────────────────
+
+export function fileExtensionLower(path: string) {
+  const value = path.trim();
+  if (!value) return "";
+
+  const lastSlash = Math.max(value.lastIndexOf("/"), value.lastIndexOf("\\"));
+  const base = lastSlash >= 0 ? value.slice(lastSlash + 1) : value;
+  const dot = base.lastIndexOf(".");
+  if (dot <= 0) return "";
+  return base.slice(dot + 1).toLowerCase();
+}
+
+export function isDocxPath(path: string) {
+  return fileExtensionLower(path) === "docx";
+}
+
 // ── 文件名清理 ───────────────────────────────────────────
 
 export function sanitizeFileName(name: string) {
@@ -393,6 +418,7 @@ export function chunkStatusTone(
 ): NoticeTone {
   if (chunk.status === "failed") return "error";
   if (chunk.status === "running") return "info";
+  if (chunk.skipRewrite) return "info";
 
   const summary = summarizeChunkSuggestions(chunkSuggestions);
   if (summary.applied) return "success";
