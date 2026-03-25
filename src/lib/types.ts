@@ -1,5 +1,4 @@
 export type ChunkPreset = "clause" | "sentence" | "paragraph";
-export type SegmentationMode = "rules" | "aiFallback";
 export type RewriteMode = "manual" | "auto";
 export type PromptPresetId = "aigc_v1" | "humanizer_zh" | (string & {});
 export type ChunkStatus = "idle" | "running" | "done" | "failed";
@@ -25,7 +24,8 @@ export interface AppSettings {
   timeoutMs: number;
   temperature: number;
   chunkPreset: ChunkPreset;
-  segmentationMode: SegmentationMode;
+  /** 是否允许改写标题/章节标题等结构性文本 */
+  rewriteHeadings: boolean;
   rewriteMode: RewriteMode;
   maxConcurrency: number;
   promptPresetId: PromptPresetId;

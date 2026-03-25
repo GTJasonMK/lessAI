@@ -1,0 +1,569 @@
+/* ── Settings Modal ───────────────────────────────────── */
+
+.modal-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 120;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 22px;
+  background: rgba(10, 10, 10, 0.22);
+  backdrop-filter: blur(10px);
+}
+
+.modal-card {
+  width: min(980px, 100%);
+  /* 固定高度：避免切换设置分类时弹窗尺寸跳动 */
+  height: min(760px, calc(100vh - 44px));
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  border: var(--border);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--panel-shadow);
+  background:
+    linear-gradient(135deg, rgba(255, 255, 255, 0.94), rgba(255, 250, 241, 0.96));
+}
+
+/* ── Confirm Dialog ───────────────────────────────────── */
+
+.dialog-card {
+  width: min(640px, 100%);
+  max-height: min(520px, calc(100vh - 44px));
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  border: var(--border);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--panel-shadow);
+  background:
+    linear-gradient(135deg, rgba(255, 255, 255, 0.96), rgba(255, 250, 241, 0.98));
+}
+
+.dialog-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 16px 18px 10px;
+}
+
+.dialog-header-title {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.dialog-header h2 {
+  margin: 0;
+  font-size: clamp(1.1rem, 1.25vw, 1.25rem);
+}
+
+.dialog-body {
+  flex: 1;
+  min-height: 0;
+  padding: 0 18px 16px;
+  overflow: auto;
+}
+
+.dialog-message {
+  margin: 0;
+  padding: 14px;
+  border: var(--border);
+  border-radius: var(--radius-md);
+  background: rgba(255, 255, 255, 0.72);
+  white-space: pre-wrap;
+  line-height: 1.65;
+}
+
+.dialog-footer {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 12px;
+  padding: 12px 18px 16px;
+  border-top: 1px solid rgba(20, 20, 20, 0.12);
+  background: rgba(255, 250, 241, 0.86);
+}
+
+.dialog-footer-actions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 10px;
+  flex-wrap: nowrap;
+  overflow-x: auto;
+  padding-bottom: 4px;
+  padding-right: 4px;
+  scrollbar-width: none;
+}
+
+.dialog-footer-actions::-webkit-scrollbar {
+  height: 0;
+}
+
+.modal-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 16px 18px 10px;
+}
+
+.modal-header-title {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.modal-header h2 {
+  margin: 0;
+  font-size: clamp(1.25rem, 1.55vw, 1.55rem);
+}
+
+.modal-subtitle {
+  margin: 0;
+  color: var(--muted);
+  line-height: 1.5;
+  font-size: 0.92rem;
+}
+
+.modal-body {
+  flex: 1;
+  min-height: 0;
+  display: grid;
+  grid-template-columns: 240px minmax(0, 1fr);
+  gap: 14px;
+  padding: 0 18px 16px;
+  overflow: hidden;
+}
+
+.settings-nav {
+  min-height: 0;
+  display: grid;
+  gap: 10px;
+  padding: 10px 0;
+  align-content: start;
+  overflow: auto;
+}
+
+.settings-nav-item {
+  width: 100%;
+  text-align: left;
+  padding: 12px 12px;
+  border: var(--border);
+  border-radius: var(--radius-md);
+  background: rgba(255, 255, 255, 0.72);
+  box-shadow: var(--panel-shadow-sm);
+  transition:
+    transform var(--transition),
+    background-color var(--transition),
+    box-shadow var(--transition);
+}
+
+.settings-nav-item strong {
+  display: block;
+}
+
+.settings-nav-item span {
+  display: block;
+  margin-top: 6px;
+  color: var(--muted);
+  font-size: 0.86rem;
+  line-height: 1.35;
+}
+
+.settings-nav-item.is-active {
+  background:
+    linear-gradient(135deg, rgba(239, 193, 34, 0.18), rgba(255, 250, 241, 0.95));
+}
+
+.settings-content {
+  min-height: 0;
+  overflow: auto;
+  padding: 14px;
+  border: var(--border);
+  border-radius: var(--radius-lg);
+  background: rgba(255, 255, 255, 0.75);
+}
+
+/* 设置弹窗：隐藏滚动条（依然可滚动） */
+.settings-nav,
+.settings-content,
+.prompt-preview {
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+}
+
+.settings-nav::-webkit-scrollbar,
+.settings-content::-webkit-scrollbar,
+.prompt-preview::-webkit-scrollbar {
+  width: 0;
+  height: 0;
+}
+
+.settings-page {
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.settings-page-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.settings-page-head h3 {
+  margin: 0;
+  font-family: "Newsreader", Georgia, serif;
+  font-size: 1.2rem;
+}
+
+.prompt-preset-grid {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 12px;
+}
+
+.prompt-preset-card {
+  min-height: 96px;
+}
+
+.prompt-preview {
+  min-height: 240px;
+  max-height: 420px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono",
+    "Courier New", monospace;
+  font-size: 0.92rem;
+  line-height: 1.55;
+}
+
+.modal-footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 12px 18px 16px;
+  border-top: 1px solid rgba(20, 20, 20, 0.12);
+  background: rgba(255, 250, 241, 0.86);
+}
+
+.modal-footer-left {
+  min-width: 0;
+}
+
+.modal-footer-actions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 10px;
+  flex-wrap: nowrap;
+  overflow-x: auto;
+  padding-bottom: 4px;
+  padding-right: 4px;
+  scrollbar-width: none;
+}
+
+.modal-footer-actions::-webkit-scrollbar {
+  height: 0;
+}
+
+.queue-board,
+.review-nav {
+  min-height: 0;
+}
+
+.field-grid,
+.metric-grid,
+.segmented-grid,
+.bullet-list,
+.compact-list,
+.info-card,
+.action-card-grid,
+.lane-grid,
+.review-cluster-grid {
+  display: grid;
+  gap: 12px;
+}
+
+.field-grid {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.field {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.field span {
+  font-size: 0.82rem;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+
+.field-inline input {
+  max-width: 180px;
+}
+
+.field-block {
+  padding: 14px;
+  border: var(--border);
+  border-radius: var(--radius-md);
+  background: rgba(255, 255, 255, 0.65);
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.segmented-grid {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+.segment-card {
+  display: flex;
+  min-height: 80px;
+  flex-direction: column;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 12px;
+  border: var(--border);
+  border-radius: var(--radius-md);
+  background: rgba(255, 255, 255, 0.8);
+  box-shadow: var(--panel-shadow-sm);
+  text-align: left;
+  transition:
+    transform var(--transition),
+    background-color var(--transition),
+    box-shadow var(--transition);
+}
+
+.segment-card span {
+  font-size: 0.86rem;
+  line-height: 1.5;
+  color: var(--muted);
+}
+
+.segment-card.is-active {
+  background:
+    linear-gradient(135deg, rgba(239, 193, 34, 0.18), rgba(255, 250, 241, 0.95));
+}
+
+.segment-card:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+  transform: none;
+}
+
+.button {
+  min-height: 48px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  padding: 0 16px;
+  flex: 0 0 auto;
+  border: var(--border);
+  border-radius: 999px;
+  box-shadow: var(--panel-shadow-sm);
+  font-weight: 700;
+  white-space: nowrap;
+  transition:
+    transform var(--transition),
+    background-color var(--transition),
+    box-shadow var(--transition);
+}
+
+.button svg {
+  width: 18px;
+  height: 18px;
+}
+
+.button:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+  transform: none;
+}
+
+.button-primary {
+  background: var(--blue);
+  color: #fff;
+}
+
+.button-secondary {
+  background: rgba(255, 255, 255, 0.82);
+  color: var(--ink);
+}
+
+.button-danger {
+  background: var(--red);
+  color: #fff;
+}
+
+.button-block {
+  width: 100%;
+}
+
+.notice {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-height: 54px;
+  padding: 0 16px;
+  border-radius: var(--radius-md);
+  background: rgba(255, 255, 255, 0.88);
+}
+
+.toast-layer {
+  position: fixed;
+  inset: 0;
+  /* 预留窗口缩放热区，避免提示挡住右下角 resize handle */
+  padding: 20px;
+  display: flex;
+  align-items: flex-end;
+  justify-content: flex-end;
+  pointer-events: none;
+  /* 需要高于 modal-overlay（120），否则在设置弹窗里触发提示会“像没反应” */
+  z-index: 130;
+}
+
+.notice.toast {
+  min-height: auto;
+  max-width: min(520px, calc(100% - 24px));
+  padding: 12px 14px;
+  border-radius: 18px;
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.98), rgba(255, 250, 241, 0.92));
+  pointer-events: auto;
+  transform-origin: bottom right;
+  animation: toast-in 160ms ease;
+}
+
+.notice.toast .notice-dismiss {
+  width: 34px;
+  height: 34px;
+  box-shadow: none;
+}
+
+.notice.toast .notice-dismiss svg {
+  width: 16px;
+  height: 16px;
+}
+
+@keyframes toast-in {
+  from {
+    opacity: 0;
+    transform: translateY(10px) scale(0.98);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+.notice span {
+  flex: 1;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.notice .notice-dismiss {
+  margin-left: auto;
+  flex: 0 0 auto;
+}
+
+.notice.is-info {
+  border-color: var(--blue);
+}
+
+.notice.is-success {
+  border-color: var(--green);
+}
+
+.notice.is-warning {
+  border-color: var(--yellow);
+}
+
+.notice.is-error {
+  border-color: var(--red);
+}
+
+.status-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 32px;
+  padding: 0 12px;
+  border: 2px solid var(--line);
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.75);
+  font-size: 0.78rem;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.status-badge.is-info {
+  background: rgba(23, 68, 207, 0.14);
+}
+
+.status-badge.is-success {
+  background: rgba(31, 122, 60, 0.16);
+}
+
+.status-badge.is-warning {
+  background: rgba(239, 193, 34, 0.22);
+}
+
+.status-badge.is-error {
+  background: rgba(214, 45, 32, 0.18);
+}
+
+.workflow-mini-list,
+.session-list,
+.queue-list,
+.suggestion-list {
+  display: flex;
+  min-height: 0;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.mini-step,
+.session-row,
+.queue-row,
+.switch-chip,
+.suggestion-row {
+  width: 100%;
+  border-radius: var(--radius-md);
+  background: rgba(255, 255, 255, 0.78);
+  text-align: left;
+  transition:
+    transform var(--transition),
+    background-color var(--transition),
+    box-shadow var(--transition);
+}
+
+.mini-step {
+  padding: 12px 14px;
+}
+
+.mini-step small {
+  display: block;
+  margin-top: 4px;
+  color: var(--muted);
+}
+
+.mini-step.is-active {
+  background:
+    linear-gradient(135deg, rgba(23, 68, 207, 0.12), rgba(255, 250, 241, 0.92));
+}
+

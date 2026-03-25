@@ -13,65 +13,7 @@ use super::TextRegion;
 pub struct TexAdapter;
 
 impl TexAdapter {
-    /// 粗略判断：是否疑似 TeX 文本。
-    ///
-    /// 即使误判进入慢路径，也必须保证输出严格保真。
-    pub fn should_adapt(text: &str) -> bool {
-        // 典型 TeX 关键字/结构（优先命中）
-        let patterns = [
-            "\\documentclass",
-            "\\begin{document}",
-            "\\usepackage",
-            "\\begin{",
-            "\\end{",
-            "\\section",
-            "\\subsection",
-            "\\paragraph",
-            "\\cite",
-            "\\ref",
-            "\\label",
-            "\\(",
-            "\\[",
-            "$$",
-        ];
-        if patterns.iter().any(|pat| text.contains(pat)) {
-            return true;
-        }
-
-        // 兜底：出现疑似 TeX 控制序列（`\` + 字母/符号）。
-        // 这里刻意偏“宁可误判”：误判只会让更多片段进入 skip_rewrite，保证不改坏格式。
-        let bytes = text.as_bytes();
-        for index in 0..bytes.len().saturating_sub(1) {
-            if bytes[index] != b'\\' {
-                continue;
-            }
-            let next = bytes[index + 1];
-            if next.is_ascii_alphabetic()
-                || matches!(
-                    next,
-                    b'\\'
-                        | b'%'
-                        | b'$'
-                        | b'{'
-                        | b'}'
-                        | b'_'
-                        | b'#'
-                        | b'&'
-                        | b'^'
-                        | b'~'
-                        | b'['
-                        | b']'
-                )
-            {
-                return true;
-            }
-        }
-
-        // 最后兜底：出现 `$`（可能是数学模式），仍值得尝试标记。
-        text.contains('$')
-    }
-
-    pub fn split_regions(text: &str) -> Vec<TextRegion> {
+    pub fn split_regions(text: &str, rewrite_headings: bool) -> Vec<TextRegion> {
         if text.is_empty() {
             return vec![TextRegion {
                 body: String::new(),
@@ -186,8 +128,10 @@ impl TexAdapter {
                     continue;
                 }
 
-                // 文本型命令：保留命令语法，但允许其参数正文进入改写（例如 \section{标题}）。
-                if let Some((span_end, pieces)) = split_text_command_regions(text, index) {
+                // 文本型命令：保留命令语法；是否允许改写其参数正文取决于命令类型与设置。
+                if let Some((span_end, pieces)) =
+                    split_text_command_regions(text, index, rewrite_headings)
+                {
                     push_region(&mut regions, &text[last..index], false);
                     for piece in pieces.into_iter() {
                         push_region(&mut regions, &piece.body, piece.skip_rewrite);
@@ -548,7 +492,11 @@ fn find_command_span_end(text: &str, index: usize) -> Option<usize> {
     Some(pos)
 }
 
-fn split_text_command_regions(text: &str, index: usize) -> Option<(usize, Vec<TextRegion>)> {
+fn split_text_command_regions(
+    text: &str,
+    index: usize,
+    rewrite_headings: bool,
+) -> Option<(usize, Vec<TextRegion>)> {
     let (name, mut pos) = parse_command_name(text, index)?;
 
     // 只有“字母命令”才有“参数正文”；控制符（例如 \\ \%）不走这里。
@@ -556,8 +504,7 @@ fn split_text_command_regions(text: &str, index: usize) -> Option<(usize, Vec<Te
         return None;
     };
 
-    // 允许改写其大括号正文的命令白名单（保守挑选：高频标题/强调/注释类）。
-    let allow_single_arg = matches!(
+    let is_heading_command = matches!(
         name,
         "section"
             | "subsection"
@@ -569,20 +516,18 @@ fn split_text_command_regions(text: &str, index: usize) -> Option<(usize, Vec<Te
             | "title"
             | "subtitle"
             | "caption"
-            | "footnote"
-            | "emph"
-            | "textbf"
-            | "textit"
-            | "underline"
-            | "textrm"
-            | "textsf"
-            | "textsc"
+    );
+
+    // 允许改写其大括号正文的命令白名单（保守挑选：高频强调/注释类）。
+    let allow_single_arg = matches!(
+        name,
+        "footnote" | "emph" | "textbf" | "textit" | "underline" | "textrm" | "textsf" | "textsc"
     );
 
     // 特例：\href{url}{text} —— 第一个参数是 URL，第二个参数是可读文本。
     let allow_href = name == "href";
 
-    if !allow_single_arg && !allow_href {
+    if !is_heading_command && !allow_single_arg && !allow_href {
         return None;
     }
 
@@ -611,13 +556,23 @@ fn split_text_command_regions(text: &str, index: usize) -> Option<(usize, Vec<Te
         let content_start = pos + 1;
         let content_end = group_end - 1;
 
+        if is_heading_command && !rewrite_headings {
+            return Some((
+                group_end,
+                vec![TextRegion {
+                    body: text[index..group_end].to_string(),
+                    skip_rewrite: true,
+                }],
+            ));
+        }
+
         let mut out: Vec<TextRegion> = Vec::new();
         out.push(TextRegion {
             body: text[index..content_start].to_string(),
             skip_rewrite: true,
         });
 
-        let inner = TexAdapter::split_regions(&text[content_start..content_end]);
+        let inner = TexAdapter::split_regions(&text[content_start..content_end], rewrite_headings);
         out.extend(inner);
 
         out.push(TextRegion {
@@ -661,7 +616,7 @@ fn split_text_command_regions(text: &str, index: usize) -> Option<(usize, Vec<Te
         body: text[index..content_start].to_string(),
         skip_rewrite: true,
     });
-    let inner = TexAdapter::split_regions(&text[content_start..content_end]);
+    let inner = TexAdapter::split_regions(&text[content_start..content_end], rewrite_headings);
     out.extend(inner);
     out.push(TextRegion {
         body: text[content_end..second_end].to_string(),
@@ -765,7 +720,7 @@ mod tests {
     fn preserves_text_when_splitting_tex_regions() {
         let text =
             "前文 $E=mc^2$ 后文。\n\\begin{verbatim}\nfn main() {}\n\\end{verbatim}\n% 注释\n末尾";
-        let regions = TexAdapter::split_regions(text);
+        let regions = TexAdapter::split_regions(text, false);
         let rebuilt = regions
             .iter()
             .map(|region| region.body.as_str())
@@ -775,9 +730,23 @@ mod tests {
     }
 
     #[test]
-    fn marks_commands_as_skip_rewrite() {
+    fn blocks_rewriting_text_inside_heading_commands_by_default() {
         let text = "这是一句。\\section{标题}\n下一句。";
-        let regions = TexAdapter::split_regions(text);
+        let regions = TexAdapter::split_regions(text, false);
+        assert!(regions
+            .iter()
+            .any(|r| r.skip_rewrite && r.body.contains("\\section")));
+        assert!(!regions
+            .iter()
+            .any(|r| !r.skip_rewrite && r.body.contains("标题")));
+        let rebuilt = regions.iter().map(|r| r.body.as_str()).collect::<String>();
+        assert_eq!(rebuilt, text);
+    }
+
+    #[test]
+    fn allows_rewriting_text_inside_heading_commands_when_enabled() {
+        let text = "这是一句。\\section{标题}\n下一句。";
+        let regions = TexAdapter::split_regions(text, true);
         assert!(regions
             .iter()
             .any(|r| r.skip_rewrite && r.body.contains("\\section")));
@@ -791,7 +760,7 @@ mod tests {
     #[test]
     fn allows_rewriting_text_inside_emphasis_commands() {
         let text = "这是 \\textbf{很重要} 的句子。";
-        let regions = TexAdapter::split_regions(text);
+        let regions = TexAdapter::split_regions(text, false);
         assert!(regions
             .iter()
             .any(|r| r.skip_rewrite && r.body.contains("\\textbf{")));
@@ -808,7 +777,7 @@ mod tests {
     #[test]
     fn keeps_href_url_as_skip_but_allows_text_argument() {
         let text = "见 \\href{https://example.com}{这里}。";
-        let regions = TexAdapter::split_regions(text);
+        let regions = TexAdapter::split_regions(text, false);
         assert!(regions
             .iter()
             .any(|r| r.skip_rewrite && r.body.contains("https://example.com")));
@@ -822,7 +791,7 @@ mod tests {
     #[test]
     fn marks_lstinline_as_skip_rewrite() {
         let text = "代码 \\lstinline|fn main() {}| 示例。";
-        let regions = TexAdapter::split_regions(text);
+        let regions = TexAdapter::split_regions(text, false);
         assert!(regions
             .iter()
             .any(|r| { r.skip_rewrite && r.body.contains("\\lstinline|fn main() {}|") }));
@@ -833,7 +802,7 @@ mod tests {
     #[test]
     fn marks_path_as_skip_rewrite() {
         let text = "路径 \\path|C:\\\\a\\\\b| 示例。";
-        let regions = TexAdapter::split_regions(text);
+        let regions = TexAdapter::split_regions(text, false);
         assert!(regions
             .iter()
             .any(|r| r.skip_rewrite && r.body.contains("\\path|C:\\\\a\\\\b|")));
@@ -845,7 +814,7 @@ mod tests {
     fn marks_bibliography_environment_as_skip_rewrite() {
         let text =
             "前文。\n\\begin{thebibliography}{9}\n\\bibitem{a} A.\n\\end{thebibliography}\n后文。";
-        let regions = TexAdapter::split_regions(text);
+        let regions = TexAdapter::split_regions(text, false);
         assert!(regions
             .iter()
             .any(|r| { r.skip_rewrite && r.body.contains("\\begin{thebibliography}") }));

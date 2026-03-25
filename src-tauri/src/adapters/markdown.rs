@@ -21,60 +21,7 @@ struct LineSlice<'a> {
 }
 
 impl MarkdownAdapter {
-    /// 快速判断：是否值得进入 Markdown 解析慢路径。
-    ///
-    /// 这里只做粗略包含判断；即使误判进入慢路径，也必须保证输出严格保真。
-    pub fn should_adapt(text: &str) -> bool {
-        let trimmed_start =
-            text.trim_start_matches(|ch: char| ch == '\u{feff}' || ch.is_whitespace());
-        let might_have_front_matter = trimmed_start.starts_with("---");
-        let might_have_table = text.contains('|');
-        let might_have_fence = text.contains("```") || text.contains("~~~");
-        let might_have_inline_code = text.contains('`');
-        let might_have_link_like =
-            text.contains("](") || text.contains("![") || text.contains("]:");
-        let might_have_emphasis = text.contains("**") || text.contains("~~") || text.contains("__");
-        let might_have_single_emphasis = contains_likely_single_emphasis(text);
-        let might_have_indented_code = text.starts_with('\t')
-            || text.contains("\n\t")
-            || text.starts_with("    ")
-            || text.contains("\n    ");
-        let might_have_footnote = text.contains("[^");
-        let might_have_pandoc_citation = text.contains("[@") || text.contains("[-@");
-        let might_have_html_comment = text.contains("<!--");
-        let might_have_html_tag = trimmed_start.starts_with('<')
-            || text.contains("\n<")
-            || text.contains("</")
-            || text.contains("/>");
-
-        // 常见 Markdown 行级结构（标题/引用/列表）。这里宁可多触发，也不要漏触发导致语法被改坏。
-        let might_have_line_markers = text.starts_with('#')
-            || text.contains("\n#")
-            || text.starts_with('>')
-            || text.contains("\n>")
-            || text.starts_with("- ")
-            || text.contains("\n- ")
-            || text.starts_with("* ")
-            || text.contains("\n* ")
-            || text.starts_with("+ ")
-            || text.contains("\n+ ");
-
-        might_have_fence
-            || might_have_front_matter
-            || might_have_table
-            || might_have_inline_code
-            || might_have_link_like
-            || might_have_emphasis
-            || might_have_single_emphasis
-            || might_have_indented_code
-            || might_have_footnote
-            || might_have_pandoc_citation
-            || might_have_html_comment
-            || might_have_html_tag
-            || might_have_line_markers
-    }
-
-    pub fn split_regions(text: &str) -> Vec<TextRegion> {
+    pub fn split_regions(text: &str, rewrite_headings: bool) -> Vec<TextRegion> {
         let lines = split_lines_with_endings(text);
         let front_matter = find_yaml_front_matter_range(&lines);
         let mut regions: Vec<TextRegion> = Vec::new();
@@ -187,7 +134,7 @@ impl MarkdownAdapter {
                 continue;
             }
 
-            let pieces = split_inline_protected_regions(&region.body);
+            let pieces = split_inline_protected_regions(&region.body, rewrite_headings);
             for piece in pieces.into_iter() {
                 push_text_region(&mut out, piece);
             }
@@ -195,99 +142,6 @@ impl MarkdownAdapter {
 
         out
     }
-}
-
-fn contains_likely_single_emphasis(text: &str) -> bool {
-    if !text.contains('*') && !text.contains('_') {
-        return false;
-    }
-
-    for line in text.split(|ch| ch == '\n' || ch == '\r') {
-        if line.len() < 3 {
-            continue;
-        }
-        if contains_likely_single_emphasis_in_line(line, b'*')
-            || contains_likely_single_emphasis_in_line(line, b'_')
-        {
-            return true;
-        }
-    }
-
-    false
-}
-
-fn contains_likely_single_emphasis_in_line(line: &str, marker: u8) -> bool {
-    let bytes = line.as_bytes();
-    let len = bytes.len();
-    let mut index = 0usize;
-
-    while index < len {
-        if bytes[index] != marker {
-            index += 1;
-            continue;
-        }
-        if index > 0 && bytes[index - 1] == b'\\' {
-            index += 1;
-            continue;
-        }
-        if index + 1 >= len || bytes[index + 1].is_ascii_whitespace() {
-            index += 1;
-            continue;
-        }
-        if index + 1 < len && bytes[index + 1] == marker {
-            index += 2;
-            continue;
-        }
-        if marker == b'_' {
-            let prev = if index > 0 { bytes[index - 1] } else { b' ' };
-            let next = bytes[index + 1];
-            if prev.is_ascii_alphanumeric() && next.is_ascii_alphanumeric() {
-                index += 1;
-                continue;
-            }
-        }
-
-        let mut close = index + 2;
-        while close < len {
-            if bytes[close] != marker {
-                close += 1;
-                continue;
-            }
-            if bytes[close - 1].is_ascii_whitespace() {
-                close += 1;
-                continue;
-            }
-            if close > 0 && bytes[close - 1] == b'\\' {
-                close += 1;
-                continue;
-            }
-            if close + 1 < len && bytes[close + 1] == marker {
-                close += 2;
-                continue;
-            }
-            if marker == b'_' {
-                let prev = bytes[close - 1];
-                let next = if close + 1 < len {
-                    bytes[close + 1]
-                } else {
-                    b' '
-                };
-                if prev.is_ascii_alphanumeric() && next.is_ascii_alphanumeric() {
-                    close += 1;
-                    continue;
-                }
-            }
-
-            if bytes[index + 1].is_ascii_whitespace() {
-                break;
-            }
-            return true;
-        }
-
-        index += 1;
-    }
-
-    false
 }
 
 fn find_unescaped_emphasis_marker(
@@ -499,13 +353,15 @@ fn is_markdown_table_delimiter(line: &str) -> bool {
     })
 }
 
-fn split_inline_protected_regions(text: &str) -> Vec<TextRegion> {
+fn split_inline_protected_regions(text: &str, rewrite_headings: bool) -> Vec<TextRegion> {
     let lines = split_lines_with_endings(text);
     let mut out: Vec<TextRegion> = Vec::new();
     let mut in_indented_code_block = false;
     let mut in_html_comment = false;
 
-    for slice in lines.into_iter() {
+    let mut index = 0usize;
+    while index < lines.len() {
+        let slice = &lines[index];
         let mut line = slice.line;
         let full = slice.full;
         let ending = &full[slice.line.len()..];
@@ -535,6 +391,7 @@ fn split_inline_protected_regions(text: &str) -> Vec<TextRegion> {
                     },
                 );
                 in_indented_code_block = false;
+                index += 1;
                 continue;
             }
         }
@@ -556,6 +413,7 @@ fn split_inline_protected_regions(text: &str) -> Vec<TextRegion> {
                 );
                 in_html_comment = true;
                 in_indented_code_block = false;
+                index += 1;
                 continue;
             }
         }
@@ -574,6 +432,7 @@ fn split_inline_protected_regions(text: &str) -> Vec<TextRegion> {
                 },
             );
             in_indented_code_block = false;
+            index += 1;
             continue;
         }
 
@@ -591,6 +450,7 @@ fn split_inline_protected_regions(text: &str) -> Vec<TextRegion> {
                 },
             );
             in_indented_code_block = false;
+            index += 1;
             continue;
         }
 
@@ -608,6 +468,7 @@ fn split_inline_protected_regions(text: &str) -> Vec<TextRegion> {
                 },
             );
             in_indented_code_block = false;
+            index += 1;
             continue;
         }
 
@@ -630,6 +491,7 @@ fn split_inline_protected_regions(text: &str) -> Vec<TextRegion> {
                         skip_rewrite: true,
                     },
                 );
+                index += 1;
                 continue;
             } else {
                 in_indented_code_block = false;
@@ -649,10 +511,35 @@ fn split_inline_protected_regions(text: &str) -> Vec<TextRegion> {
                     skip_rewrite: true,
                 },
             );
+            index += 1;
             continue;
         }
 
+        if !rewrite_headings {
+            let next_line = lines.get(index + 1).map(|slice| slice.line);
+            let is_setext_heading = !line.trim().is_empty()
+                && next_line.is_some_and(|next| is_setext_underline_line(next));
+            let is_atx_heading = is_atx_heading_line(line);
+            if is_atx_heading || is_setext_heading {
+                push_text_region(
+                    &mut out,
+                    TextRegion {
+                        body: if emitted_prefix {
+                            format!("{line}{ending}")
+                        } else {
+                            full.to_string()
+                        },
+                        skip_rewrite: true,
+                    },
+                );
+                in_indented_code_block = false;
+                index += 1;
+                continue;
+            }
+        }
+
         process_markdown_line(&mut out, line, ending);
+        index += 1;
     }
 
     out
@@ -940,6 +827,45 @@ fn is_horizontal_rule_line(line: &str) -> bool {
     }
 
     trimmed.chars().all(|ch| ch == first || ch.is_whitespace())
+}
+
+fn is_atx_heading_line(line: &str) -> bool {
+    let bytes = line.as_bytes();
+    let mut pos = 0usize;
+    while pos < bytes.len() && matches!(bytes[pos], b' ' | b'\t') {
+        pos += 1;
+    }
+    if pos >= bytes.len() || bytes[pos] != b'#' {
+        return false;
+    }
+
+    let mut p = pos;
+    while p < bytes.len() && bytes[p] == b'#' {
+        p += 1;
+    }
+    let count = p - pos;
+    if !(1..=6).contains(&count) {
+        return false;
+    }
+    if p >= bytes.len() {
+        return true;
+    }
+    bytes[p].is_ascii_whitespace()
+}
+
+fn is_setext_underline_line(line: &str) -> bool {
+    let trimmed = line.trim();
+    if trimmed.is_empty() {
+        return false;
+    }
+    let mut chars = trimmed.chars();
+    let Some(first) = chars.next() else {
+        return false;
+    };
+    if !matches!(first, '-' | '=') {
+        return false;
+    }
+    chars.all(|ch| ch == first)
 }
 
 fn strip_one_indent(line: &str) -> Option<&str> {
@@ -1409,7 +1335,7 @@ mod tests {
     #[test]
     fn preserves_text_when_splitting_markdown_regions() {
         let text = "---\ntitle: 测试\n---\n\n# 标题\n\n这里是正文，包含 `inline code` 和 [链接](https://example.com)。\n\n```rust\nfn main() {}\n```\n\n|a|b|\n|---|---|\n|1|2|\n";
-        let regions = MarkdownAdapter::split_regions(text);
+        let regions = MarkdownAdapter::split_regions(text, false);
         let rebuilt = regions
             .iter()
             .map(|region| region.body.as_str())
@@ -1421,7 +1347,7 @@ mod tests {
     #[test]
     fn protects_inline_html_tags_and_single_emphasis_markers() {
         let text = "按 <kbd>Ctrl</kbd> + <kbd>S</kbd> 保存，这是 *重点* 和 _斜体_。\n下一行。";
-        let regions = MarkdownAdapter::split_regions(text);
+        let regions = MarkdownAdapter::split_regions(text, false);
         let rebuilt = regions
             .iter()
             .map(|region| region.body.as_str())
@@ -1444,7 +1370,7 @@ mod tests {
     #[test]
     fn does_not_treat_intraword_underscore_as_emphasis() {
         let text = "foo_bar_baz";
-        let regions = MarkdownAdapter::split_regions(text);
+        let regions = MarkdownAdapter::split_regions(text, false);
         let rebuilt = regions
             .iter()
             .map(|region| region.body.as_str())

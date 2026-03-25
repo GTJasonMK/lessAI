@@ -1,5 +1,6 @@
 use std::{
     fs,
+    io::Write,
     path::{Path, PathBuf},
 };
 
@@ -35,8 +36,55 @@ fn read_json<T: serde::de::DeserializeOwned>(path: &Path) -> Result<T, String> {
 }
 
 fn write_json<T: serde::Serialize>(path: &Path, value: &T) -> Result<(), String> {
-    let content = serde_json::to_string_pretty(value).map_err(|error| error.to_string())?;
-    fs::write(path, content).map_err(|error| error.to_string())
+    let content = serde_json::to_vec_pretty(value).map_err(|error| error.to_string())?;
+    let parent = path.parent().unwrap_or_else(|| Path::new("."));
+    fs::create_dir_all(parent).map_err(|error| error.to_string())?;
+
+    let filename = path
+        .file_name()
+        .map(|value| value.to_string_lossy().to_string())
+        .unwrap_or_else(|| "data".to_string());
+    let tmp_path = parent.join(format!(".{filename}.tmp-{}", std::process::id()));
+
+    {
+        let mut file = fs::OpenOptions::new()
+            .create(true)
+            .truncate(true)
+            .write(true)
+            .open(&tmp_path)
+            .map_err(|error| error.to_string())?;
+        file.write_all(&content)
+            .map_err(|error| error.to_string())?;
+        file.sync_all().map_err(|error| error.to_string())?;
+    }
+
+    match fs::rename(&tmp_path, path) {
+        Ok(()) => {
+            #[cfg(unix)]
+            {
+                use std::os::unix::fs::PermissionsExt;
+                // settings/session 可能包含敏感信息（例如 API Key、草稿内容），尽量限制文件权限。
+                let _ = fs::set_permissions(path, fs::Permissions::from_mode(0o600));
+            }
+            Ok(())
+        }
+        Err(first_error) => {
+            // Windows 上 rename 覆盖现有文件会失败，这里做一次兼容处理。
+            if path.exists() {
+                fs::remove_file(path).map_err(|error| error.to_string())?;
+                fs::rename(&tmp_path, path).map_err(|error| error.to_string())?;
+                #[cfg(unix)]
+                {
+                    use std::os::unix::fs::PermissionsExt;
+                    let _ = fs::set_permissions(path, fs::Permissions::from_mode(0o600));
+                }
+                return Ok(());
+            }
+
+            let _ = fs::remove_file(&tmp_path);
+            Err(first_error.to_string())
+        }
+    }
 }
 
 pub fn load_settings(app: &AppHandle) -> Result<AppSettings, String> {

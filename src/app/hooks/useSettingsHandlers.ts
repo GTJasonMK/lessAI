@@ -1,0 +1,180 @@
+import { useCallback } from "react";
+import type { AppSettings, PromptTemplate, ProviderCheckResult } from "../../lib/types";
+import { isSettingsReady, readableError } from "../../lib/helpers";
+import { saveSettings, testProvider } from "../../lib/api";
+import type { NoticeTone } from "../../lib/constants";
+
+type ShowNotice = (
+  tone: NoticeTone,
+  message: string,
+  options?: { autoDismissMs?: number | null }
+) => void;
+
+export function useSettingsHandlers(options: {
+  settings: AppSettings;
+  setSettings: React.Dispatch<React.SetStateAction<AppSettings>>;
+  setProviderStatus: React.Dispatch<React.SetStateAction<ProviderCheckResult | null>>;
+  showNotice: ShowNotice;
+  withBusy: <T>(action: string, fn: () => Promise<T>) => Promise<T>;
+  closeSettings: () => void;
+  readChunkStrategyLockedReason: () => string | null;
+}) {
+  const {
+    settings,
+    setSettings,
+    setProviderStatus,
+    showNotice,
+    withBusy,
+    closeSettings,
+    readChunkStrategyLockedReason
+  } = options;
+
+  const handleUpdateStringSetting = useCallback(
+    (key: "baseUrl" | "apiKey" | "model" | "updateProxy", value: string) => {
+      if (key !== "updateProxy") {
+        setProviderStatus(null);
+      }
+      setSettings((current) => ({ ...current, [key]: value }));
+    },
+    [setProviderStatus, setSettings]
+  );
+
+  const handleUpdateNumberSetting = useCallback(
+    (key: "timeoutMs" | "temperature" | "maxConcurrency", value: string) => {
+      const parsed =
+        key === "timeoutMs" || key === "maxConcurrency"
+          ? Number.parseInt(value, 10)
+          : Number.parseFloat(value);
+
+      if (!Number.isFinite(parsed)) {
+        return;
+      }
+
+      setProviderStatus(null);
+      setSettings((current) => ({
+        ...current,
+        [key]:
+          key === "timeoutMs"
+            ? Math.max(1_000, parsed)
+            : key === "maxConcurrency"
+              ? Math.max(1, Math.min(8, parsed))
+              : Math.max(0, Math.min(2, parsed))
+      }));
+    },
+    [setProviderStatus, setSettings]
+  );
+
+  const handleUpdateChunkPreset = useCallback(
+    (value: AppSettings["chunkPreset"]) => {
+      const lockedReason = readChunkStrategyLockedReason();
+      if (lockedReason) {
+        showNotice("warning", lockedReason);
+        return;
+      }
+      setProviderStatus(null);
+      setSettings((current) => ({ ...current, chunkPreset: value }));
+    },
+    [readChunkStrategyLockedReason, setProviderStatus, setSettings, showNotice]
+  );
+
+  const handleUpdateRewriteHeadings = useCallback(
+    (value: boolean) => {
+      const lockedReason = readChunkStrategyLockedReason();
+      if (lockedReason) {
+        showNotice("warning", lockedReason);
+        return;
+      }
+      setProviderStatus(null);
+      setSettings((current) => ({ ...current, rewriteHeadings: value }));
+    },
+    [readChunkStrategyLockedReason, setProviderStatus, setSettings, showNotice]
+  );
+
+  const handleUpdateRewriteMode = useCallback(
+    (value: AppSettings["rewriteMode"]) => {
+      setProviderStatus(null);
+      setSettings((current) => ({ ...current, rewriteMode: value }));
+    },
+    [setProviderStatus, setSettings]
+  );
+
+  const handleUpdatePromptPresetId = useCallback(
+    (value: AppSettings["promptPresetId"]) => {
+      setSettings((current) => ({ ...current, promptPresetId: value }));
+    },
+    [setSettings]
+  );
+
+  const handleUpsertCustomPrompt = useCallback(
+    (template: PromptTemplate) => {
+      setSettings((current) => {
+        const existingIndex = current.customPrompts.findIndex(
+          (item) => item.id === template.id
+        );
+        const nextPrompts =
+          existingIndex >= 0
+            ? current.customPrompts.map((item) =>
+                item.id === template.id ? template : item
+              )
+            : [...current.customPrompts, template];
+
+        return { ...current, customPrompts: nextPrompts };
+      });
+    },
+    [setSettings]
+  );
+
+  const handleDeleteCustomPrompt = useCallback(
+    (templateId: string) => {
+      setSettings((current) => {
+        const nextPrompts = current.customPrompts.filter(
+          (item) => item.id !== templateId
+        );
+        const nextPresetId =
+          current.promptPresetId === templateId
+            ? "humanizer_zh"
+            : current.promptPresetId;
+        return { ...current, customPrompts: nextPrompts, promptPresetId: nextPresetId };
+      });
+    },
+    [setSettings]
+  );
+
+  const handleSaveSettings = useCallback(async () => {
+    try {
+      const saved = await withBusy("save-settings", () => saveSettings(settings));
+      setSettings(saved);
+      showNotice("success", "配置已保存，后续打开的文档会沿用当前接口与模型。");
+      if (isSettingsReady(saved)) {
+        closeSettings();
+      }
+    } catch (error) {
+      showNotice("error", `保存失败：${readableError(error)}`);
+    }
+  }, [closeSettings, settings, setSettings, showNotice, withBusy]);
+
+  const handleTestProvider = useCallback(async () => {
+    try {
+      const result = await withBusy("test-provider", () => testProvider(settings));
+      setProviderStatus(result);
+      showNotice(result.ok ? "success" : "warning", result.message);
+    } catch (error) {
+      setProviderStatus({ ok: false, message: readableError(error) });
+      showNotice("error", `连接测试失败：${readableError(error)}`);
+    }
+  }, [settings, setProviderStatus, showNotice, withBusy]);
+
+  return {
+    handleUpdateStringSetting,
+    handleUpdateNumberSetting,
+    handleUpdateChunkPreset,
+    handleUpdateRewriteHeadings,
+    handleUpdateRewriteMode,
+    handleUpdatePromptPresetId,
+    handleUpsertCustomPrompt,
+    handleDeleteCustomPrompt,
+    handleSaveSettings,
+    handleTestProvider
+  } as const;
+}
+
