@@ -102,7 +102,7 @@ fn myers_diff<T: Eq + Copy>(before: &[T], after: &[T], max_trace_bytes: usize) -
                 v[minus_index] < v[plus_index]
             };
 
-            let x = if down {
+            let mut x = if down {
                 // 向下走：插入 after[y]
                 let Some(plus_index) = checked_index(v_len, offset + k + 1) else {
                     return myers_prefix_suffix_diff(before, after);
