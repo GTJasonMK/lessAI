@@ -38,10 +38,31 @@ fn myers_diff<T: Eq + Copy>(before: &[T], after: &[T], max_trace_bytes: usize) -
         return Vec::new();
     }
 
+    fn checked_index(len: usize, index: i32) -> Option<usize> {
+        if index < 0 {
+            return None;
+        }
+        let index = index as usize;
+        if index < len {
+            Some(index)
+        } else {
+            None
+        }
+    }
+
+    // 防御：Myers 需要把 (n+m) 映射到 i32 偏移量。
+    // 对极端长输入，直接回退到前后缀 diff（保证稳定，不追求最优）。
+    if max > i32::MAX as usize {
+        return myers_prefix_suffix_diff(before, after);
+    }
+
     // trace 是 diff 算法的主要内存来源：每一轮 d 都会保存一份 v 的快照用于回溯。
     // 对“超长文本但改动很小”的场景，实际 d 很小，内存也很小；因此不使用最坏情况估算直接拒绝，
     // 而是按实际 trace 增长动态止损，超过阈值时回退到前后缀 diff（保命优先，避免 OOM）。
-    let v_len = 2usize.saturating_mul(max).saturating_add(1);
+    let v_len = match max.checked_mul(2).and_then(|value| value.checked_add(1)) {
+        Some(value) => value,
+        None => return myers_prefix_suffix_diff(before, after),
+    };
     let bytes_per_trace = v_len.saturating_mul(std::mem::size_of::<i32>());
     if bytes_per_trace > max_trace_bytes {
         return myers_prefix_suffix_diff(before, after);
@@ -49,37 +70,65 @@ fn myers_diff<T: Eq + Copy>(before: &[T], after: &[T], max_trace_bytes: usize) -
     let mut trace_bytes_used = 0usize;
 
     let offset = max as i32;
-    let mut v = vec![-1i32; 2 * max + 1];
-    v[(offset + 1) as usize] = 0;
+    // 注意：不要用 -1 做默认值，否则前向计算可能出现负坐标，后续 cast 到 usize 会溢出。
+    let mut v = vec![0i32; v_len];
+    let Some(start_index) = checked_index(v_len, offset + 1) else {
+        return myers_prefix_suffix_diff(before, after);
+    };
+    v[start_index] = 0;
 
     let mut trace: Vec<Vec<i32>> = Vec::new();
+    let mut found = false;
 
     for d in 0..=max {
         let d_i32 = d as i32;
         let mut k = -d_i32;
         while k <= d_i32 {
-            let k_index = (offset + k) as usize;
+            let Some(k_index) = checked_index(v_len, offset + k) else {
+                return myers_prefix_suffix_diff(before, after);
+            };
 
-            let mut x: i32;
-            if k == -d_i32
-                || (k != d_i32 && v[(offset + k - 1) as usize] < v[(offset + k + 1) as usize])
-            {
+            let down = if k == -d_i32 {
+                true
+            } else if k == d_i32 {
+                false
+            } else {
+                let Some(minus_index) = checked_index(v_len, offset + k - 1) else {
+                    return myers_prefix_suffix_diff(before, after);
+                };
+                let Some(plus_index) = checked_index(v_len, offset + k + 1) else {
+                    return myers_prefix_suffix_diff(before, after);
+                };
+                v[minus_index] < v[plus_index]
+            };
+
+            let x = if down {
                 // 向下走：插入 after[y]
-                x = v[(offset + k + 1) as usize];
+                let Some(plus_index) = checked_index(v_len, offset + k + 1) else {
+                    return myers_prefix_suffix_diff(before, after);
+                };
+                v[plus_index]
             } else {
                 // 向右走：删除 before[x]
-                x = v[(offset + k - 1) as usize].saturating_add(1);
-            }
+                let Some(minus_index) = checked_index(v_len, offset + k - 1) else {
+                    return myers_prefix_suffix_diff(before, after);
+                };
+                v[minus_index] + 1
+            };
 
             let mut y: i32 = x - k;
-            while (x as usize) < n && (y as usize) < m && before[x as usize] == after[y as usize] {
+            if x < 0 || y < 0 {
+                return myers_prefix_suffix_diff(before, after);
+            }
+            while x < n as i32 && y < m as i32 && before[x as usize] == after[y as usize] {
                 x += 1;
                 y += 1;
             }
 
             v[k_index] = x;
 
-            if (x as usize) >= n && (y as usize) >= m {
+            if x >= n as i32 && y >= m as i32 {
+                found = true;
                 break;
             }
 
@@ -91,6 +140,14 @@ fn myers_diff<T: Eq + Copy>(before: &[T], after: &[T], max_trace_bytes: usize) -
         }
         trace.push(v.clone());
         trace_bytes_used = trace_bytes_used.saturating_add(bytes_per_trace);
+
+        if found {
+            break;
+        }
+    }
+
+    if !found {
+        return myers_prefix_suffix_diff(before, after);
     }
 
     let mut x = n as i32;
@@ -102,16 +159,39 @@ fn myers_diff<T: Eq + Copy>(before: &[T], after: &[T], max_trace_bytes: usize) -
         let d_i32 = d as i32;
         let k = x - y;
 
-        let prev_k = if k == -d_i32
-            || (k != d_i32 && v_prev[(offset + k - 1) as usize] < v_prev[(offset + k + 1) as usize])
-        {
+        // 防御：如果回溯坐标不在当前 d 的可达范围内，直接回退。
+        if k < -d_i32 || k > d_i32 {
+            return myers_prefix_suffix_diff(before, after);
+        }
+
+        let prev_k = if k == -d_i32 {
             k + 1
-        } else {
+        } else if k == d_i32 {
             k - 1
+        } else {
+            let minus_index = (offset + k - 1) as usize;
+            let plus_index = (offset + k + 1) as usize;
+            if minus_index >= v_prev.len() || plus_index >= v_prev.len() {
+                return myers_prefix_suffix_diff(before, after);
+            }
+            if v_prev[minus_index] < v_prev[plus_index] {
+                k + 1
+            } else {
+                k - 1
+            }
         };
 
-        let prev_x = v_prev[(offset + prev_k) as usize];
+        let prev_k_index = (offset + prev_k) as usize;
+        if prev_k_index >= v_prev.len() {
+            return myers_prefix_suffix_diff(before, after);
+        }
+        let prev_x = v_prev[prev_k_index];
         let prev_y = prev_x - prev_k;
+
+        // 防御：任何越界/负坐标都直接回退（diff 用于 UI，稳定优先）。
+        if prev_x < 0 || prev_y < 0 || prev_x > n as i32 || prev_y > m as i32 {
+            return myers_prefix_suffix_diff(before, after);
+        }
 
         while x > prev_x && y > prev_y {
             reversed_ops.push(DiffOp {
@@ -123,11 +203,17 @@ fn myers_diff<T: Eq + Copy>(before: &[T], after: &[T], max_trace_bytes: usize) -
         }
 
         if x == prev_x {
+            if prev_y >= m as i32 {
+                return myers_prefix_suffix_diff(before, after);
+            }
             reversed_ops.push(DiffOp {
                 kind: DiffOpKind::Insert,
                 value: after[prev_y as usize],
             });
         } else {
+            if prev_x >= n as i32 {
+                return myers_prefix_suffix_diff(before, after);
+            }
             reversed_ops.push(DiffOp {
                 kind: DiffOpKind::Delete,
                 value: before[prev_x as usize],
@@ -363,7 +449,17 @@ fn diff_text_by_lines(before: &str, after: &str, max_trace_bytes: usize) -> Vec<
 
 pub fn build_diff(source: &str, candidate: &str) -> Vec<DiffSpan> {
     const MAX_TRACE_BYTES: usize = 64 * 1024 * 1024;
-    diff_text_by_lines(source, candidate, MAX_TRACE_BYTES)
+    // diff 属于 UI 辅助信息，任何情况下都不应导致后台线程 panic。
+    // 即使算法遇到极端输入，我们也优先返回“可展示、可导出”的退化结果。
+    std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        diff_text_by_lines(source, candidate, MAX_TRACE_BYTES)
+    }))
+    .unwrap_or_else(|_| {
+        let mut spans = Vec::new();
+        push_span_text(&mut spans, DiffType::Delete, source);
+        push_span_text(&mut spans, DiffType::Insert, candidate);
+        spans
+    })
 }
 
 fn push_diff(spans: &mut Vec<DiffSpan>, kind: DiffType, ch: char) {

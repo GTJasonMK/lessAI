@@ -18,6 +18,30 @@ export function readableError(error: unknown): string {
     return error;
   }
 
+  if (typeof error === "object" && error) {
+    const maybeMessage = (error as { message?: unknown }).message;
+    if (typeof maybeMessage === "string" && maybeMessage.trim().length > 0) {
+      return maybeMessage;
+    }
+
+    const maybeError = (error as { error?: unknown }).error;
+    if (typeof maybeError === "string" && maybeError.trim().length > 0) {
+      return maybeError;
+    }
+
+    try {
+      const json = JSON.stringify(error);
+      if (json && json !== "{}") return json;
+    } catch {
+      // ignore
+    }
+
+    const asString = String(error);
+    if (asString && asString !== "[object Object]") {
+      return asString;
+    }
+  }
+
   return "发生了未识别的异常。";
 }
 

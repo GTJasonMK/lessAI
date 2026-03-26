@@ -231,9 +231,10 @@ fn coalesce_tex_math_skip_blocks(
                             });
 
                         if !next_is_math && !next_is_boundary {
-                            let next = iter.next().expect("peeked Some then next");
-                            last.body.push_str(&next.body);
-                            last.separator_after.push_str(&next.separator_after);
+                            if let Some(next) = iter.next() {
+                                last.body.push_str(&next.body);
+                                last.separator_after.push_str(&next.separator_after);
+                            }
                         }
                     }
                 }

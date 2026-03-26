@@ -1,5 +1,5 @@
 use crate::adapters::markdown::MarkdownAdapter;
-use crate::models::{ChunkPreset, DocumentFormat};
+use crate::models::{ChunkPreset, DiffType, DocumentFormat};
 
 use super::*;
 
@@ -13,6 +13,38 @@ fn normalize_text_collapses_blank_lines() {
 fn build_diff_produces_spans() {
     let spans = build_diff("你好", "hollow");
     assert!(!spans.is_empty());
+}
+
+#[test]
+fn build_diff_reconstructs_candidate_text() {
+    fn rebuild_candidate(spans: &[crate::models::DiffSpan]) -> String {
+        spans
+            .iter()
+            .filter(|span| span.r#type != DiffType::Delete)
+            .map(|span| span.text.as_str())
+            .collect::<String>()
+    }
+
+    let cases = vec![
+        ("", ""),
+        ("a", "a"),
+        ("a", ""),
+        ("", "a"),
+        ("abc", "abXc"),
+        ("你好", "你好"),
+        ("你好", "你好呀"),
+        ("Hello\nWorld\n", "Hello\nNew World\n"),
+        ("1. 第一条。\n2. 第二条。\n", "1. 第一条。\n2. 修改。\n"),
+        (
+            "链接：https://example.com:8080/path?b=c#frag\n",
+            "链接：https://example.com:8080/path?b=d#frag\n",
+        ),
+    ];
+
+    for (before, after) in cases.into_iter() {
+        let spans = build_diff(before, after);
+        assert_eq!(rebuild_candidate(&spans), after);
+    }
 }
 
 #[test]
