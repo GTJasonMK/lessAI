@@ -1,7 +1,8 @@
-import { memo, useEffect, useRef, useState } from "react";
+import { memo, useEffect, useMemo, useRef, useState } from "react";
 import { countCharacters } from "../../../lib/helpers";
 import { StatusBadge } from "../../../components/StatusBadge";
 import type { DocumentSession } from "../../../lib/types";
+import { guessClientDocumentFormat, renderInlineProtectedText } from "../../../lib/protectedText";
 import { useEditorHunks } from "../hooks/useEditorHunks";
 
 type EditorReviewView = "diff" | "source" | "current";
@@ -19,15 +20,25 @@ interface EditorReviewPaneProps {
   currentSession: DocumentSession;
   editorText: string;
   editorDirty: boolean;
+  showMarkers: boolean;
 }
 
 export const EditorReviewPane = memo(function EditorReviewPane({
   currentSession,
   editorText,
-  editorDirty
+  editorDirty,
+  showMarkers
 }: EditorReviewPaneProps) {
   const [editorReviewView, setEditorReviewView] = useState<EditorReviewView>("diff");
   const editorDiffViewRef = useRef<HTMLDivElement | null>(null);
+  const documentFormat = useMemo(
+    () => guessClientDocumentFormat(currentSession.documentPath),
+    [currentSession.documentPath]
+  );
+  const renderText = (value: string, key: string) => {
+    if (!showMarkers) return value;
+    return renderInlineProtectedText(value, documentFormat, key);
+  };
 
   const {
     editorDiffStats,
@@ -79,15 +90,32 @@ export const EditorReviewPane = memo(function EditorReviewPane({
                     key={`${span.type}-${index}-${span.text.length}`}
                     className={`diff-span is-${span.type}`}
                   >
-                    {span.text}
+                    {renderText(
+                      span.text,
+                      `editor-diff-${activeEditorHunk.id}-${span.type}-${index}`
+                    )}
                   </span>
                 ))}
               </p>
             ) : null}
 
-            {editorReviewView === "source" ? <p>{activeEditorHunk.beforeText}</p> : null}
+            {editorReviewView === "source" ? (
+              <p>
+                {renderText(
+                  activeEditorHunk.beforeText,
+                  `editor-source-${activeEditorHunk.id}`
+                )}
+              </p>
+            ) : null}
 
-            {editorReviewView === "current" ? <p>{activeEditorHunk.afterText}</p> : null}
+            {editorReviewView === "current" ? (
+              <p>
+                {renderText(
+                  activeEditorHunk.afterText,
+                  `editor-current-${activeEditorHunk.id}`
+                )}
+              </p>
+            ) : null}
           </div>
 
           <div className="suggestion-list scroll-region">
@@ -134,4 +162,3 @@ export const EditorReviewPane = memo(function EditorReviewPane({
     </>
   );
 });
-

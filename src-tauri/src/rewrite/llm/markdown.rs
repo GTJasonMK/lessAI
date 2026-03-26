@@ -1,27 +1,31 @@
-use crate::adapters::tex::TexAdapter;
+use crate::adapters::markdown::MarkdownAdapter;
 use crate::adapters::TextRegion;
 use crate::models::AppSettings;
 
-pub(super) async fn rewrite_tex_chunk_with_client(
+pub(super) async fn rewrite_markdown_chunk_with_client(
     client: &reqwest::Client,
     settings: &AppSettings,
     source_text: &str,
 ) -> Result<String, String> {
-    // TeX 片段中会夹杂大量语法结构（命令/数学/注释/环境等），直接让 LLM 改写非常容易破坏可编译性。
+    // Markdown 片段常包含“语法强约束片段”（链接/内联代码/强调标记/公式/HTML/引用定义等）。
+    // 如果把这些内容直接交给模型改写，极易改坏语法，导致渲染/导出漂移。
     //
-    // 这里采用“可改写正文 + 锁定占位符”的策略：
-    // - 先用 TexAdapter 识别不可改写片段（skip_rewrite=true）；
-    // - 若这些片段都在单行内（不包含换行），则用占位符替换后交给模型改写；
-    // - 模型输出后再把占位符替换回原始片段，保证语法严格保真；
-    // - 若存在跨行的 skip 片段（环境/块数学/注释等），退回到“分段改写可改写区域”的保守模式。
-    let regions = TexAdapter::split_regions(source_text, settings.rewrite_headings);
+    // 目标：
+    // - chunk 作为审阅单元应保持自然（句/段），不被保护区切碎；
+    // - 但改写时必须锁定保护区，保证拼回去后 Markdown 结构严格不变。
+    //
+    // 策略（与 TeX 类似）：
+    // - 先用 MarkdownAdapter 标记 skip_rewrite 片段；
+    // - 若 skip 片段跨行（包含换行），退回到“按 region 改写可改写区域”的保守模式；
+    // - 否则用占位符替换 skip 片段，让模型只改写正文，再把占位符替换回原始片段。
+    let regions = MarkdownAdapter::split_regions(source_text, settings.rewrite_headings);
     if regions.iter().all(|region| !region.skip_rewrite) {
         return super::plain::rewrite_plain_chunk_with_client(client, settings, source_text, None)
             .await;
     }
 
-    // 多行强约束片段（环境/块数学/多行注释等）：
-    // 用保守模式避免占位符被模型搬家导致结构漂移。
+    // 多行结构（例如 fenced code block / table / front matter / 多行 HTML 注释）：
+    // 用“按 region 改写可改写区域”的保守模式，避免占位符被模型搬家导致结构块漂移。
     let has_multiline_skip = regions.iter().any(|region| {
         if !region.skip_rewrite {
             return false;
@@ -30,10 +34,10 @@ pub(super) async fn rewrite_tex_chunk_with_client(
         trimmed.contains('\n') || trimmed.contains('\r')
     });
     if has_multiline_skip {
-        return rewrite_tex_chunk_by_regions(client, settings, regions).await;
+        return rewrite_markdown_chunk_by_regions(client, settings, regions).await;
     }
 
-    let (masked, placeholders) = mask_tex_regions_with_placeholders(&regions);
+    let (masked, placeholders) = mask_markdown_regions_with_placeholders(&regions);
     if placeholders.is_empty() {
         return super::plain::rewrite_plain_chunk_with_client(client, settings, source_text, None)
             .await;
@@ -50,8 +54,7 @@ pub(super) async fn rewrite_tex_chunk_with_client(
     .await?;
 
     // 占位符验收：
-    // - 必须每个占位符都出现且仅出现一次（避免复制/丢失导致锁定片段重复或缺失）
-    // - 必须按输入顺序出现（避免锁定片段被搬家）
+    // - 必须每个占位符都出现且仅出现一次（避免模型复制/丢失导致锁定片段重复或缺失）。
     let mut placeholders_ok = true;
     let mut search_from = 0usize;
     for (placeholder, _) in placeholders.iter() {
@@ -60,6 +63,7 @@ pub(super) async fn rewrite_tex_chunk_with_client(
             placeholders_ok = false;
             break;
         }
+
         let Some(pos) = candidate_masked[search_from..].find(placeholder) else {
             placeholders_ok = false;
             break;
@@ -69,8 +73,7 @@ pub(super) async fn rewrite_tex_chunk_with_client(
             .saturating_add(placeholder.len());
     }
     if !placeholders_ok {
-        // 占位符被模型改坏：退回到保守模式，不信任该输出。
-        return rewrite_tex_chunk_by_regions(client, settings, regions).await;
+        return rewrite_markdown_chunk_by_regions(client, settings, regions).await;
     }
 
     let mut rebuilt = candidate_masked;
@@ -81,7 +84,7 @@ pub(super) async fn rewrite_tex_chunk_with_client(
     Ok(rebuilt)
 }
 
-async fn rewrite_tex_chunk_by_regions(
+async fn rewrite_markdown_chunk_by_regions(
     client: &reqwest::Client,
     settings: &AppSettings,
     regions: Vec<TextRegion>,
@@ -92,6 +95,7 @@ async fn rewrite_tex_chunk_by_regions(
             out.push_str(&region.body);
             continue;
         }
+
         let rewritten =
             super::plain::rewrite_plain_chunk_with_client(client, settings, &region.body, None)
                 .await?;
@@ -100,7 +104,9 @@ async fn rewrite_tex_chunk_by_regions(
     Ok(out)
 }
 
-fn mask_tex_regions_with_placeholders(regions: &[TextRegion]) -> (String, Vec<(String, String)>) {
+fn mask_markdown_regions_with_placeholders(
+    regions: &[TextRegion],
+) -> (String, Vec<(String, String)>) {
     let mut masked = String::new();
     let mut placeholders: Vec<(String, String)> = Vec::new();
     let mut seq = 1usize;

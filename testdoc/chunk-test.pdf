@@ -1,0 +1,114 @@
+%PDF-1.4
+%‚„œ”
+1 0 obj
+<< /Type /Catalog /Pages 2 0 R >>
+endobj
+2 0 obj
+<< /Type /Pages /Kids [8 0 R 9 0 R] /Count 2 >>
+endobj
+5 0 obj
+<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>
+endobj
+6 0 obj
+<< /Length 1162 >>
+stream
+BT
+/F1 12 Tf
+72 720 Td
+(LessAI chunk test \(PDF\)) Tj
+0 -16 Td
+(Generated: 2026-03-26) Tj
+0 -16 Td
+() Tj
+0 -16 Td
+(Purpose:) Tj
+0 -16 Td
+(- Verify PDF text extraction \(line breaks are heuristic\).) Tj
+0 -16 Td
+(- Verify chunk boundaries stay stable after edits.) Tj
+0 -16 Td
+(- Verify diff review does not accidentally merge unrelated lines.) Tj
+0 -16 Td
+() Tj
+0 -16 Td
+(Paragraph 1:) Tj
+0 -16 Td
+(This line contains numbers: 3.14, 2,718.28, and v1.2.3.) Tj
+0 -16 Td
+(This line contains a date: 2026-03-26 and a time: 09:30.) Tj
+0 -16 Td
+(This line contains an email: foo.bar+tag@example.com) Tj
+0 -16 Td
+(This line contains a URL: https://example.com/docs) Tj
+0 -16 Td
+() Tj
+0 -16 Td
+(Paragraph 2 \(soft wrap simulation\):) Tj
+0 -16 Td
+(This is an exam-) Tj
+0 -16 Td
+(ple of a word split across two lines, which may appear in extracted text) Tj
+0 -16 Td
+(Depending on extraction, you might see line breaks preserved as-is) Tj
+0 -16 Td
+() Tj
+0 -16 Td
+(Bullet list:) Tj
+0 -16 Td
+(- Keep list skeleton intact) Tj
+0 -16 Td
+(- Do not rewrite code-like tokens: cargo fmt --check) Tj
+0 -16 Td
+(- Do not lose punctuation: \(parentheses\), "quotes", and commas,) Tj
+ET
+endstream
+endobj
+7 0 obj
+<< /Length 463 >>
+stream
+BT
+/F1 12 Tf
+72 720 Td
+(Page 2:) Tj
+0 -16 Td
+(This page exists to test page separation \(adapter inserts a blank line\).) Tj
+0 -16 Td
+() Tj
+0 -16 Td
+(Edge punctuation:) Tj
+0 -16 Td
+(Mr. Smith said: "Do not split U.S.A. too aggressively.") Tj
+0 -16 Td
+(Sometimes ellipsis is written as ... and should be treated as text.) Tj
+0 -16 Td
+(Math-like text in plain PDF: E=mc^2, alpha+beta->gamma, a<=b, n->infty) Tj
+0 -16 Td
+() Tj
+0 -16 Td
+(End of PDF test file.) Tj
+ET
+endstream
+endobj
+8 0 obj
+<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Resources << /Font << /F1 5 0 R >> >> /Contents 6 0 R >>
+endobj
+9 0 obj
+<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Resources << /Font << /F1 5 0 R >> >> /Contents 7 0 R >>
+endobj
+xref
+0 10
+0000000000 65535 f 
+0000000015 00000 n 
+0000000064 00000 n 
+0000000000 65535 f 
+0000000000 65535 f 
+0000000127 00000 n 
+0000000197 00000 n 
+0000001410 00000 n 
+0000001923 00000 n 
+0000002049 00000 n 
+trailer
+<< /Size 10 /Root 1 0 R >>
+startxref
+2175
+%%EOF

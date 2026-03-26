@@ -6,7 +6,8 @@ import type {
   RewriteMode
 } from "../../lib/types";
 import type { SessionStats } from "../../lib/helpers";
-import { countCharacters, isDocxPath } from "../../lib/helpers";
+import { countCharacters, isDocxPath, isPdfPath } from "../../lib/helpers";
+import { guessClientDocumentFormat } from "../../lib/protectedText";
 import { Panel } from "../../components/Panel";
 import { useCopyDocument, type DocumentView } from "./hooks/useCopyDocument";
 import { DocumentActionBar } from "./document/DocumentActionBar";
@@ -19,6 +20,7 @@ interface DocumentPanelProps {
   settingsReady: boolean;
   currentSession: DocumentSession | null;
   currentStats: SessionStats | null;
+  showMarkers: boolean;
   suggestionsByChunk: Map<number, EditSuggestion[]>;
   runningIndexSet: Set<number>;
   optimisticManualRunningIndex: number | null;
@@ -43,6 +45,7 @@ interface DocumentPanelProps {
   onSaveEditorAndExit: () => void;
   onDiscardEditorChanges: () => void;
   onExitEditor: () => void;
+  onToggleMarkers: () => void;
 }
 
 export const DocumentPanel = memo(function DocumentPanel({
@@ -50,6 +53,7 @@ export const DocumentPanel = memo(function DocumentPanel({
   settingsReady,
   currentSession,
   currentStats,
+  showMarkers,
   suggestionsByChunk,
   runningIndexSet,
   optimisticManualRunningIndex,
@@ -73,14 +77,17 @@ export const DocumentPanel = memo(function DocumentPanel({
   onSaveEditor,
   onSaveEditorAndExit,
   onDiscardEditorChanges,
-  onExitEditor
+  onExitEditor,
+  onToggleMarkers
 }: DocumentPanelProps) {
   const [documentView, setDocumentView] = useState<DocumentView>("markup");
 
   const rewriteRunning = currentSession?.status === "running";
   const rewritePaused = currentSession?.status === "paused";
-  const docxDocument = Boolean(
-    currentSession && isDocxPath(currentSession.documentPath)
+  const readOnlyDocument = Boolean(
+    currentSession &&
+      (isDocxPath(currentSession.documentPath) ||
+        isPdfPath(currentSession.documentPath))
   );
   const anyBusy = Boolean(busyAction);
 
@@ -158,7 +165,7 @@ export const DocumentPanel = memo(function DocumentPanel({
 
   const canEnterEditor = Boolean(
     currentSession &&
-      !docxDocument &&
+      !readOnlyDocument &&
       !rewriteRunning &&
       !rewritePaused &&
       currentSession.status === "idle" &&
@@ -171,8 +178,11 @@ export const DocumentPanel = memo(function DocumentPanel({
 
   const enterEditorTitle = useMemo(() => {
     if (!currentSession) return "请先打开一个文档";
-    if (docxDocument) {
+    if (isDocxPath(currentSession.documentPath)) {
       return "docx 目前仅支持导入/改写/导出，暂不支持终稿编辑或写回覆盖";
+    }
+    if (isPdfPath(currentSession.documentPath)) {
+      return "pdf 目前仅支持导入/改写/导出，暂不支持终稿编辑或写回覆盖";
     }
     if (rewriteRunning || rewritePaused) {
       return "请先取消自动任务后再编辑终稿";
@@ -188,7 +198,7 @@ export const DocumentPanel = memo(function DocumentPanel({
       return "该文档存在生成进度/失败片段，为避免冲突，请先“覆写并清理记录”或“重置记录”后再编辑";
     }
     return "编辑终稿（仅在无修订记录时开放）";
-  }, [anyBusy, currentSession, docxDocument, rewritePaused, rewriteRunning]);
+  }, [anyBusy, currentSession, rewritePaused, rewriteRunning]);
 
   const finalizeDisabled =
     editorMode ||
@@ -197,12 +207,15 @@ export const DocumentPanel = memo(function DocumentPanel({
     rewriteRunning ||
     rewritePaused ||
     !hasAppliedEdits ||
-    docxDocument;
+    readOnlyDocument;
 
   const finalizeTitle = useMemo(() => {
     if (finalizeBusy) return "正在写回原文件…";
-    if (docxDocument) {
+    if (currentSession && isDocxPath(currentSession.documentPath)) {
       return "docx 暂不支持写回覆盖，请导出为纯文本后再写回";
+    }
+    if (currentSession && isPdfPath(currentSession.documentPath)) {
+      return "pdf 暂不支持写回覆盖，请导出为 .txt 后再进行后续排版";
     }
     if (rewriteRunning || rewritePaused) {
       return "请先取消自动任务后再写回原文件";
@@ -212,7 +225,7 @@ export const DocumentPanel = memo(function DocumentPanel({
       return "还没有已应用的修改（先在右侧点“应用”）";
     }
     return "覆盖原文件并清理记录（不可撤销）";
-  }, [currentStats, docxDocument, finalizeBusy, rewritePaused, rewriteRunning]);
+  }, [currentSession, currentStats, finalizeBusy, rewritePaused, rewriteRunning]);
 
   const { canCopy, copyState, copyTitle, handleCopyDocument } = useCopyDocument({
     editorMode,
@@ -221,6 +234,11 @@ export const DocumentPanel = memo(function DocumentPanel({
     chunks: currentSession?.chunks ?? null,
     suggestionsByChunk
   });
+
+  const documentFormat = useMemo(
+    () => guessClientDocumentFormat(currentSession?.documentPath ?? ""),
+    [currentSession?.documentPath]
+  );
 
   const editorCharacterCount = useMemo(
     () => (editorMode ? countCharacters(editorText) : 0),
@@ -283,6 +301,8 @@ export const DocumentPanel = memo(function DocumentPanel({
             editorMode={editorMode}
             documentView={documentView}
             onSetDocumentView={setDocumentView}
+            showMarkers={showMarkers}
+            onToggleMarkers={onToggleMarkers}
             canCopy={canCopy}
             copyState={copyState}
             copyTitle={copyTitle}
@@ -343,6 +363,8 @@ export const DocumentPanel = memo(function DocumentPanel({
                 sessionId={currentSession.id}
                 chunks={currentSession.chunks}
                 documentView={documentView}
+                documentFormat={documentFormat}
+                showMarkers={showMarkers}
                 suggestionsByChunk={suggestionsByChunk}
                 runningIndexSet={runningIndexSet}
                 optimisticManualRunningIndex={optimisticManualRunningIndex}
@@ -365,4 +387,3 @@ export const DocumentPanel = memo(function DocumentPanel({
     </Panel>
   );
 });
-

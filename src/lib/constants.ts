@@ -66,7 +66,7 @@ export const DEFAULT_SETTINGS: AppSettings = {
   updateProxy: "",
   timeoutMs: 45_000,
   temperature: 0.8,
-  chunkPreset: "sentence",
+  chunkPreset: "paragraph",
   rewriteHeadings: false,
   rewriteMode: "manual",
   maxConcurrency: 2,
@@ -81,9 +81,13 @@ export const PRESET_OPTIONS: ReadonlyArray<{
   label: string;
   hint: string;
 }> = [
-  { value: "clause", label: "小句", hint: "按逗号/分号等切分，最细粒度" },
-  { value: "sentence", label: "整句", hint: "按句号/问号等切分，默认推荐" },
-  { value: "paragraph", label: "段落", hint: "按自然段切分，轮次更少" }
+  { value: "clause", label: "小句", hint: "按逗号/分号等切分，粒度最细（更稳妥但调用更多）" },
+  { value: "sentence", label: "整句", hint: "按句号/问号等切分，粒度折中（更适合长段落）" },
+  {
+    value: "paragraph",
+    label: "空白分段",
+    hint: "按空白分段（TeX：空行/\\par 分段；单换行视为段内空格）"
+  }
 ];
 
 export const MODE_OPTIONS: ReadonlyArray<{

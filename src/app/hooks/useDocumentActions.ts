@@ -4,6 +4,7 @@ import { openDocument, saveDocumentEdits } from "../../lib/api";
 import type { DocumentSession, RewriteProgress } from "../../lib/types";
 import {
   isDocxPath,
+  isPdfPath,
   normalizeNewlines,
   readableError,
   selectDefaultChunkIndex
@@ -82,7 +83,12 @@ export function useDocumentActions(options: {
       const selection = await open({
         multiple: false,
         directory: false,
-        filters: [{ name: "Documents", extensions: ["txt", "md", "tex", "docx"] }]
+        filters: [
+          {
+            name: "Documents",
+            extensions: ["txt", "md", "markdown", "tex", "latex", "docx", "pdf"]
+          }
+        ]
       });
       if (!selection) return;
 
@@ -128,6 +134,13 @@ export function useDocumentActions(options: {
       showNotice(
         "warning",
         "docx 目前仅支持导入/改写/导出，暂不支持终稿编辑或写回覆盖。"
+      );
+      return;
+    }
+    if (isPdfPath(session.documentPath)) {
+      showNotice(
+        "warning",
+        "pdf 目前仅支持导入/改写/导出，暂不支持终稿编辑或写回覆盖。"
       );
       return;
     }

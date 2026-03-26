@@ -11,6 +11,7 @@ import {
   formatDisplayPath,
   getSessionStats,
   isDocxPath,
+  isPdfPath,
   readableError,
   sanitizeFileName,
   selectDefaultChunkIndex
@@ -107,6 +108,13 @@ export function useDocumentFinalizeActions(options: {
       showNotice(
         "warning",
         "docx 暂不支持写回覆盖（会破坏文件结构）。请先“导出”为纯文本后再写回。"
+      );
+      return;
+    }
+    if (isPdfPath(session.documentPath)) {
+      showNotice(
+        "warning",
+        "pdf 暂不支持写回覆盖（PDF 不是纯文本格式）。请先“导出”为 .txt 再进行后续排版。"
       );
       return;
     }

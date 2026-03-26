@@ -403,6 +403,10 @@ export function isDocxPath(path: string) {
   return fileExtensionLower(path) === "docx";
 }
 
+export function isPdfPath(path: string) {
+  return fileExtensionLower(path) === "pdf";
+}
+
 // ── 文件名清理 ───────────────────────────────────────────
 
 export function sanitizeFileName(name: string) {

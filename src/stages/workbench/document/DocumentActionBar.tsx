@@ -33,6 +33,8 @@ interface DocumentActionBarProps {
   editorMode: boolean;
   documentView: DocumentView;
   onSetDocumentView: (view: DocumentView) => void;
+  showMarkers: boolean;
+  onToggleMarkers: () => void;
 
   canCopy: boolean;
   copyState: CopyState;
@@ -87,6 +89,8 @@ export const DocumentActionBar = memo(function DocumentActionBar({
   editorMode,
   documentView,
   onSetDocumentView,
+  showMarkers,
+  onToggleMarkers,
   canCopy,
   copyState,
   copyTitle,
@@ -149,6 +153,21 @@ export const DocumentActionBar = memo(function DocumentActionBar({
                   {option.label}
                 </button>
               ))}
+
+              <button
+                type="button"
+                className={`switch-chip ${showMarkers ? "is-active" : ""}`}
+                onClick={onToggleMarkers}
+                aria-label={showMarkers ? "隐藏辅助标记" : "显示辅助标记"}
+                title={
+                  showMarkers
+                    ? "隐藏分块边界/保护区/运行态等辅助高亮（更适合通读）"
+                    : "显示分块边界/保护区/运行态等辅助高亮（更适合审阅）"
+                }
+                disabled={editorMode}
+              >
+                {showMarkers ? "标记：开" : "标记：关"}
+              </button>
             </div>
 
             <div className="workbench-action-row is-editor" aria-hidden={!editorMode}>
@@ -337,4 +356,3 @@ export const DocumentActionBar = memo(function DocumentActionBar({
     </div>
   );
 });
-

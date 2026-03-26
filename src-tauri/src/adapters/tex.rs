@@ -71,7 +71,9 @@ impl TexAdapter {
 
             if bytes[index] == b'\\' {
                 // 数学模式：\(...\) 与 \[...\]
-                if text[index..].starts_with("\\(") {
+                // 注意：要避免把 `\\\\[1em]` 这类“换行命令的可选参数”误识别为 `\\[ ... \\]` 数学块。
+                // 这里要求开头的反斜杠不能是被前一个反斜杠“转义”的（即不是 `\\\\` 的第二个 `\\`）。
+                if text[index..].starts_with("\\(") && !is_escaped(text, index) {
                     if let Some(end) = find_substring(text, index + 2, "\\)") {
                         push_region(&mut regions, &text[last..index], false);
                         push_region(&mut regions, &text[index..end], true);
@@ -80,7 +82,7 @@ impl TexAdapter {
                         continue;
                     }
                 }
-                if text[index..].starts_with("\\[") {
+                if text[index..].starts_with("\\[") && !is_escaped(text, index) {
                     if let Some(end) = find_substring(text, index + 2, "\\]") {
                         push_region(&mut regions, &text[last..index], false);
                         push_region(&mut regions, &text[index..end], true);
@@ -469,6 +471,17 @@ fn find_command_span_end(text: &str, index: usize) -> Option<usize> {
     } else {
         // control symbol：\% \{ \\ 等
         pos += 1;
+        // 特例：`\\`（换行命令）支持可选 `*` 与可选 `[len]`，应整体锁定为 skip，
+        // 否则模型可能会改坏 `[1em]` 这类排版参数，甚至触发误识别 `\\[ ... \\]` 数学块。
+        if index + 1 < bytes.len() && bytes[index + 1] == b'\\' {
+            if pos < bytes.len() && bytes[pos] == b'*' {
+                pos += 1;
+            }
+            pos = consume_whitespace(text, pos);
+            if pos < bytes.len() && bytes[pos] == b'[' {
+                pos = parse_bracket_group(text, pos).unwrap_or(bytes.len());
+            }
+        }
         return Some(pos);
     }
 

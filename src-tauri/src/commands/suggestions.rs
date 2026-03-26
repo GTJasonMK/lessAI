@@ -2,7 +2,7 @@ use chrono::Utc;
 use tauri::{AppHandle, State};
 
 use crate::{
-    models::{ChunkStatus, DocumentSession, RunningState, SuggestionDecision},
+    models::{ChunkStatus, DocumentSession, SuggestionDecision},
     state::{with_session_lock, AppState},
     storage,
 };

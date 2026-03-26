@@ -1,4 +1,4 @@
-import { memo, useMemo } from "react";
+import { memo, useEffect, useMemo, useState } from "react";
 import type {
   AppSettings,
   ChunkTask,
@@ -86,6 +86,28 @@ export const WorkbenchStage = memo(function WorkbenchStage({
 }: WorkbenchStageProps) {
   const settingsReady = isSettingsReady(settings);
 
+  const [showMarkers, setShowMarkers] = useState<boolean>(() => {
+    try {
+      const raw =
+        typeof localStorage === "undefined" ? null : localStorage.getItem("lessai.showMarkers");
+      // 默认开启：分块边界/保护区/运行态/差异高亮是工作台的核心可视化信息。
+      // 用户仍可手动关闭以获得更“通读”的视图。
+      if (!raw) return true;
+      return raw === "1" || raw.toLowerCase() === "true";
+    } catch {
+      return true;
+    }
+  });
+
+  useEffect(() => {
+    try {
+      if (typeof localStorage === "undefined") return;
+      localStorage.setItem("lessai.showMarkers", showMarkers ? "1" : "0");
+    } catch {
+      // ignore
+    }
+  }, [showMarkers]);
+
   const suggestionsByChunk = useMemo(
     () => groupSuggestionsByChunk(currentSession?.suggestions ?? []),
     [currentSession?.suggestions]
@@ -136,6 +158,7 @@ export const WorkbenchStage = memo(function WorkbenchStage({
             settingsReady={settingsReady}
             currentSession={currentSession}
             currentStats={currentStats}
+            showMarkers={showMarkers}
             suggestionsByChunk={suggestionsByChunk}
             runningIndexSet={runningIndexSet}
             optimisticManualRunningIndex={optimisticManualRunningIndex}
@@ -160,6 +183,7 @@ export const WorkbenchStage = memo(function WorkbenchStage({
             onSaveEditorAndExit={onSaveEditorAndExit}
             onDiscardEditorChanges={onDiscardEditorChanges}
             onExitEditor={onExitEditor}
+            onToggleMarkers={() => setShowMarkers((value) => !value)}
           />
         </div>
 
@@ -172,6 +196,7 @@ export const WorkbenchStage = memo(function WorkbenchStage({
             activeChunkSuggestions={activeChunkSuggestions}
             activeSuggestionId={activeSuggestionId}
             activeSuggestion={activeSuggestion}
+            showMarkers={showMarkers}
             busyAction={busyAction}
             editorMode={editorMode}
             editorText={editorText}
@@ -193,4 +218,3 @@ export const WorkbenchStage = memo(function WorkbenchStage({
     </div>
   );
 });
-

@@ -1,0 +1,143 @@
+<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">
+  <w:body>
+    <w:p>
+      <w:pPr>
+        <w:pStyle w:val="Title" />
+      </w:pPr>
+      <w:r><w:t>LessAI 分块测试（DOCX）</w:t></w:r>
+    </w:p>
+
+    <w:p>
+      <w:pPr>
+        <w:pStyle w:val="Subtitle" />
+      </w:pPr>
+      <w:r><w:t>用于验证：段落/整句/小句 + 标题保护 + 列表骨架 + 表格文本 + 软换行合并</w:t></w:r>
+    </w:p>
+
+    <w:p>
+      <w:pPr>
+        <w:pStyle w:val="Heading1" />
+      </w:pPr>
+      <w:r><w:t>第一部分：段落与整句</w:t></w:r>
+    </w:p>
+
+    <w:p>
+      <w:r><w:t>第一段：这是一段包含多个整句的正文，用来检查整句切分是否稳定。</w:t></w:r>
+      <w:r><w:t>数值 3.14、版本号 v1.2.3、日期 2026-03-26 都不应触发“误切”。</w:t></w:r>
+      <w:r><w:t>最后一句带问号，用于观察整句切分是否在“？”处生效？</w:t></w:r>
+    </w:p>
+
+    <w:p>
+      <w:r><w:t>第二段：这里包含中英混排（e.g. / i.e. / U.S.A.），以及中文引号“引用内容”。</w:t></w:r>
+      <w:r><w:t>如果整句模式把 U.S.A. 切碎，这是边缘情况；但段落级不应受影响。</w:t></w:r>
+    </w:p>
+
+    <w:p>
+      <w:r><w:t>第三段：这一段包含命令 token：cargo fmt --check；以及路径：E:\\Code\\LessAI\\testdoc。</w:t></w:r>
+      <w:r><w:t>理想情况下，这类 token 在改写时不应被拆散或改坏。</w:t></w:r>
+    </w:p>
+
+    <w:p>
+      <w:pPr>
+        <w:pStyle w:val="Heading2" />
+      </w:pPr>
+      <w:r><w:t>段内换行与 Tab（骨架应保留）</w:t></w:r>
+    </w:p>
+
+    <w:p>
+      <w:r><w:t>这一段包含一个 Tab：</w:t></w:r>
+      <w:r><w:tab/></w:r>
+      <w:r><w:t>Tab 后面还有文字；以及一个手动换行：</w:t></w:r>
+      <w:r><w:br/></w:r>
+      <w:r><w:t>换行后的文字仍属于同一段落（用于观察导入与分块）。</w:t></w:r>
+    </w:p>
+
+    <w:p></w:p>
+
+    <w:p>
+      <w:pPr>
+        <w:pStyle w:val="Heading1" />
+      </w:pPr>
+      <w:r><w:t>第二部分：列表（骨架要稳定）</w:t></w:r>
+    </w:p>
+
+    <w:p>
+      <w:pPr>
+        <w:numPr></w:numPr>
+      </w:pPr>
+      <w:r><w:t>列表项 A：包含括号（例如：A1、A2），以及句号。</w:t></w:r>
+    </w:p>
+
+    <w:p>
+      <w:pPr>
+        <w:numPr></w:numPr>
+      </w:pPr>
+      <w:r><w:t>列表项 B：包含英文命令 cargo fmt --check（不要改动连字符或空格）。</w:t></w:r>
+    </w:p>
+
+    <w:p>
+      <w:pPr>
+        <w:numPr></w:numPr>
+      </w:pPr>
+      <w:r><w:t>列表项 C：包含一个链接 https://example.com/docs（观察是否整体处理）。</w:t></w:r>
+    </w:p>
+
+    <w:p>
+      <w:pPr>
+        <w:pStyle w:val="Heading1" />
+      </w:pPr>
+      <w:r><w:t>第三部分：表格（在 docx 中也是一组段落）</w:t></w:r>
+    </w:p>
+
+    <w:tbl>
+      <w:tr>
+        <w:tc><w:p><w:r><w:t>项目</w:t></w:r></w:p></w:tc>
+        <w:tc><w:p><w:r><w:t>期望</w:t></w:r></w:p></w:tc>
+        <w:tc><w:p><w:r><w:t>备注</w:t></w:r></w:p></w:tc>
+      </w:tr>
+      <w:tr>
+        <w:tc><w:p><w:r><w:t>空白分段</w:t></w:r></w:p></w:tc>
+        <w:tc><w:p><w:r><w:t>只在空行处分块</w:t></w:r></w:p></w:tc>
+        <w:tc><w:p><w:r><w:t>段落最自然</w:t></w:r></w:p></w:tc>
+      </w:tr>
+      <w:tr>
+        <w:tc><w:p><w:r><w:t>整句/小句</w:t></w:r></w:p></w:tc>
+        <w:tc><w:p><w:r><w:t>仅在段内更细切分</w:t></w:r></w:p></w:tc>
+        <w:tc><w:p><w:r><w:t>审阅更细但更碎</w:t></w:r></w:p></w:tc>
+      </w:tr>
+    </w:tbl>
+
+    <w:p>
+      <w:pPr>
+        <w:pStyle w:val="Heading1" />
+      </w:pPr>
+      <w:r><w:t>第四部分：模拟软换行（PDF 转 Word 常见问题）</w:t></w:r>
+    </w:p>
+
+    <w:p>
+      <w:r><w:t>说明：下面这一段故意被拆成很多行（每行一个段落），用于观察“导入时是否会合并软换行”。</w:t></w:r>
+      <w:r><w:t>如果你的 docx 来自 PDF 转换，常会出现这种结构。</w:t></w:r>
+    </w:p>
+
+    <w:p><w:r><w:t>这一段故意被切成很多行以模拟逐行段落</w:t></w:r></w:p>
+    <w:p><w:r><w:t>如果软换行合并启用这些行应被拼回一个段落</w:t></w:r></w:p>
+    <w:p><w:r><w:t>合并时需要保留句子内部空格与符号例如 exam-</w:t></w:r></w:p>
+    <w:p><w:r><w:t>ple 这种断词应该被修复为 example 而不是 exam- ple</w:t></w:r></w:p>
+    <w:p><w:r><w:t>同时也要避免把列表项或标题误合并进正文</w:t></w:r></w:p>
+    <w:p><w:r><w:t>这一行结尾不带句号</w:t></w:r></w:p>
+    <w:p><w:r><w:t>下一行继续描述并且也不带句号</w:t></w:r></w:p>
+    <w:p><w:r><w:t>这里放一个编号 1) 2) 3) 只是普通文本不是列表骨架</w:t></w:r></w:p>
+    <w:p><w:r><w:t>这里放一个链接 https://example.com 观察是否被拆开</w:t></w:r></w:p>
+    <w:p><w:r><w:t>这里放一个邮箱 foo.bar+tag@example.com 观察是否被拆开</w:t></w:r></w:p>
+    <w:p><w:r><w:t>这里放一个小数 2,718.28 与日期 2026-03-26</w:t></w:r></w:p>
+    <w:p><w:r><w:t>最后一行之前再写一句强调 chunk 边界只由空行决定</w:t></w:r></w:p>
+    <w:p><w:r><w:t>最后一行用句号结束。</w:t></w:r></w:p>
+
+    <w:p>
+      <w:r><w:t>收尾提示：你可以只改动上面某一行的一个标点，观察 diff 是否只影响一个 chunk。</w:t></w:r>
+    </w:p>
+
+    <w:sectPr />
+  </w:body>
+</w:document>

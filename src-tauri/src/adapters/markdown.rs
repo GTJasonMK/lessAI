@@ -29,7 +29,7 @@ impl MarkdownAdapter {
         let mut buffer = String::new();
         let mut in_fence: Option<FenceMarker> = None;
 
-        let mut flush = |regions: &mut Vec<TextRegion>, buffer: &mut String, skip: bool| {
+        let flush = |regions: &mut Vec<TextRegion>, buffer: &mut String, skip: bool| {
             if buffer.is_empty() {
                 return;
             }
@@ -358,6 +358,7 @@ fn split_inline_protected_regions(text: &str, rewrite_headings: bool) -> Vec<Tex
     let mut out: Vec<TextRegion> = Vec::new();
     let mut in_indented_code_block = false;
     let mut in_html_comment = false;
+    let mut in_math_block = false;
 
     let mut index = 0usize;
     while index < lines.len() {
@@ -416,6 +417,48 @@ fn split_inline_protected_regions(text: &str, rewrite_headings: bool) -> Vec<Tex
                 index += 1;
                 continue;
             }
+        }
+
+        if in_math_block {
+            push_text_region(
+                &mut out,
+                TextRegion {
+                    body: if emitted_prefix {
+                        format!("{line}{ending}")
+                    } else {
+                        full.to_string()
+                    },
+                    skip_rewrite: true,
+                },
+            );
+
+            if is_math_block_delimiter_line(line) {
+                in_math_block = false;
+            }
+
+            in_indented_code_block = false;
+            index += 1;
+            continue;
+        }
+
+        // Markdown 数学块（常见于 KaTeX/MathJax）：以单独一行的 `$$` 作为开关。
+        // 这类内容属于“语法强约束片段”，应整体跳过改写以避免公式被模型改坏。
+        if is_math_block_delimiter_line(line) {
+            push_text_region(
+                &mut out,
+                TextRegion {
+                    body: if emitted_prefix {
+                        format!("{line}{ending}")
+                    } else {
+                        full.to_string()
+                    },
+                    skip_rewrite: true,
+                },
+            );
+            in_math_block = true;
+            in_indented_code_block = false;
+            index += 1;
+            continue;
         }
 
         // 参考式链接定义：`[id]: https://...`
@@ -1230,6 +1273,10 @@ fn find_bare_url_end(line: &str, start: usize) -> usize {
     end.max(start)
 }
 
+fn is_math_block_delimiter_line(line: &str) -> bool {
+    line.trim() == "$$"
+}
+
 fn find_markdown_protected_spans(line: &str) -> Vec<(usize, usize)> {
     let bytes = line.as_bytes();
     let mut spans: Vec<(usize, usize)> = Vec::new();
@@ -1321,11 +1368,85 @@ fn find_markdown_protected_spans(line: &str) -> Vec<(usize, usize)> {
                 }
                 index += 1;
             }
+            b'$' => {
+                if let Some(end) = find_markdown_math_span_end(line, index) {
+                    spans.push((index, end));
+                    index = end;
+                    continue;
+                }
+                index += 1;
+            }
             _ => index += 1,
         }
     }
 
     spans
+}
+
+fn is_markdown_escaped(bytes: &[u8], index: usize) -> bool {
+    if index == 0 || index > bytes.len() {
+        return false;
+    }
+    let mut backslashes = 0usize;
+    let mut pos = index;
+    while pos > 0 {
+        pos -= 1;
+        if bytes[pos] == b'\\' {
+            backslashes = backslashes.saturating_add(1);
+        } else {
+            break;
+        }
+    }
+    backslashes % 2 == 1
+}
+
+fn find_markdown_math_span_end(line: &str, start: usize) -> Option<usize> {
+    let bytes = line.as_bytes();
+    if start >= bytes.len() || bytes[start] != b'$' {
+        return None;
+    }
+    if is_markdown_escaped(bytes, start) {
+        return None;
+    }
+
+    let delimiter_len = if start + 1 < bytes.len() && bytes[start + 1] == b'$' {
+        2usize
+    } else {
+        1usize
+    };
+
+    let mut index = start + delimiter_len;
+    while index < bytes.len() {
+        if bytes[index] != b'$' {
+            index += 1;
+            continue;
+        }
+        if is_markdown_escaped(bytes, index) {
+            index += 1;
+            continue;
+        }
+
+        if delimiter_len == 2 {
+            if index + 1 < bytes.len()
+                && bytes[index + 1] == b'$'
+                && !is_markdown_escaped(bytes, index)
+            {
+                if index > start + delimiter_len {
+                    return Some(index + 2);
+                }
+                return None;
+            }
+            index += 1;
+            continue;
+        }
+
+        if index > start + delimiter_len {
+            return Some(index + 1);
+        }
+        return None;
+    }
+
+    None
 }
 
 #[cfg(test)]

@@ -151,14 +151,29 @@ fn segment_by_boundary(text: &str, kind: BoundaryKind) -> Vec<SegmentedChunk> {
         let ch = chars[index];
         current.push(ch);
 
-        let mut should_cut = match kind {
+        let should_cut = match kind {
             BoundaryKind::Sentence => is_sentence_boundary(&chars, index),
             BoundaryKind::Clause => is_clause_boundary(&chars, index),
         };
         if should_cut {
-            while index + 1 < chars.len() && is_closing_punctuation(chars[index + 1]) {
-                index += 1;
-                current.push(chars[index]);
+            // 句末常见写法：`？？` / `!!` / `...` 等。
+            // 如果只在第一个标点处截断，会导致第二个标点变成“下一块的开头”，
+            // 审阅体验很割裂（甚至出现只包含一个 `？` 的 chunk）。
+            while index + 1 < chars.len() {
+                let next_index = index + 1;
+                let next_ch = chars[next_index];
+
+                let is_boundary_cluster = match kind {
+                    BoundaryKind::Sentence => is_sentence_boundary(&chars, next_index),
+                    BoundaryKind::Clause => is_clause_boundary(&chars, next_index),
+                };
+                if is_closing_punctuation(next_ch) || is_boundary_cluster {
+                    index = next_index;
+                    current.push(next_ch);
+                    continue;
+                }
+
+                break;
             }
         }
 

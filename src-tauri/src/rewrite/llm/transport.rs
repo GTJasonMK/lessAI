@@ -85,18 +85,19 @@ pub(super) async fn call_chat_model(
             return parse_stream_chat_response_body(&body);
         }
 
-        match parse_json_chat_response_body(&body) {
+        return match parse_json_chat_response_body(&body) {
             Ok(text) => Ok(text),
             Err(error) => {
                 // 兼容“强制流式输出但没有正确标 Content-Type”的上游：
                 // - 可能返回 NDJSON（多行 JSON）
                 // - 也可能直接返回 SSE 文本但首行不是 `data:`（极少见）
                 if body_looks_like_ndjson(&body) {
-                    return parse_stream_chat_response_body(&body);
+                    parse_stream_chat_response_body(&body)
+                } else {
+                    Err(error)
                 }
-                Err(error)
             }
-        }
+        };
     }
 
     if response_requires_stream(status, &body) {

@@ -2,6 +2,7 @@ use std::time::Duration;
 
 use crate::models::{AppSettings, DocumentFormat, ProviderCheckResult};
 
+mod markdown;
 mod plain;
 mod prompt;
 mod tex;
@@ -46,7 +47,10 @@ pub async fn rewrite_chunk_with_client(
         DocumentFormat::Tex => {
             tex::rewrite_tex_chunk_with_client(client, settings, source_text).await
         }
-        DocumentFormat::Markdown | DocumentFormat::PlainText => {
+        DocumentFormat::Markdown => {
+            markdown::rewrite_markdown_chunk_with_client(client, settings, source_text).await
+        }
+        DocumentFormat::PlainText => {
             plain::rewrite_plain_chunk_with_client(client, settings, source_text, None).await
         }
     }

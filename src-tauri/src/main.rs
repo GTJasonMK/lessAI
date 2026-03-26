@@ -15,7 +15,6 @@ use commands::{
     resume_rewrite, retry_chunk, save_document_edits, save_settings, start_rewrite, test_provider,
 };
 use state::AppState;
-use tauri::Manager;
 
 fn main() {
     tauri::Builder::default()

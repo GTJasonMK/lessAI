@@ -43,23 +43,60 @@ fn is_tex_comment_span(body: &str) -> bool {
     body.trim_start().starts_with('%')
 }
 
-fn is_tex_item_command_span(body: &str) -> bool {
+fn is_tex_math_environment_name(name: &str) -> bool {
+    // 与 TexAdapter::math_env_names 保持一致（仅用于“是否把数学块并回相邻段落”的启发式）。
+    matches!(
+        name,
+        "equation"
+            | "equation*"
+            | "align"
+            | "align*"
+            | "alignat"
+            | "alignat*"
+            | "flalign"
+            | "flalign*"
+            | "gather"
+            | "gather*"
+            | "multline"
+            | "multline*"
+            | "eqnarray"
+            | "eqnarray*"
+            | "math"
+            | "displaymath"
+            | "split"
+            | "cases"
+            | "matrix"
+            | "pmatrix"
+            | "bmatrix"
+            | "vmatrix"
+            | "Vmatrix"
+    )
+}
+
+fn is_tex_math_skip_block_span(body: &str) -> bool {
     let trimmed = body.trim_start();
-    if !trimmed.starts_with('\\') {
+
+    if trimmed.starts_with("$$") {
+        return true;
+    }
+    if trimmed.starts_with("\\[") {
+        return true;
+    }
+
+    if !trimmed.starts_with("\\begin{") {
         return false;
     }
 
-    let lowered = trimmed.to_ascii_lowercase();
-    if !lowered.starts_with("\\item") {
+    let name_start = "\\begin{".len();
+    let Some(name_end_rel) = trimmed[name_start..].find('}') else {
+        return false;
+    };
+    let name_end = name_start.saturating_add(name_end_rel);
+    if name_end <= name_start || name_end > trimmed.len() {
         return false;
     }
-
-    let rest = &lowered["\\item".len()..];
-    rest.is_empty()
-        || rest
-            .chars()
-            .next()
-            .is_some_and(|ch| ch.is_whitespace() || ch == '[' || ch == '{')
+    let env_name = &trimmed[name_start..name_end];
+    is_tex_math_environment_name(env_name)
 }
 
 fn split_tex_top_pieces(text: &str, rewrite_headings: bool) -> Vec<(String, bool)> {
@@ -69,8 +106,10 @@ fn split_tex_top_pieces(text: &str, rewrite_headings: bool) -> Vec<(String, bool
 
     // TeX 的 chunk 目标是“渲染出来的文本流”，而不是源码行。
     //
-    // 这里先用 TexAdapter 找出“跨行的语法强约束片段”，将其作为独立的 skip block，
-    // 避免和正文混在同一块里（例如 verbatim/minted/align 等环境、块数学等）。
+    // 这里先用 TexAdapter 找出“跨行的语法强约束片段”，将其作为临时的独立 piece，
+    // 避免被“空行/段落分隔符”解析误伤（例如环境内部出现空行时，不应触发段落切分）。
+    //
+    // 后续在段落块级别，会把“数学块”尽量并回相邻段落，避免保护区把 chunk 切断。
     //
     // 但注意：`% ... EOL` 注释同样包含换行符；注释行经常用于“吞换行/控制空格”，
     // 不能把它们当作独立 block，否则会把同一段切碎。
@@ -104,6 +143,133 @@ fn split_tex_top_pieces(text: &str, rewrite_headings: bool) -> Vec<(String, bool
     } else {
         pieces
     }
+}
+
+fn shift_one_leading_line_ending_to_previous_skip_piece(pieces: &mut Vec<(String, bool)>) {
+    if pieces.len() < 2 {
+        return;
+    }
+
+    for index in 1..pieces.len() {
+        let (left, right) = pieces.split_at_mut(index);
+        let (prev_body, prev_is_skip) = &mut left[index - 1];
+        if !*prev_is_skip {
+            continue;
+        }
+
+        let (curr_body, _) = &mut right[0];
+        // 允许闭合行末存在尾随空格：把 `[\t ]*\r?\n` 一起挪回 skip piece，
+        // 避免把“上一行的行末空白”误判成“新段落的空行”。
+        let bytes = curr_body.as_bytes();
+        let mut ws_len = 0usize;
+        while ws_len < bytes.len() && (bytes[ws_len] == b' ' || bytes[ws_len] == b'\t') {
+            ws_len = ws_len.saturating_add(1);
+        }
+
+        let line_ending_len = if ws_len < bytes.len() && bytes[ws_len] == b'\n' {
+            1usize
+        } else if ws_len < bytes.len() && bytes[ws_len] == b'\r' {
+            if ws_len + 1 < bytes.len() && bytes[ws_len + 1] == b'\n' {
+                2usize
+            } else {
+                1usize
+            }
+        } else {
+            0usize
+        };
+
+        if line_ending_len > 0 {
+            let cut = ws_len.saturating_add(line_ending_len);
+            prev_body.push_str(&curr_body[..cut]);
+            curr_body.replace_range(..cut, "");
+        }
+    }
+
+    pieces.retain(|(body, _)| !body.is_empty());
+}
+
+fn coalesce_tex_math_skip_blocks(
+    blocks: Vec<ParagraphBlock>,
+    rewrite_headings: bool,
+) -> Vec<ParagraphBlock> {
+    if blocks.is_empty() {
+        return blocks;
+    }
+
+    let mut iter = blocks.into_iter().peekable();
+    let mut out: Vec<ParagraphBlock> = Vec::new();
+
+    while let Some(block) = iter.next() {
+        let is_math_block = !tex_body_has_editable_text(&block.body, rewrite_headings)
+            && is_tex_math_skip_block_span(&block.body);
+
+        if !is_math_block {
+            out.push(block);
+            continue;
+        }
+
+        if let Some(last) = out.last_mut() {
+            // 仅在“同一段落内”合并：如果上一块已经进入 separator（空行/\par），
+            // 说明出现了段落边界，不应跨段落合并。
+            if last.separator_after.is_empty() {
+                last.body.push_str(&block.body);
+                last.separator_after.push_str(&block.separator_after);
+
+                // 关键：数学块通常位于同一段落的中间（渲染文本上仍应连续）。
+                // 但由于我们把“跨行 skip 区”临时拆成独立 block，可能出现：
+                //   [正文] [数学块] [正文]
+                // 这种“被保护区切断”的段落。这里把紧随其后的“正文续行块”并回去，
+                // 让段落级 chunk 回到“连续可读”的状态。
+                if let Some(next) = iter.peek() {
+                    if !next.body.is_empty() {
+                        let next_is_math =
+                            !tex_body_has_editable_text(&next.body, rewrite_headings)
+                                && is_tex_math_skip_block_span(&next.body);
+                        let next_is_boundary = tex_block_first_content_line(&next.body)
+                            .is_some_and(|line| {
+                                is_tex_heading_command_span(line) || is_tex_begin_command_line(line)
+                            });
+
+                        if !next_is_math && !next_is_boundary {
+                            let next = iter.next().expect("peeked Some then next");
+                            last.body.push_str(&next.body);
+                            last.separator_after.push_str(&next.separator_after);
+                        }
+                    }
+                }
+                continue;
+            }
+        }
+
+        // 尝试并到下一块：同样只在“无段落边界”的情况下做。
+        let can_merge_next = block.separator_after.is_empty()
+            && iter.peek().is_some_and(|next| {
+                if next.body.is_empty() {
+                    return false;
+                }
+                let next_is_math = !tex_body_has_editable_text(&next.body, rewrite_headings)
+                    && is_tex_math_skip_block_span(&next.body);
+                let next_is_boundary =
+                    tex_block_first_content_line(&next.body).is_some_and(|line| {
+                        is_tex_heading_command_span(line) || is_tex_begin_command_line(line)
+                    });
+
+                next_is_math || !next_is_boundary
+            });
+        if can_merge_next {
+            if let Some(next) = iter.peek_mut() {
+                let mut merged_prefix = block.body;
+                merged_prefix.push_str(&block.separator_after);
+                merged_prefix.push_str(&next.body);
+                next.body = merged_prefix;
+            }
+            continue;
+        }
+
+        out.push(block);
+    }
+
+    out
 }
 
 fn strip_tex_comment_from_line(line: &str) -> &str {
@@ -231,7 +397,7 @@ fn split_tex_render_blocks_in_text_piece(text: &str) -> Vec<ParagraphBlock> {
 
     let mut blocks: Vec<ParagraphBlock> = Vec::new();
     let mut current_body = String::new();
-    let mut current_sep = String::new();
+    let mut pending_sep = String::new();
     let mut in_sep = false;
 
     for (content, ending) in lines.into_iter() {
@@ -250,34 +416,25 @@ fn split_tex_render_blocks_in_text_piece(text: &str) -> Vec<ParagraphBlock> {
                 .get("\\par".len()..)
                 .is_some_and(|rest| rest.trim().is_empty());
 
-        if is_blank || is_par_line {
-            current_sep.push_str(&raw_line);
-            in_sep = true;
-            continue;
-        }
+        let is_sep_line = is_blank || is_par_line;
 
         if in_sep {
+            if is_sep_line {
+                pending_sep.push_str(&raw_line);
+                continue;
+            }
+
             blocks.push(ParagraphBlock {
                 body: std::mem::take(&mut current_body),
-                separator_after: std::mem::take(&mut current_sep),
+                separator_after: std::mem::take(&mut pending_sep),
             });
             in_sep = false;
         }
 
-        // TeX 的“渲染文本流”边界：
-        // - 空行 => 段落边界（上面已处理）
-        // - \item => 列表项边界（渲染上是新块）
-        // - 标题命令（\section/\caption/...）=> 结构块边界
-        // - \begin{...}（单独一行）=> 结构块边界（通常不应黏到上一段正文）
-        let is_boundary = is_tex_item_command_span(trimmed)
-            || is_tex_heading_command_span(trimmed)
-            || is_tex_begin_command_line(trimmed);
-
-        if is_boundary && !current_body.is_empty() {
-            blocks.push(ParagraphBlock {
-                body: std::mem::take(&mut current_body),
-                separator_after: String::new(),
-            });
+        if is_sep_line {
+            pending_sep.push_str(&raw_line);
+            in_sep = true;
+            continue;
         }
 
         current_body.push_str(&raw_line);
@@ -285,7 +442,7 @@ fn split_tex_render_blocks_in_text_piece(text: &str) -> Vec<ParagraphBlock> {
 
     blocks.push(ParagraphBlock {
         body: current_body,
-        separator_after: current_sep,
+        separator_after: pending_sep,
     });
 
     blocks
@@ -338,8 +495,11 @@ fn coalesce_tex_begin_end_blocks(
             rewrite_headings,
             is_tex_begin_command_line,
         );
-        if is_begin && block.separator_after.is_empty() {
+        if is_begin {
+            // `\\begin{...}` 在渲染中通常不可见，作为独立审阅单元没有意义。
+            // 即使其后存在空行/\\par，也应尽量并入下一块，避免出现“孤儿 chunk”。
             pending_prefix.push_str(&block.body);
+            pending_prefix.push_str(&block.separator_after);
             continue;
         }
 
@@ -498,10 +658,34 @@ fn segment_tex_by_boundary(
         }
 
         if should_cut && !hit_max {
-            while index + 1 < chars.len() && is_closing_punctuation(chars[index + 1]) {
-                index += 1;
-                current.push(chars[index]);
-                current_len = current_len.saturating_add(1);
+            // TeX 中也会出现连续的句末标点（例如 `？？` / `!!` / `...`），
+            // 以及 `？”` 这类“标点 + 闭合符号”的组合。
+            //
+            // 如果只在第一个标点处切，会让后续标点变成“下一块的开头”，
+            // 视觉上像被错误切碎。这里把紧邻的边界标点和闭合符号合并进同一块。
+            while index + 1 < chars.len() {
+                let next_index = index + 1;
+                let next_ch = chars[next_index];
+                let next_is_editable = editable.get(next_index).copied().unwrap_or(false);
+
+                // 保守：不吞入不可改写字符，避免把受保护的 TeX 结构拆开。
+                if !next_is_editable {
+                    break;
+                }
+
+                let is_boundary_cluster = match kind {
+                    BoundaryKind::Sentence => is_sentence_boundary(&chars, next_index),
+                    BoundaryKind::Clause => is_clause_boundary(&chars, next_index),
+                };
+
+                if is_closing_punctuation(next_ch) || is_boundary_cluster {
+                    index = next_index;
+                    current.push(next_ch);
+                    current_len = current_len.saturating_add(1);
+                    continue;
+                }
+
+                break;
             }
         }
 
@@ -560,7 +744,14 @@ pub(super) fn segment_tex_text(
     preset: ChunkPreset,
     rewrite_headings: bool,
 ) -> Vec<SegmentedChunk> {
-    let pieces = split_tex_top_pieces(text, rewrite_headings);
+    let mut pieces = split_tex_top_pieces(text, rewrite_headings);
+    // TexAdapter 的数学块 `\\[ ... \\]` / `$$ ... $$` span 通常不包含闭合行末的换行符，
+    // 会导致下一段 piece 以换行符开头，从而在“按渲染文本流”拆段时误判出一个空行块，
+    // 进而让数学块把同一段切碎。
+    //
+    // 这里把紧跟在 multiline skip piece 后面的“一个行末换行符”挪回 skip piece，
+    // 以保持行结构与原文一致，同时不改变整体拼回文本。
+    shift_one_leading_line_ending_to_previous_skip_piece(&mut pieces);
     let mut blocks: Vec<ParagraphBlock> = Vec::new();
 
     for (body, is_skip_block) in pieces.into_iter() {
@@ -579,6 +770,7 @@ pub(super) fn segment_tex_text(
         blocks.extend(split_tex_render_blocks_in_text_piece(&body));
     }
 
+    let blocks = coalesce_tex_math_skip_blocks(blocks, rewrite_headings);
     let blocks = coalesce_tex_begin_end_blocks(blocks, rewrite_headings);
 
     let mut chunks: Vec<SegmentedChunk> = Vec::new();

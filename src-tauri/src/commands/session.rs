@@ -237,7 +237,13 @@ pub fn open_document(
         return Err("文件路径不能为空。".to_string());
     }
 
-    let canonical = fs::canonicalize(&path).map_err(|error| error.to_string())?;
+    let canonical = fs::canonicalize(&path)
+        .map_err(|error| format!("无法打开文件（路径无效或文件不存在）：{error}"))?;
+    let meta = fs::metadata(&canonical)
+        .map_err(|error| format!("无法读取文件信息（可能无权限或文件不存在）：{error}"))?;
+    if !meta.is_file() {
+        return Err("所选路径不是文件，请选择一个文档文件。".to_string());
+    }
     let canonical_str = canonical.to_string_lossy().to_string();
     let session_id = document_session_id(&canonical_str);
 
@@ -280,7 +286,7 @@ pub fn open_document(
                 // 注意：段落模式允许 chunk.source_text 内含换行（段内换行），因此该条件仅用于
                 // Sentence/Clause 模式的迁移检测。
                 let should_rebuild = rebuilt != session.source_text
-                    || (settings.chunk_preset != crate::models::ChunkPreset::Paragraph
+                    || (!matches!(settings.chunk_preset, crate::models::ChunkPreset::Paragraph)
                         && has_inline_newlines
                         && !allow_inline_newlines);
 

@@ -48,7 +48,7 @@ impl Default for AppSettings {
             update_proxy: String::new(),
             timeout_ms: 45_000,
             temperature: 0.8,
-            chunk_preset: ChunkPreset::Sentence,
+            chunk_preset: ChunkPreset::Paragraph,
             rewrite_headings: false,
             rewrite_mode: RewriteMode::Manual,
             max_concurrency: default_max_concurrency(),
@@ -66,7 +66,7 @@ pub enum ChunkPreset {
     Clause,
     #[serde(alias = "medium")]
     Sentence,
-    #[serde(alias = "large")]
+    #[serde(alias = "large", alias = "question")]
     Paragraph,
 }
 

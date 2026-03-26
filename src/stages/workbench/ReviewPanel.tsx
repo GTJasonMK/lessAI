@@ -16,6 +16,7 @@ interface ReviewPanelProps {
   activeChunkSuggestions: EditSuggestion[];
   activeSuggestionId: string | null;
   activeSuggestion: EditSuggestion | null;
+  showMarkers: boolean;
   busyAction: string | null;
   editorMode: boolean;
   editorText: string;
@@ -41,6 +42,7 @@ export const ReviewPanel = memo(function ReviewPanel({
   activeChunkSuggestions,
   activeSuggestionId,
   activeSuggestion,
+  showMarkers,
   busyAction,
   editorMode,
   editorText,
@@ -91,6 +93,7 @@ export const ReviewPanel = memo(function ReviewPanel({
             currentSession={currentSession}
             editorText={editorText}
             editorDirty={editorDirty}
+            showMarkers={showMarkers}
           />
         ) : (
           <SuggestionReviewPane
@@ -99,6 +102,7 @@ export const ReviewPanel = memo(function ReviewPanel({
             activeChunk={activeChunk}
             activeSuggestionId={activeSuggestionId}
             activeSuggestion={activeSuggestion}
+            showMarkers={showMarkers}
             reviewView={reviewView}
             orderedSuggestions={orderedSuggestions}
             onSetReviewView={onSetReviewView}
@@ -118,4 +122,3 @@ export const ReviewPanel = memo(function ReviewPanel({
     </Panel>
   );
 });
-

@@ -5,7 +5,7 @@ use tauri::{AppHandle, State};
 use crate::{
     models::{DocumentSession, RewriteMode, RunningState},
     rewrite_jobs,
-    state::{AppState, JobControl},
+    state::AppState,
 };
 
 #[tauri::command]

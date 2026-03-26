@@ -4,6 +4,7 @@ import type { ChunkTask, DocumentSession, EditSuggestion } from "../../../lib/ty
 import type { SessionStats } from "../../../lib/helpers";
 import type { ReviewView } from "../../../lib/constants";
 import { REVIEW_VIEW_OPTIONS } from "../../../lib/constants";
+import { guessClientDocumentFormat, renderInlineProtectedText } from "../../../lib/protectedText";
 import {
   countCharacters,
   formatDate,
@@ -19,6 +20,7 @@ interface SuggestionReviewPaneProps {
   activeChunk: ChunkTask | null;
   activeSuggestionId: string | null;
   activeSuggestion: EditSuggestion | null;
+  showMarkers: boolean;
   reviewView: ReviewView;
   orderedSuggestions: EditSuggestion[];
   onSetReviewView: (view: ReviewView) => void;
@@ -32,16 +34,26 @@ export const SuggestionReviewPane = memo(function SuggestionReviewPane({
   activeChunk,
   activeSuggestionId,
   activeSuggestion,
+  showMarkers,
   reviewView,
   orderedSuggestions,
   onSetReviewView,
   onSelectChunk,
   onSelectSuggestion
 }: SuggestionReviewPaneProps) {
+  const documentFormat = useMemo(
+    () => guessClientDocumentFormat(currentSession.documentPath),
+    [currentSession.documentPath]
+  );
   const latestSuggestion = useMemo(() => getLatestSuggestion(currentSession), [currentSession]);
   const activeCandidateCharacters = activeSuggestion?.afterText
     ? countCharacters(activeSuggestion.afterText)
     : 0;
+
+  const renderText = (value: string, key: string) => {
+    if (!showMarkers) return value;
+    return renderInlineProtectedText(value, documentFormat, key);
+  };
 
   return (
     <>
@@ -96,7 +108,10 @@ export const SuggestionReviewPane = memo(function SuggestionReviewPane({
                     key={`${span.type}-${index}-${span.text.length}`}
                     className={`diff-span is-${span.type}`}
                   >
-                    {span.text}
+                    {renderText(
+                      span.text,
+                      `suggestion-${activeSuggestion.id}-diff-${span.type}-${index}`
+                    )}
                   </span>
                 ))}
               </p>
@@ -107,9 +122,23 @@ export const SuggestionReviewPane = memo(function SuggestionReviewPane({
             )
           ) : null}
 
-          {reviewView === "source" ? <p>{activeSuggestion.beforeText}</p> : null}
+          {reviewView === "source" ? (
+            <p>
+              {renderText(
+                activeSuggestion.beforeText,
+                `suggestion-${activeSuggestion.id}-source`
+              )}
+            </p>
+          ) : null}
 
-          {reviewView === "candidate" ? <p>{activeSuggestion.afterText}</p> : null}
+          {reviewView === "candidate" ? (
+            <p>
+              {renderText(
+                activeSuggestion.afterText,
+                `suggestion-${activeSuggestion.id}-candidate`
+              )}
+            </p>
+          ) : null}
         </div>
       ) : (
         <div className="empty-inline">
@@ -156,4 +185,3 @@ export const SuggestionReviewPane = memo(function SuggestionReviewPane({
     </>
   );
 });
-
