@@ -203,6 +203,12 @@ pub(in crate::rewrite) fn parse_stream_chat_response_body(body: &str) -> Result<
             return sanitize_completion_text(extract_content(&value));
         }
 
+        // 兼容：上游返回“纯文本”但正文恰好以 `{` 开头（例如代码/配置片段）。
+        // 此时不应强行按 JSON/NDJSON 解析，否则会把合法文本误判为错误。
+        if !body_looks_like_ndjson(body) {
+            return sanitize_completion_text(Some(trimmed.to_string()));
+        }
+
         // 兼容少数上游用 NDJSON 进行流式输出：每行一个 JSON 对象。
         let mut merged = String::new();
         let mut saw_json = false;

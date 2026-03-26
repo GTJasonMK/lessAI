@@ -305,7 +305,7 @@
 }
 
 .workbench-doc-panel .panel-action {
-  flex: 0 0 auto;
+  flex: 0 1 auto;
   min-width: 0;
 }
 
@@ -339,14 +339,9 @@
 
 .workbench-review-panel .workbench-review-actionbar-buttons {
   justify-self: end;
-  overflow-x: auto;
+  overflow: visible;
   padding-bottom: 4px;
   padding-right: 4px;
-  scrollbar-width: none;
-}
-
-.workbench-review-panel .workbench-review-actionbar-buttons::-webkit-scrollbar {
-  height: 0;
 }
 
 .workbench-doc-actionbar-left,
@@ -356,7 +351,8 @@
   justify-content: flex-end;
   gap: 8px;
   flex-wrap: nowrap;
-  overflow: hidden;
+  min-width: 0;
+  overflow: visible;
 }
 
 .workbench-doc-actionbar-left {
@@ -366,7 +362,7 @@
 }
 
 .workbench-doc-actionbar-right {
-  flex: 0 0 auto;
+  flex: 0 1 auto;
   overflow: visible;
 }
 
@@ -382,6 +378,7 @@
 .workbench-doc-actionbar .workbench-action-reel {
   /* 给阴影/边框留一点“内边距缓冲”，避免看起来像被裁切了一点点 */
   padding: 0 6px;
+  overflow-x: visible;
 }
 
 .workbench-action-track {

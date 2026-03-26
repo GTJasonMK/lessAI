@@ -79,6 +79,26 @@ fn sentence_preset_does_not_split_on_punct_quoted_as_literal() {
 }
 
 #[test]
+fn sentence_preset_splits_on_quoted_punct_when_followed_by_whitespace() {
+    // `“？”` 有两种常见语义：
+    // 1) 在句中“提到问号这个符号”（例如 `在“？”处...`），这种不应切块；
+    // 2) 引用/对话中“一个问号作为回应”，随后出现空白并开始新句，这种应当断句。
+    //
+    // 这里覆盖第 2 种：如果闭合引号后紧跟空白，通常意味着该 `？` 是实际标点而非“字面量符号”。
+    let text = "他说：“？” 下一句。";
+    let chunks = segment_text(
+        text,
+        ChunkPreset::Sentence,
+        DocumentFormat::PlainText,
+        false,
+    );
+    let editable_chunks: Vec<&SegmentedChunk> = chunks.iter().filter(|c| !c.skip_rewrite).collect();
+    assert_eq!(editable_chunks.len(), 2);
+    assert_eq!(editable_chunks[0].text, "他说：“？”");
+    assert_eq!(editable_chunks[1].text, "下一句。");
+}
+
+#[test]
 fn clause_preset_does_not_split_on_punct_quoted_as_literal() {
     let text = "符号“，”后面紧接文字不应切开。";
     let chunks = segment_text(text, ChunkPreset::Clause, DocumentFormat::PlainText, false);
@@ -103,6 +123,174 @@ fn sentence_preset_does_not_split_on_ascii_abbreviation_dots() {
         "这里包含中英混排（e.g. / i.e. / U.S.A.），以及中文引号“引用内容”。"
     );
     assert_eq!(editable_chunks[1].text, "下一句。");
+}
+
+#[test]
+fn sentence_preset_splits_after_ascii_abbreviation_when_it_ends_a_sentence() {
+    // 句内缩写点号（e.g. / U.S.A.）不应导致“碎块”；
+    // 但当缩写出现在句末（后面紧跟下一句），仍然需要断句。
+    let text = "I live in the U.S.A. It is big.";
+    let chunks = segment_text(
+        text,
+        ChunkPreset::Sentence,
+        DocumentFormat::PlainText,
+        false,
+    );
+    let editable_chunks: Vec<&SegmentedChunk> = chunks.iter().filter(|c| !c.skip_rewrite).collect();
+    assert_eq!(editable_chunks.len(), 2);
+    assert_eq!(editable_chunks[0].text, "I live in the U.S.A.");
+    assert_eq!(editable_chunks[1].text, "It is big.");
+}
+
+#[test]
+fn sentence_preset_does_not_split_after_us_when_followed_by_proper_noun() {
+    // 反例：`U.S.` 后面接专有名词（例如 Army）时，通常仍在同一句里；
+    // 不应把 `U.S.` 错切成一个独立 chunk。
+    let text = "The U.S. Army is here.";
+    let chunks = segment_text(
+        text,
+        ChunkPreset::Sentence,
+        DocumentFormat::PlainText,
+        false,
+    );
+    let editable_chunks: Vec<&SegmentedChunk> = chunks.iter().filter(|c| !c.skip_rewrite).collect();
+    assert_eq!(editable_chunks.len(), 1);
+    assert_eq!(editable_chunks[0].text, text);
+}
+
+#[test]
+fn sentence_preset_does_not_split_on_title_abbreviation_period() {
+    let text = "I met Dr. Smith yesterday. Next sentence.";
+    let chunks = segment_text(
+        text,
+        ChunkPreset::Sentence,
+        DocumentFormat::PlainText,
+        false,
+    );
+    let editable_chunks: Vec<&SegmentedChunk> = chunks.iter().filter(|c| !c.skip_rewrite).collect();
+    assert_eq!(editable_chunks.len(), 2);
+    assert_eq!(editable_chunks[0].text, "I met Dr. Smith yesterday.");
+    assert_eq!(editable_chunks[1].text, "Next sentence.");
+}
+
+#[test]
+fn sentence_preset_does_not_split_on_et_al_abbreviation_period() {
+    let text = "Smith et al. showed it. Next sentence.";
+    let chunks = segment_text(
+        text,
+        ChunkPreset::Sentence,
+        DocumentFormat::PlainText,
+        false,
+    );
+    let editable_chunks: Vec<&SegmentedChunk> = chunks.iter().filter(|c| !c.skip_rewrite).collect();
+    assert_eq!(editable_chunks.len(), 2);
+    assert_eq!(editable_chunks[0].text, "Smith et al. showed it.");
+    assert_eq!(editable_chunks[1].text, "Next sentence.");
+}
+
+#[test]
+fn sentence_preset_does_not_split_on_fig_abbreviation_period() {
+    let text = "See Fig. 1 for details. Next sentence.";
+    let chunks = segment_text(
+        text,
+        ChunkPreset::Sentence,
+        DocumentFormat::PlainText,
+        false,
+    );
+    let editable_chunks: Vec<&SegmentedChunk> = chunks.iter().filter(|c| !c.skip_rewrite).collect();
+    assert_eq!(editable_chunks.len(), 2);
+    assert_eq!(editable_chunks[0].text, "See Fig. 1 for details.");
+    assert_eq!(editable_chunks[1].text, "Next sentence.");
+}
+
+#[test]
+fn sentence_preset_does_not_split_on_eq_abbreviation_period() {
+    let text = "See Eq. (3) for details. Next sentence.";
+    let chunks = segment_text(
+        text,
+        ChunkPreset::Sentence,
+        DocumentFormat::PlainText,
+        false,
+    );
+    let editable_chunks: Vec<&SegmentedChunk> = chunks.iter().filter(|c| !c.skip_rewrite).collect();
+    assert_eq!(editable_chunks.len(), 2);
+    assert_eq!(editable_chunks[0].text, "See Eq. (3) for details.");
+    assert_eq!(editable_chunks[1].text, "Next sentence.");
+}
+
+#[test]
+fn sentence_preset_does_not_split_on_sec_abbreviation_period() {
+    let text = "See Sec. 2 for details. Next sentence.";
+    let chunks = segment_text(
+        text,
+        ChunkPreset::Sentence,
+        DocumentFormat::PlainText,
+        false,
+    );
+    let editable_chunks: Vec<&SegmentedChunk> = chunks.iter().filter(|c| !c.skip_rewrite).collect();
+    assert_eq!(editable_chunks.len(), 2);
+    assert_eq!(editable_chunks[0].text, "See Sec. 2 for details.");
+    assert_eq!(editable_chunks[1].text, "Next sentence.");
+}
+
+#[test]
+fn sentence_preset_does_not_split_on_ref_abbreviation_period() {
+    let text = "See Ref. [1] for details. Next sentence.";
+    let chunks = segment_text(
+        text,
+        ChunkPreset::Sentence,
+        DocumentFormat::PlainText,
+        false,
+    );
+    let editable_chunks: Vec<&SegmentedChunk> = chunks.iter().filter(|c| !c.skip_rewrite).collect();
+    assert_eq!(editable_chunks.len(), 2);
+    assert_eq!(editable_chunks[0].text, "See Ref. [1] for details.");
+    assert_eq!(editable_chunks[1].text, "Next sentence.");
+}
+
+#[test]
+fn sentence_preset_does_not_split_on_no_abbreviation_period() {
+    let text = "See No. 1 for details. Next sentence.";
+    let chunks = segment_text(
+        text,
+        ChunkPreset::Sentence,
+        DocumentFormat::PlainText,
+        false,
+    );
+    let editable_chunks: Vec<&SegmentedChunk> = chunks.iter().filter(|c| !c.skip_rewrite).collect();
+    assert_eq!(editable_chunks.len(), 2);
+    assert_eq!(editable_chunks[0].text, "See No. 1 for details.");
+    assert_eq!(editable_chunks[1].text, "Next sentence.");
+}
+
+#[test]
+fn sentence_preset_does_not_split_on_vol_abbreviation_period() {
+    let text = "See Vol. 2 for details. Next sentence.";
+    let chunks = segment_text(
+        text,
+        ChunkPreset::Sentence,
+        DocumentFormat::PlainText,
+        false,
+    );
+    let editable_chunks: Vec<&SegmentedChunk> = chunks.iter().filter(|c| !c.skip_rewrite).collect();
+    assert_eq!(editable_chunks.len(), 2);
+    assert_eq!(editable_chunks[0].text, "See Vol. 2 for details.");
+    assert_eq!(editable_chunks[1].text, "Next sentence.");
+}
+
+#[test]
+fn sentence_preset_does_not_split_on_ch_abbreviation_period() {
+    let text = "See Ch. 3 for details. Next sentence.";
+    let chunks = segment_text(
+        text,
+        ChunkPreset::Sentence,
+        DocumentFormat::PlainText,
+        false,
+    );
+    let editable_chunks: Vec<&SegmentedChunk> = chunks.iter().filter(|c| !c.skip_rewrite).collect();
+    assert_eq!(editable_chunks.len(), 2);
+    assert_eq!(editable_chunks[0].text, "See Ch. 3 for details.");
+    assert_eq!(editable_chunks[1].text, "Next sentence.");
 }
 
 #[test]
@@ -148,6 +336,25 @@ fn sentence_preset_does_not_split_on_numeric_list_marker_period() {
     assert_eq!(editable_chunks.len(), 2);
     assert_eq!(editable_chunks[0].text, "1. 第一条。");
     assert_eq!(editable_chunks[1].text, "2. 第二条。");
+}
+
+#[test]
+fn sentence_preset_does_not_split_on_numeric_list_marker_period_followed_by_newline() {
+    // 一些导入格式（PDF/Word/复制粘贴）会把编号和正文拆到两行：
+    // `1.` 在上一行，正文在下一行。
+    //
+    // Sentence 模式不应把 `1.` 当成句末独立切块，否则会生成“只有 1.”的碎块。
+    let text = "1.\n第一条。2.\n第二条。";
+    let chunks = segment_text(
+        text,
+        ChunkPreset::Sentence,
+        DocumentFormat::PlainText,
+        false,
+    );
+    let editable_chunks: Vec<&SegmentedChunk> = chunks.iter().filter(|c| !c.skip_rewrite).collect();
+    assert_eq!(editable_chunks.len(), 2);
+    assert_eq!(editable_chunks[0].text, "1.\n第一条。");
+    assert_eq!(editable_chunks[1].text, "2.\n第二条。");
 }
 
 #[test]
@@ -730,6 +937,25 @@ fn tex_sentence_preset_does_not_split_on_items_without_blank_lines() {
 }
 
 #[test]
+fn tex_sentence_preset_does_not_get_stuck_on_unbalanced_braces() {
+    // 分句/整句分块需要能容错：不应因为正文里出现了未配对的 `}` 就彻底失去断句能力。
+    // （例如导入/复制粘贴导致的语法不完整，或正文里包含类似代码片段。）
+    let text = "这是一个}例子。下一句。";
+    let chunks = segment_text(text, ChunkPreset::Sentence, DocumentFormat::Tex, false);
+
+    let rebuilt = chunks
+        .iter()
+        .map(|chunk| format!("{}{}", chunk.text, chunk.separator_after))
+        .collect::<String>();
+    assert_eq!(rebuilt, text);
+
+    let editable_chunks: Vec<&SegmentedChunk> = chunks.iter().filter(|c| !c.skip_rewrite).collect();
+    assert_eq!(editable_chunks.len(), 2);
+    assert_eq!(editable_chunks[0].text, "这是一个}例子。");
+    assert_eq!(editable_chunks[1].text, "下一句。");
+}
+
+#[test]
 fn tex_blank_line_splits_paragraph_chunks() {
     // TeX/LaTeX 的“段落”由空行（或 `\par`）触发：
     // - 单个换行通常在渲染中视为段内空格；
@@ -826,5 +1052,16 @@ fn parses_ndjson_stream_chat_response_body() {
     assert_eq!(
         super::llm::transport::parse_stream_chat_response_body(body).unwrap(),
         "你好".to_string()
+    );
+}
+
+#[test]
+fn parses_plain_text_stream_body_starting_with_brace() {
+    // 一些上游会返回“纯文本”但 Content-Type 仍然是流式/非标准；
+    // 当正文刚好以 `{` 开头（例如代码/配置片段）时，不应被误判为 JSON/NDJSON 而失败。
+    let body = "{not json}";
+    assert_eq!(
+        super::llm::transport::parse_stream_chat_response_body(body).unwrap(),
+        "{not json}".to_string()
     );
 }

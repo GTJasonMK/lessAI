@@ -14,6 +14,7 @@ use super::TextRegion;
 pub struct DocxAdapter;
 
 impl DocxAdapter {
+    #[cfg(test)]
     pub fn extract_text(docx_bytes: &[u8]) -> Result<String, String> {
         let xml = read_document_xml(docx_bytes)?;
         extract_text_from_document_xml(&xml)
@@ -61,6 +62,7 @@ struct DocxParagraph {
     is_heading: bool,
 }
 
+#[cfg(test)]
 fn extract_text_from_document_xml(xml: &str) -> Result<String, String> {
     let paragraphs = extract_paragraphs_from_document_xml(xml)?;
     let mut out = paragraphs
@@ -285,6 +287,17 @@ fn last_significant_char(text: &str) -> Option<char> {
     None
 }
 
+fn is_cjk_char(ch: char) -> bool {
+    matches!(
+        ch,
+        '\u{3400}'..='\u{4DBF}' | '\u{4E00}'..='\u{9FFF}' | '\u{F900}'..='\u{FAFF}'
+    )
+}
+
+fn looks_like_cjk(text: &str) -> bool {
+    text.chars().any(is_cjk_char)
+}
+
 fn ends_with_terminal_punct(text: &str) -> bool {
     let Some(ch) = last_significant_char(text) else {
         return true;
@@ -307,7 +320,11 @@ fn should_enable_softwrap_coalescing(paragraphs: &[DocxParagraph]) -> bool {
         })
         .collect::<Vec<_>>();
     let total = candidates.len();
-    if total < 12 {
+    // 经验阈值：
+    // - 太少的段落很难判断是否“按行断开”，合并容易误伤；
+    // - 但现实里也会有只有几十行以内的短材料（作业/题目/通知）从 PDF 转 Word，
+    //   如果阈值过高会导致完全不合并，段落级分块退化为“每行一个块”。
+    if total < 8 {
         return false;
     }
 
@@ -339,9 +356,11 @@ fn should_merge_softwrap_boundary(
 
     // 关键启发式：上一行“看起来像被硬换行截断”的概率较高，才合并到下一行。
     let prev_len = prev.chars().count();
-    const MIN_LINE_CHARS: usize = 12;
+    // 中文/日文这类无空格语言的“软换行行长度”通常更短；
+    // 若阈值过高，会导致软换行合并中途断开，段落仍然过碎。
+    let min_line_chars: usize = if looks_like_cjk(prev) { 6 } else { 12 };
     const MAX_LINE_CHARS: usize = 140;
-    if prev_len < MIN_LINE_CHARS || prev_len > MAX_LINE_CHARS {
+    if prev_len < min_line_chars || prev_len > MAX_LINE_CHARS {
         return false;
     }
     if ends_with_terminal_punct(prev) {
@@ -585,6 +604,31 @@ mod tests {
         let bytes = build_minimal_docx(xml);
         let text = DocxAdapter::extract_text(&bytes).expect("extract text");
         // 合并后应只剩 1 个自然段（没有段落空行分隔符）。
+        assert!(!text.contains("\n\n"));
+        assert!(text.contains("最后一行收尾。"));
+    }
+
+    #[test]
+    fn coalesces_softwrapped_paragraph_runs_when_document_looks_line_wrapped_with_fewer_lines() {
+        // 现实里也会出现“只有几行”的 PDF→Word 文档（例如作业/短材料）；
+        // 仍然应触发软换行合并，否则段落级 chunk 会退化为“每行一个块”。
+        let xml = r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">
+  <w:body>
+    <w:p><w:r><w:t>这一段被硬换行拆成很多行</w:t></w:r></w:p>
+    <w:p><w:r><w:t>每行都成了一个段落导致切块过碎</w:t></w:r></w:p>
+    <w:p><w:r><w:t>导入时需要做轻量合并</w:t></w:r></w:p>
+    <w:p><w:r><w:t>否则连一句完整的话都不在同一块里</w:t></w:r></w:p>
+    <w:p><w:r><w:t>这里继续补一些行以触发启发式</w:t></w:r></w:p>
+    <w:p><w:r><w:t>第六行内容用于模拟真实文档</w:t></w:r></w:p>
+    <w:p><w:r><w:t>第七行内容用于模拟真实文档</w:t></w:r></w:p>
+    <w:p><w:r><w:t>第八行内容用于模拟真实文档</w:t></w:r></w:p>
+    <w:p><w:r><w:t>第九行内容用于模拟真实文档</w:t></w:r></w:p>
+    <w:p><w:r><w:t>最后一行收尾。</w:t></w:r></w:p>
+  </w:body>
+</w:document>"#;
+        let bytes = build_minimal_docx(xml);
+        let text = DocxAdapter::extract_text(&bytes).expect("extract text");
         assert!(!text.contains("\n\n"));
         assert!(text.contains("最后一行收尾。"));
     }

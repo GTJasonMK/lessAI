@@ -121,6 +121,15 @@ fn starts_with_any_phrase(text: &str, phrases: &[&'static str]) -> Option<&'stat
     None
 }
 
+fn starts_with_any_prefix(text: &str, prefixes: &[&'static str]) -> Option<&'static str> {
+    for prefix in prefixes.iter() {
+        if text.starts_with(prefix) {
+            return Some(*prefix);
+        }
+    }
+    None
+}
+
 fn first_nonempty_line(text: &str) -> &str {
     for line in text.lines() {
         if !line.trim().is_empty() {
@@ -201,8 +210,11 @@ fn find_unwanted_preface(source: &str, candidate: &str) -> Option<&'static str> 
         || candidate_line.contains("降重")
         || candidate_line.contains("优化");
     if meta_hint
-        && starts_with_any_phrase(&source_line, PREFACE_REWRITE_PREFIX).is_none()
-        && starts_with_any_phrase(&candidate_line, PREFACE_REWRITE_PREFIX).is_some()
+        // 注意：中文引导语后面通常直接接“改写/润色”等词，并不会有空格或标点。
+        // 因此这里不能用 starts_with_phrase 的“边界字符”判定，否则会漏检
+        // `下面是改写后的版本：...` 这种最常见的正文污染模式。
+        && starts_with_any_prefix(&source_line, PREFACE_REWRITE_PREFIX).is_none()
+        && starts_with_any_prefix(&candidate_line, PREFACE_REWRITE_PREFIX).is_some()
     {
         return Some("改写引导语");
     }

@@ -6,7 +6,7 @@ mod markdown;
 mod plain;
 mod prompt;
 mod tex;
-mod transport;
+pub(in crate::rewrite) mod transport;
 mod validate;
 
 pub fn build_client(settings: &AppSettings) -> Result<reqwest::Client, String> {

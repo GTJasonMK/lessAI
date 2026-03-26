@@ -22,6 +22,15 @@ fn is_punct_quoted_as_literal(chars: &[char], index: usize) -> bool {
         return false;
     }
 
+    // 如果闭合引号/括号后紧跟空白（空格/换行等），更像“真实标点之后的停顿/换行”，
+    // 而不是“把标点当成一个被提及的符号嵌在句子里”。
+    //
+    // 典型场景：`他说：“？” 下一句。`
+    let after = chars[index + 2];
+    if after.is_whitespace() {
+        return false;
+    }
+
     let prev = chars[index.saturating_sub(1)];
     let next = chars[index + 1];
 
@@ -61,6 +70,70 @@ fn is_ascii_token_char(ch: char) -> bool {
     // - 邮箱：foo.bar+tag@example.com
     // - URL：https://example.com/a?b=c
     ch.is_ascii_alphanumeric() || matches!(ch, '_' | '-' | '+' | '#')
+}
+
+fn looks_like_english_sentence_starter(chars: &[char], period_index: usize) -> bool {
+    // 轻量启发式：当英文缩写（U.S.A. / Ph.D. 等）出现在句末时，最后一个 `.` 仍应触发断句。
+    //
+    // 但不能因为 “U.S. Army” 这种专名短语就误切成 `U.S.` + `Army ...` 碎块。
+    // 因此这里只在“下一词是非常常见的句首词”时才认定为句末。
+    let mut pos = period_index.saturating_add(1);
+    while pos < chars.len() {
+        let ch = chars[pos];
+        if ch.is_whitespace() || is_closing_punctuation(ch) {
+            pos = pos.saturating_add(1);
+            continue;
+        }
+        break;
+    }
+    if pos >= chars.len() || !chars[pos].is_ascii_alphabetic() {
+        return false;
+    }
+
+    let start = pos;
+    while pos < chars.len() && chars[pos].is_ascii_alphabetic() {
+        pos = pos.saturating_add(1);
+    }
+    if start >= pos {
+        return false;
+    }
+
+    let word = chars[start..pos].iter().collect::<String>();
+    if !word
+        .chars()
+        .next()
+        .is_some_and(|ch| ch.is_ascii_uppercase())
+    {
+        return false;
+    }
+
+    let lower = word.to_ascii_lowercase();
+    matches!(
+        lower.as_str(),
+        "i"
+            | "we"
+            | "you"
+            | "he"
+            | "she"
+            | "they"
+            | "it"
+            | "this"
+            | "that"
+            | "these"
+            | "those"
+            | "the"
+            | "a"
+            | "an"
+            | "there"
+            | "here"
+            | "in"
+            | "on"
+            | "at"
+            | "for"
+            | "to"
+            | "from"
+            | "as"
+    )
 }
 
 fn is_period_in_ascii_token(chars: &[char], index: usize) -> bool {
@@ -107,6 +180,16 @@ fn is_period_in_ascii_token(chars: &[char], index: usize) -> bool {
         .map(|value| is_ascii_token_char(*value))
         .unwrap_or(false);
     if prev_dot_token && prev_prev_is_token {
+        // 缩写末尾的 `.`：
+        // - 默认不切（避免把 `U.S.` / `e.g.` 切碎）
+        // - 但如果它看起来确实位于句末（后面紧跟常见句首词），则允许断句。
+        let ends_with_uppercase = index
+            .checked_sub(1)
+            .and_then(|prev| chars.get(prev))
+            .is_some_and(|ch| ch.is_ascii_uppercase());
+        if ends_with_uppercase && looks_like_english_sentence_starter(chars, index) {
+            return false;
+        }
         return true;
     }
 
@@ -123,6 +206,56 @@ fn is_period_in_ellipsis(chars: &[char], index: usize) -> bool {
             .copied()
             == Some('.')
             || chars.get(index + 1).copied() == Some('.'))
+}
+
+fn is_period_after_common_abbreviation(chars: &[char], index: usize) -> bool {
+    // 目标：避免把常见缩写里的 `.` 当成句末，否则会产生 `Dr.` / `al.` 这类碎块，
+    // 影响审阅可读性（论文/报告里非常常见）。
+    //
+    // 约束：当它确实出现在句末（后面紧跟常见句首词）时，仍应允许断句。
+    if chars.get(index) != Some(&'.') {
+        return false;
+    }
+
+    let mut start = index;
+    while start > 0 && chars[start - 1].is_ascii_alphabetic() {
+        start = start.saturating_sub(1);
+    }
+    let len = index.saturating_sub(start);
+    if len == 0 || len > 6 {
+        return false;
+    }
+
+    let word = chars[start..index].iter().collect::<String>().to_ascii_lowercase();
+    let is_known = matches!(
+        word.as_str(),
+        "mr"
+            | "mrs"
+            | "ms"
+            | "dr"
+            | "prof"
+            | "sr"
+            | "jr"
+            | "st"
+            | "al"
+            | "fig"
+            | "eq"
+            | "sec"
+            | "ref"
+            | "no"
+            | "vol"
+            | "ch"
+    );
+    if !is_known {
+        return false;
+    }
+
+    // 若它看起来确实位于句末，则不要屏蔽断句（例如 `I met Dr. It was late.`）。
+    if looks_like_english_sentence_starter(chars, index) {
+        return false;
+    }
+
+    true
 }
 
 fn is_period_after_numeric_list_marker(chars: &[char], index: usize) -> bool {
@@ -149,27 +282,51 @@ fn is_period_after_numeric_list_marker(chars: &[char], index: usize) -> bool {
         return false;
     }
 
-    let prefix_ok = if start == 0 {
-        true
-    } else {
-        let prev = chars[start - 1];
-        prev.is_whitespace() || matches!(prev, '(' | '（' | '[' | '【')
+    // 允许一定缩进/空白（尤其是导入 PDF/Word 文本时）：
+    // - `  1. 第一条`
+    // - `。 2. 第二条` / `。2. 第二条`
+    //
+    // 但不要把句中 “他得了 1.” 这种写法误判为编号列表。
+    let prefix_ok = {
+        let mut pos = start;
+        while pos > 0 && matches!(chars[pos - 1], ' ' | '\t') {
+            pos = pos.saturating_sub(1);
+        }
+        if pos == 0 {
+            true
+        } else {
+            let prev = chars[pos - 1];
+            matches!(
+                prev,
+                '\n' | '\r'
+                    | '('
+                    | '（'
+                    | '['
+                    | '【'
+                    | '。'
+                    | '！'
+                    | '？'
+                    | '!'
+                    | '?'
+                    | ';'
+                    | '；'
+                    | ':'
+                    | '：'
+            )
+        }
     };
     if !prefix_ok {
         return false;
     }
 
     let mut next = index + 1;
-    if next >= chars.len() || !matches!(chars[next], ' ' | '\t') {
+    if next >= chars.len() || !chars[next].is_whitespace() {
         return false;
     }
-    while next < chars.len() && matches!(chars[next], ' ' | '\t') {
+    while next < chars.len() && chars[next].is_whitespace() {
         next = next.saturating_add(1);
     }
     if next >= chars.len() {
-        return false;
-    }
-    if matches!(chars[next], '\n' | '\r') {
         return false;
     }
 
@@ -290,6 +447,7 @@ pub(super) fn is_sentence_boundary(chars: &[char], index: usize) -> bool {
             !is_numeric_punctuation(chars, index)
                 && !is_punct_quoted_as_literal(chars, index)
                 && !is_period_in_ellipsis(chars, index)
+                && !is_period_after_common_abbreviation(chars, index)
                 && !is_period_after_numeric_list_marker(chars, index)
                 && !is_period_in_ascii_token(chars, index)
         }

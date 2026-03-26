@@ -487,16 +487,24 @@ fn find_command_span_end(text: &str, index: usize) -> Option<usize> {
 
     // 可选/必选参数：尽量保守吞掉，减少语法被模型破坏的可能。
     loop {
-        pos = consume_whitespace(text, pos);
-        if pos >= bytes.len() {
+        // 只在“空白后紧跟参数组”时才把空白吞进命令 span。
+        //
+        // 目的：支持如下合法写法（参数可换行）：
+        //   \section
+        //   {标题}
+        //
+        // 同时避免把“参数之后的行末换行”也吞进命令 span，导致
+        // `\begin{...}\n\item ...` 这类结构被误判为“跨行 skip block”，进而把同一段切碎。
+        let after_ws = consume_whitespace(text, pos);
+        if after_ws >= bytes.len() {
             break;
         }
-        if bytes[pos] == b'[' {
-            pos = parse_bracket_group(text, pos).unwrap_or(bytes.len());
+        if bytes[after_ws] == b'[' {
+            pos = parse_bracket_group(text, after_ws).unwrap_or(bytes.len());
             continue;
         }
-        if bytes[pos] == b'{' {
-            pos = parse_brace_group(text, pos).unwrap_or(bytes.len());
+        if bytes[after_ws] == b'{' {
+            pos = parse_brace_group(text, after_ws).unwrap_or(bytes.len());
             continue;
         }
         break;

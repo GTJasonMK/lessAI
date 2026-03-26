@@ -608,7 +608,7 @@ fn segment_tex_by_boundary(
     let mut current = String::new();
     let mut index = 0usize;
     let mut current_len = 0usize;
-    let mut brace_depth: i32 = 0;
+    let mut brace_depth: usize = 0;
     let mut pending_boundary = false;
     let mut pending_max_cut = false;
 

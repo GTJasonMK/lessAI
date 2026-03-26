@@ -255,14 +255,15 @@
   flex-wrap: nowrap;
   flex-shrink: 0;
   padding: 0 22px;
-  overflow-x: auto;
-  padding-bottom: 4px;
-  padding-right: 4px;
-  scrollbar-width: none;
+  overflow: hidden;
 }
 
-.review-switches::-webkit-scrollbar {
-  height: 0;
+.review-switches .switch-chip {
+  flex: 1 1 0;
+  min-width: 0;
+  justify-content: center;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .switch-chip {
