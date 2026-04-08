@@ -18,6 +18,11 @@ import {
   readableError,
   selectDefaultChunkIndex
 } from "../../lib/helpers";
+import {
+  findAutoPendingTargetChunks,
+  findNextManualTargetChunk,
+  hasSelectedChunks
+} from "../../lib/chunkSelection";
 import type { ConfirmModalOptions } from "../../components/ConfirmModal";
 import type { NoticeTone } from "../../lib/constants";
 
@@ -47,19 +52,6 @@ type RefreshSessionState = (
 
 const CHUNK_RISK_WARNING_NON_WHITESPACE_CHARS = 6000;
 
-function findNextManualChunk(session: DocumentSession) {
-  return (
-    session.chunks.find(
-      (chunk) =>
-        !chunk.skipRewrite && (chunk.status === "idle" || chunk.status === "failed")
-    ) ?? null
-  );
-}
-
-function findAutoPendingChunks(session: DocumentSession) {
-  return session.chunks.filter((chunk) => !chunk.skipRewrite && chunk.status !== "done");
-}
-
 function chunkSizeSummary(chunk: ChunkTask) {
   const rawChars = chunk.sourceText.length;
   const nonWhitespaceChars = countCharacters(chunk.sourceText);
@@ -72,6 +64,7 @@ export function useRewriteActions(options: {
   currentSessionRef: React.MutableRefObject<DocumentSession | null>;
   activeChunkIndexRef: React.MutableRefObject<number>;
   activeSuggestionIdRef: React.MutableRefObject<string | null>;
+  selectedChunkIndicesRef: React.MutableRefObject<number[]>;
   editorDirtyRef: React.MutableRefObject<boolean>;
   requestConfirm: (options: ConfirmModalOptions) => Promise<boolean>;
   applySessionState: ApplySessionState;
@@ -86,6 +79,7 @@ export function useRewriteActions(options: {
     currentSessionRef,
     activeChunkIndexRef,
     activeSuggestionIdRef,
+    selectedChunkIndicesRef,
     editorDirtyRef,
     requestConfirm,
     applySessionState,
@@ -98,12 +92,13 @@ export function useRewriteActions(options: {
 
   const confirmIfChunksTooLarge = useCallback(
     async (mode: RewriteMode, session: DocumentSession) => {
+      const selectedChunkIndices = selectedChunkIndicesRef.current;
       const pending =
         mode === "manual"
-          ? [findNextManualChunk(session)].filter(
+          ? [findNextManualTargetChunk(session.chunks, selectedChunkIndices)].filter(
               (chunk): chunk is ChunkTask => chunk != null
             )
-          : findAutoPendingChunks(session);
+          : findAutoPendingTargetChunks(session.chunks, selectedChunkIndices);
 
       if (pending.length === 0) return true;
 
@@ -160,7 +155,7 @@ export function useRewriteActions(options: {
       });
       return ok;
     },
-    [requestConfirm]
+    [requestConfirm, selectedChunkIndicesRef]
   );
 
   const handleStartRewrite = useCallback(
@@ -181,6 +176,10 @@ export function useRewriteActions(options: {
         return;
       }
 
+      const targetChunkIndices = hasSelectedChunks(selectedChunkIndicesRef.current)
+        ? selectedChunkIndicesRef.current
+        : undefined;
+
       const ok = await confirmIfChunksTooLarge(mode, session);
       if (!ok) {
         showNotice("info", "已取消执行，请调整切段策略或拆分文本后再重试。");
@@ -188,7 +187,9 @@ export function useRewriteActions(options: {
       }
 
       try {
-        const updated = await withBusy(`start-${mode}`, () => startRewrite(session.id, mode));
+        const updated = await withBusy(`start-${mode}`, () =>
+          startRewrite(session.id, mode, targetChunkIndices)
+        );
         if (mode === "manual") {
           const suggestion = getLatestSuggestion(updated);
           const nextChunkIndex = suggestion?.chunkIndex ?? selectDefaultChunkIndex(updated);
@@ -234,6 +235,7 @@ export function useRewriteActions(options: {
       editorDirtyRef,
       refreshSessionState,
       setReviewView,
+      selectedChunkIndicesRef,
       showNotice,
       stageRef,
       withBusy

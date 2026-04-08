@@ -23,6 +23,7 @@ interface WorkbenchStageProps {
   activeChunk: ChunkTask | null;
   activeChunkIndex: number;
   activeSuggestionId: string | null;
+  selectedChunkIndices: number[];
   reviewView: ReviewView;
   busyAction: string | null;
   editorMode: boolean;
@@ -31,7 +32,7 @@ interface WorkbenchStageProps {
   editorHasSelection: boolean;
   editorRef: MutableRefObject<DocumentEditorHandle | null>;
   onOpenDocument: () => void;
-  onSelectChunk: (index: number) => void;
+  onSelectChunk: (index: number, options?: { multiSelect?: boolean }) => void;
   onSelectSuggestion: (suggestionId: string) => void;
   onSetReviewView: (view: ReviewView) => void;
   onStartRewrite: (mode: RewriteMode) => void;
@@ -63,6 +64,7 @@ export const WorkbenchStage = memo(function WorkbenchStage({
   activeChunk,
   activeChunkIndex,
   activeSuggestionId,
+  selectedChunkIndices,
   reviewView,
   busyAction,
   editorMode,
@@ -173,6 +175,7 @@ export const WorkbenchStage = memo(function WorkbenchStage({
             runningIndexSet={runningIndexSet}
             optimisticManualRunningIndex={optimisticManualRunningIndex}
             activeChunkIndex={activeChunkIndex}
+            selectedChunkIndices={selectedChunkIndices}
             busyAction={busyAction}
             editorMode={editorMode}
             editorText={editorText}

@@ -14,15 +14,24 @@ pub async fn start_rewrite(
     state: State<'_, AppState>,
     session_id: String,
     mode: RewriteMode,
+    target_chunk_indices: Option<Vec<usize>>,
 ) -> Result<DocumentSession, String> {
     let session =
         rewrite_jobs::prepare_session_for_rewrite(&app, state.inner(), &session_id).await?;
 
     match mode {
         RewriteMode::Manual => {
-            rewrite_jobs::run_manual_rewrite(&app, state.inner(), &session).await
+            rewrite_jobs::run_manual_rewrite(
+                &app,
+                state.inner(),
+                &session,
+                target_chunk_indices,
+            )
+            .await
         }
-        RewriteMode::Auto => rewrite_jobs::run_auto_rewrite(app, state, session),
+        RewriteMode::Auto => {
+            rewrite_jobs::run_auto_rewrite(app, state, session, target_chunk_indices)
+        }
     }
 }
 

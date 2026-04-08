@@ -2,6 +2,7 @@ import { useCallback } from "react";
 import { applySuggestion, deleteSuggestion, dismissSuggestion } from "../../lib/api";
 import type { DocumentSession } from "../../lib/types";
 import { getLatestSuggestion, readableError } from "../../lib/helpers";
+import { toggleSelectedChunkIndex } from "../../lib/chunkSelection";
 import type { NoticeTone } from "../../lib/constants";
 
 type ShowNotice = (
@@ -23,6 +24,7 @@ export function useSuggestionActions(options: {
   activeChunkIndexRef: React.MutableRefObject<number>;
   setActiveChunkIndex: React.Dispatch<React.SetStateAction<number>>;
   setActiveSuggestionId: React.Dispatch<React.SetStateAction<string | null>>;
+  setSelectedChunkIndices: React.Dispatch<React.SetStateAction<number[]>>;
   setReviewView: React.Dispatch<React.SetStateAction<"diff" | "source" | "candidate">>;
   applySessionState: ApplySessionState;
   showNotice: ShowNotice;
@@ -33,6 +35,7 @@ export function useSuggestionActions(options: {
     activeChunkIndexRef,
     setActiveChunkIndex,
     setActiveSuggestionId,
+    setSelectedChunkIndices,
     setReviewView,
     applySessionState,
     showNotice,
@@ -40,13 +43,22 @@ export function useSuggestionActions(options: {
   } = options;
 
   const handleSelectChunk = useCallback(
-    (index: number) => {
+    (index: number, options?: { multiSelect?: boolean }) => {
       const session = currentSessionRef.current;
       setActiveChunkIndex(index);
 
       if (!session) {
         setActiveSuggestionId(null);
         return;
+      }
+
+      const chunk = session.chunks[index];
+      if (options?.multiSelect) {
+        if (chunk && !chunk.skipRewrite) {
+          setSelectedChunkIndices((current) => toggleSelectedChunkIndex(current, index));
+        }
+      } else {
+        setSelectedChunkIndices([]);
       }
 
       let latestForChunk: { id: string; sequence: number } | null = null;
@@ -64,7 +76,12 @@ export function useSuggestionActions(options: {
 
       setActiveSuggestionId(null);
     },
-    [currentSessionRef, setActiveChunkIndex, setActiveSuggestionId]
+    [
+      currentSessionRef,
+      setActiveChunkIndex,
+      setActiveSuggestionId,
+      setSelectedChunkIndices
+    ]
   );
 
   const handleSelectSuggestion = useCallback(
@@ -179,4 +196,3 @@ export function useSuggestionActions(options: {
     handleDeleteSuggestion
   } as const;
 }
-

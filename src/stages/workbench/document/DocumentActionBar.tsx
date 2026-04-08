@@ -242,7 +242,9 @@ export const DocumentActionBar = memo(function DocumentActionBar({
 
               <button
                 type="button"
-                className={`toolbar-button ${rewriteRunning ? "is-warning" : "is-primary"}`}
+                className={`toolbar-button is-run-action ${
+                  rewriteRunning ? "is-warning" : "is-primary"
+                }`}
                 onClick={() => {
                   if (rewriteRunning) {
                     onPause();

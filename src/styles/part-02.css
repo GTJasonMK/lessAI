@@ -442,6 +442,11 @@
   gap: 8px;
 }
 
+.workbench-doc-actionbar-right .toolbar-button.is-run-action {
+  inline-size: 152px;
+  min-width: 152px;
+}
+
 .workbench-action-row {
   display: flex;
   align-items: center;

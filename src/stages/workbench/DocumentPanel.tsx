@@ -8,6 +8,11 @@ import type {
 } from "../../lib/types";
 import type { SessionStats } from "../../lib/helpers";
 import { countCharacters, isDocxPath, isPdfPath } from "../../lib/helpers";
+import {
+  findAutoPendingTargetChunks,
+  findNextManualTargetChunk,
+  hasSelectedChunks
+} from "../../lib/chunkSelection";
 import { guessClientDocumentFormat } from "../../lib/protectedText";
 import { Panel } from "../../components/Panel";
 import { useCopyDocument, type DocumentView } from "./hooks/useCopyDocument";
@@ -26,6 +31,7 @@ interface DocumentPanelProps {
   runningIndexSet: Set<number>;
   optimisticManualRunningIndex: number | null;
   activeChunkIndex: number;
+  selectedChunkIndices: number[];
   busyAction: string | null;
   editorMode: boolean;
   editorText: string;
@@ -34,7 +40,7 @@ interface DocumentPanelProps {
   editorRef: MutableRefObject<DocumentEditorHandle | null>;
   onOpenDocument: () => void;
   onOpenSettings: () => void;
-  onSelectChunk: (index: number) => void;
+  onSelectChunk: (index: number, options?: { multiSelect?: boolean }) => void;
   onSelectSuggestion: (suggestionId: string) => void;
   onStartRewrite: (mode: RewriteMode) => void;
   onPause: () => void;
@@ -63,6 +69,7 @@ export const DocumentPanel = memo(function DocumentPanel({
   runningIndexSet,
   optimisticManualRunningIndex,
   activeChunkIndex,
+  selectedChunkIndices,
   busyAction,
   editorMode,
   editorText,
@@ -112,14 +119,30 @@ export const DocumentPanel = memo(function DocumentPanel({
 
   const showCancelAction = rewriteRunning || rewritePaused;
   const hasAppliedEdits = Boolean(currentStats && currentStats.suggestionsApplied > 0);
+  const hasChunkSelection = hasSelectedChunks(selectedChunkIndices);
+  const nextManualTargetChunk = useMemo(
+    () =>
+      currentSession
+        ? findNextManualTargetChunk(currentSession.chunks, selectedChunkIndices)
+        : null,
+    [currentSession, selectedChunkIndices]
+  );
+  const autoPendingTargetChunks = useMemo(
+    () =>
+      currentSession
+        ? findAutoPendingTargetChunks(currentSession.chunks, selectedChunkIndices)
+        : [],
+    [currentSession, selectedChunkIndices]
+  );
 
   const canStartRewrite = Boolean(
     settingsReady &&
       currentSession &&
-      currentStats &&
       !rewriteRunning &&
       !rewritePaused &&
-      currentStats.pendingGeneration > 0
+      (settings.rewriteMode === "manual"
+        ? nextManualTargetChunk
+        : autoPendingTargetChunks.length > 0)
   );
 
   const runKey = rewriteRunning
@@ -132,24 +155,31 @@ export const DocumentPanel = memo(function DocumentPanel({
   const runLabel = useMemo(() => {
     if (rewriteRunning) return "暂停";
     if (rewritePaused) return "继续";
+    if (hasChunkSelection) return "处理所选";
     return settings.rewriteMode === "auto" ? "开始批处理" : "开始优化";
-  }, [rewritePaused, rewriteRunning, settings.rewriteMode]);
+  }, [hasChunkSelection, rewritePaused, rewriteRunning, settings.rewriteMode]);
 
   const runTitle = useMemo(() => {
     if (rewriteRunning) return "暂停自动任务";
     if (rewritePaused) return "继续自动任务";
     if (!currentSession) return "请先打开一个文档";
     if (!settingsReady) return "请先在设置里配置 Base URL / Key / Model";
-    if (!currentStats) return "正在计算会话状态…";
-    if (currentStats.pendingGeneration === 0) {
-      return "全部片段已生成，可在右侧审阅并导出";
+    if (settings.rewriteMode === "manual" && !nextManualTargetChunk) {
+      return hasChunkSelection ? "所选片段已处理完成" : "全部片段已生成，可在右侧审阅并导出";
     }
+    if (settings.rewriteMode === "auto" && autoPendingTargetChunks.length === 0) {
+      return hasChunkSelection ? "所选片段已处理完成" : "全部片段已生成，可在右侧审阅并导出";
+    }
+    if (hasChunkSelection) return `处理所选 ${selectedChunkIndices.length} 段`;
     return settings.rewriteMode === "auto" ? "自动批处理生成并应用" : "生成下一条修改对";
   }, [
+    autoPendingTargetChunks.length,
     currentSession,
-    currentStats,
+    hasChunkSelection,
+    nextManualTargetChunk,
     rewritePaused,
     rewriteRunning,
+    selectedChunkIndices.length,
     settings.rewriteMode,
     settingsReady
   ]);
@@ -381,6 +411,7 @@ export const DocumentPanel = memo(function DocumentPanel({
                 runningIndexSet={runningIndexSet}
                 optimisticManualRunningIndex={optimisticManualRunningIndex}
                 activeChunkIndex={activeChunkIndex}
+                selectedChunkIndices={selectedChunkIndices}
                 onSelectChunk={onSelectChunk}
                 onSelectSuggestion={onSelectSuggestion}
               />

@@ -30,8 +30,16 @@ export async function resetSession(sessionId: string) {
   return invoke<DocumentSession>("reset_session", { sessionId });
 }
 
-export async function startRewrite(sessionId: string, mode: RewriteMode) {
-  return invoke<DocumentSession>("start_rewrite", { sessionId, mode });
+export async function startRewrite(
+  sessionId: string,
+  mode: RewriteMode,
+  targetChunkIndices?: number[]
+) {
+  return invoke<DocumentSession>("start_rewrite", {
+    sessionId,
+    mode,
+    targetChunkIndices
+  });
 }
 
 export async function pauseRewrite(sessionId: string) {

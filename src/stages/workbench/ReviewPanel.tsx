@@ -25,7 +25,7 @@ interface ReviewPanelProps {
   orderedSuggestions: EditSuggestion[];
   onOpenDocument: () => void;
   onOpenSettings: () => void;
-  onSelectChunk: (index: number) => void;
+  onSelectChunk: (index: number, options?: { multiSelect?: boolean }) => void;
   onSelectSuggestion: (suggestionId: string) => void;
   onSetReviewView: (view: ReviewView) => void;
   onApplySuggestion: (suggestionId: string) => void;

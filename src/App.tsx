@@ -25,6 +25,7 @@ import {
   readableError,
   selectDefaultChunkIndex,
 } from "./lib/helpers";
+import { normalizeSelectedChunkIndices } from "./lib/chunkSelection";
 import { useNotice } from "./hooks/useNotice";
 import { useBusyAction } from "./hooks/useBusyAction";
 import { useTauriEvents } from "./hooks/useTauriEvents";
@@ -58,6 +59,7 @@ export default function App() {
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [activeChunkIndex, setActiveChunkIndex] = useState(0);
   const [activeSuggestionId, setActiveSuggestionId] = useState<string | null>(null);
+  const [selectedChunkIndices, setSelectedChunkIndices] = useState<number[]>([]);
   const [reviewView, setReviewView] = useState<ReviewView>("diff");
   const [providerStatus, setProviderStatus] =
     useState<ProviderCheckResult | null>(null);
@@ -93,6 +95,8 @@ export default function App() {
   activeChunkIndexRef.current = activeChunkIndex;
   const activeSuggestionIdRef = useRef(activeSuggestionId);
   activeSuggestionIdRef.current = activeSuggestionId;
+  const selectedChunkIndicesRef = useRef(selectedChunkIndices);
+  selectedChunkIndicesRef.current = selectedChunkIndices;
   const editorTextRef = useRef(editorText);
   editorTextRef.current = editorText;
   const editorBaselineTextRef = useRef(editorBaselineText);
@@ -341,6 +345,21 @@ export default function App() {
     }
   }, [currentSession, stage]);
 
+  useEffect(() => {
+    setSelectedChunkIndices([]);
+  }, [currentSession?.id]);
+
+  useEffect(() => {
+    if (!currentSession) return;
+    setSelectedChunkIndices((current) => {
+      const normalized = normalizeSelectedChunkIndices(currentSession.chunks, current);
+      const unchanged =
+        current.length === normalized.length &&
+        current.every((value, index) => value === normalized[index]);
+      return unchanged ? current : normalized;
+    });
+  }, [currentSession]);
+
   // ── Settings handlers ────────────────────────────────
   const {
     handleUpdateStringSetting,
@@ -427,6 +446,7 @@ export default function App() {
     currentSessionRef,
     activeChunkIndexRef,
     activeSuggestionIdRef,
+    selectedChunkIndicesRef,
     editorDirtyRef,
     requestConfirm,
     applySessionState,
@@ -448,6 +468,7 @@ export default function App() {
     activeChunkIndexRef,
     setActiveChunkIndex,
     setActiveSuggestionId,
+    setSelectedChunkIndices,
     setReviewView,
     applySessionState,
     showNotice,
@@ -492,6 +513,7 @@ export default function App() {
               activeChunk={activeChunk}
               activeChunkIndex={activeChunkIndex}
               activeSuggestionId={activeSuggestionId}
+              selectedChunkIndices={selectedChunkIndices}
               reviewView={reviewView}
               busyAction={busyAction}
               editorMode={stage === "editor"}

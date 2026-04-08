@@ -24,7 +24,7 @@ interface SuggestionReviewPaneProps {
   reviewView: ReviewView;
   orderedSuggestions: EditSuggestion[];
   onSetReviewView: (view: ReviewView) => void;
-  onSelectChunk: (index: number) => void;
+  onSelectChunk: (index: number, options?: { multiSelect?: boolean }) => void;
   onSelectSuggestion: (suggestionId: string) => void;
 }
 

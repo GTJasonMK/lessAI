@@ -6,6 +6,7 @@ mod documents;
 mod models;
 mod rewrite;
 mod rewrite_jobs;
+mod rewrite_targets;
 mod state;
 mod storage;
 

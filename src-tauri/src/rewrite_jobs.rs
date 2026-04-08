@@ -1,5 +1,5 @@
 use std::{
-    collections::{HashSet, VecDeque},
+    collections::HashSet,
     path::Path,
     sync::{atomic::Ordering, Arc},
 };
@@ -14,6 +14,7 @@ use crate::{
         ChunkCompletedEvent, ChunkStatus, DocumentSession, EditSuggestion, RewriteFailedEvent,
         RewriteMode, RewriteProgress, RunningState, SessionEvent, SuggestionDecision,
     },
+    rewrite_targets,
     rewrite,
     state::{with_session_lock, AppState, JobControl},
     storage,
@@ -70,17 +71,22 @@ pub(crate) async fn run_manual_rewrite(
     app: &AppHandle,
     state: &AppState,
     session: &DocumentSession,
+    target_chunk_indices: Option<Vec<usize>>,
 ) -> Result<DocumentSession, String> {
     if session.status == RunningState::Running || session.status == RunningState::Paused {
         return Err("当前文档正在执行自动任务，请先暂停或取消。".to_string());
     }
 
-    let next_chunk = session
-        .chunks
-        .iter()
-        .find(|chunk| matches!(chunk.status, ChunkStatus::Idle | ChunkStatus::Failed))
-        .map(|chunk| chunk.index)
-        .ok_or_else(|| "没有可继续处理的片段，当前文档可能已经全部完成。".to_string())?;
+    let target_indices =
+        rewrite_targets::resolve_target_indices(&session.chunks, target_chunk_indices)?;
+    let next_chunk = rewrite_targets::find_next_manual_chunk(&session.chunks, target_indices.as_ref())
+        .ok_or_else(|| {
+            if target_indices.is_some() {
+                "所选片段已处理完成。".to_string()
+            } else {
+                "没有可继续处理的片段，当前文档可能已经全部完成。".to_string()
+            }
+        })?;
 
     process_chunk(app, state, &session.id, next_chunk, false).await?;
     with_session_lock(state, &session.id, || {
@@ -92,7 +98,20 @@ pub(crate) fn run_auto_rewrite(
     app: AppHandle,
     state: State<'_, AppState>,
     mut session: DocumentSession,
+    target_chunk_indices: Option<Vec<usize>>,
 ) -> Result<DocumentSession, String> {
+    let target_indices =
+        rewrite_targets::resolve_target_indices(&session.chunks, target_chunk_indices)?;
+    let pending =
+        rewrite_targets::build_auto_pending_queue(&session.chunks, target_indices.as_ref());
+    if pending.is_empty() {
+        return Err(if target_indices.is_some() {
+            "所选片段已处理完成。".to_string()
+        } else {
+            "没有可继续处理的片段，当前文档可能已经全部完成。".to_string()
+        });
+    }
+
     {
         let jobs = state
             .jobs
@@ -119,9 +138,16 @@ pub(crate) fn run_auto_rewrite(
         jobs.insert(session.id.clone(), job.clone());
         let session_id = session.id.clone();
         let app_handle = app.clone();
+        let target_indices = target_indices.clone();
 
         tauri::async_runtime::spawn(async move {
-            let result = run_auto_loop(app_handle.clone(), session_id.clone(), job.clone()).await;
+            let result = run_auto_loop(
+                app_handle.clone(),
+                session_id.clone(),
+                job.clone(),
+                target_indices,
+            )
+            .await;
             if let Err(error) = result {
                 let _ = app_handle.emit(
                     "rewrite_failed",
@@ -144,6 +170,7 @@ async fn run_auto_loop(
     app: AppHandle,
     session_id: String,
     job: Arc<JobControl>,
+    target_indices: Option<HashSet<usize>>,
 ) -> Result<(), String> {
     let state = app.state::<AppState>();
     let app_state = state.inner();
@@ -170,18 +197,14 @@ async fn run_auto_loop(
                 storage::save_session(&app, &session)?;
             }
 
-            let total = session.chunks.len();
-            let completed = session
-                .chunks
-                .iter()
-                .filter(|chunk| chunk.status == ChunkStatus::Done)
-                .count();
-            let pending = session
-                .chunks
-                .iter()
-                .filter(|chunk| chunk.status != ChunkStatus::Done)
-                .map(|chunk| chunk.index)
-                .collect::<VecDeque<_>>();
+            let total =
+                rewrite_targets::count_target_total_chunks(&session.chunks, target_indices.as_ref());
+            let completed = rewrite_targets::count_target_completed_chunks(
+                &session.chunks,
+                target_indices.as_ref(),
+            );
+            let pending =
+                rewrite_targets::build_auto_pending_queue(&session.chunks, target_indices.as_ref());
             let sources = session
                 .chunks
                 .iter()

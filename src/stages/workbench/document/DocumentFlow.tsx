@@ -1,6 +1,7 @@
 import { memo, useEffect, useMemo, useRef } from "react";
 import type { ChunkTask, EditSuggestion } from "../../../lib/types";
 import { summarizeChunkSuggestions } from "../../../lib/helpers";
+import { isChunkSelected } from "../../../lib/chunkSelection";
 import type { DocumentView } from "../hooks/useCopyDocument";
 import type { ClientDocumentFormat } from "../../../lib/protectedText";
 import { renderInlineProtectedText } from "../../../lib/protectedText";
@@ -15,7 +16,8 @@ interface DocumentFlowProps {
   runningIndexSet: Set<number>;
   optimisticManualRunningIndex: number | null;
   activeChunkIndex: number;
-  onSelectChunk: (index: number) => void;
+  selectedChunkIndices: number[];
+  onSelectChunk: (index: number, options?: { multiSelect?: boolean }) => void;
   onSelectSuggestion: (suggestionId: string) => void;
 }
 
@@ -29,6 +31,7 @@ export const DocumentFlow = memo(function DocumentFlow({
   runningIndexSet,
   optimisticManualRunningIndex,
   activeChunkIndex,
+  selectedChunkIndices,
   onSelectChunk,
   onSelectSuggestion
 }: DocumentFlowProps) {
@@ -52,6 +55,7 @@ export const DocumentFlow = memo(function DocumentFlow({
       const classes = [
         "doc-chunk",
         chunk.index === activeChunkIndex ? "is-active" : "",
+        isChunkSelected(selectedChunkIndices, chunk.index) ? "is-selected" : "",
         chunk.skipRewrite ? "is-protected" : "",
         isRunning ? "is-running" : "",
         chunk.status === "failed" ? "is-failed" : "",
@@ -69,6 +73,7 @@ export const DocumentFlow = memo(function DocumentFlow({
     documentView,
     optimisticManualRunningIndex,
     runningIndexSet,
+    selectedChunkIndices,
     suggestionsByChunk
   ]);
 
@@ -78,11 +83,29 @@ export const DocumentFlow = memo(function DocumentFlow({
   };
 
   return (
-    <div className={`document-flow-wrap ${showMarkers ? "is-markers" : "is-quiet"}`}>
+    <div
+      className={`document-flow-wrap ${showMarkers ? "is-markers" : "is-quiet"} ${
+        selectedChunkIndices.length > 0 ? "has-status" : ""
+      }`}
+    >
+      {selectedChunkIndices.length > 0 ? (
+        <div className="document-flow-status" aria-label="当前选择状态">
+          <span className="context-chip" title="当前已选中的 chunk 数量">
+            已选 {selectedChunkIndices.length} 段
+          </span>
+        </div>
+      ) : null}
+
       {showMarkers ? (
         <div className="chunk-legend" aria-label="高亮说明">
           <span className="legend-chip is-editable" title="可改写 chunk（审阅最小单元）">
             可改写
+          </span>
+          <span
+            className="legend-chip is-selected"
+            title="按住 Ctrl / Cmd 点击可加入或移出本次处理范围"
+          >
+            已选中
           </span>
           <span className="legend-chip is-protected" title="保护 chunk（AI 将跳过）">
             不可改写
@@ -118,10 +141,12 @@ export const DocumentFlow = memo(function DocumentFlow({
               title={
                 chunk.skipRewrite
                   ? "保护区：该片段将不会被 AI 修改"
-                  : "可改写：点击选中该分块（审阅/生成候选的最小单元）"
+                  : "可改写：点击定位；Ctrl / Cmd + 点击加入或移出本次处理范围"
               }
-              onClick={() => {
-                onSelectChunk(chunk.index);
+              onClick={(event) => {
+                onSelectChunk(chunk.index, {
+                  multiSelect: event.metaKey || event.ctrlKey
+                });
                 if (displaySuggestion) {
                   onSelectSuggestion(displaySuggestion.id);
                 }

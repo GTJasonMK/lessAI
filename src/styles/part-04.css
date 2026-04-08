@@ -326,6 +326,24 @@
   margin: 0 0 12px;
 }
 
+.document-flow-wrap {
+  position: relative;
+}
+
+.document-flow-wrap.has-status .chunk-legend {
+  padding-right: 132px;
+}
+
+.document-flow-status {
+  position: absolute;
+  top: 0;
+  right: 0;
+  z-index: 2;
+  display: flex;
+  justify-content: flex-end;
+  pointer-events: none;
+}
+
 .legend-chip {
   display: inline-flex;
   align-items: center;
@@ -342,6 +360,11 @@
 .legend-chip.is-editable {
   background: rgba(23, 68, 207, 0.06);
   box-shadow: inset 0 0 0 1px rgba(23, 68, 207, 0.14);
+}
+
+.legend-chip.is-selected {
+  background: rgba(184, 92, 26, 0.12);
+  box-shadow: inset 0 0 0 1px rgba(184, 92, 26, 0.26);
 }
 
 .legend-chip.is-protected {
@@ -411,6 +434,17 @@
   box-shadow: 0 0 0 2px rgba(23, 68, 207, 0.18);
 }
 
+.document-flow-wrap.is-quiet .doc-chunk.is-selected {
+  background: rgba(184, 92, 26, 0.08);
+  box-shadow: inset 0 0 0 1px rgba(184, 92, 26, 0.24);
+}
+
+.document-flow-wrap.is-quiet .doc-chunk.is-active.is-selected {
+  box-shadow:
+    0 0 0 2px rgba(23, 68, 207, 0.18),
+    inset 0 0 0 1px rgba(184, 92, 26, 0.3);
+}
+
 .document-flow-wrap.is-quiet .doc-chunk.is-running {
   background: rgba(134, 93, 255, 0.08);
   box-shadow: inset 0 0 0 1px rgba(134, 93, 255, 0.22);
@@ -438,6 +472,18 @@
 .doc-chunk.is-active {
   background: rgba(23, 68, 207, 0.08);
   box-shadow: 0 0 0 2px rgba(23, 68, 207, 0.22);
+}
+
+.doc-chunk.is-selected {
+  background: rgba(184, 92, 26, 0.12);
+  box-shadow: inset 0 0 0 1px rgba(184, 92, 26, 0.26);
+}
+
+.doc-chunk.is-active.is-selected {
+  background: rgba(184, 92, 26, 0.14);
+  box-shadow:
+    0 0 0 2px rgba(23, 68, 207, 0.22),
+    inset 0 0 0 1px rgba(184, 92, 26, 0.3);
 }
 
 .doc-chunk.is-active.is-protected {
