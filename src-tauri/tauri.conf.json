@@ -37,7 +37,18 @@
       "icons/icon.icns",
       "icons/icon.ico",
       "icons/icon.png"
-    ]
+    ],
+    "windows": {
+      "nsis": {
+        "installerIcon": "icons/icon.ico",
+        "headerImage": "icons/installer-header.bmp",
+        "sidebarImage": "icons/installer-sidebar.bmp"
+      },
+      "wix": {
+        "bannerPath": "icons/installer-wix-banner.bmp",
+        "dialogImagePath": "icons/installer-wix-dialog.bmp"
+      }
+    }
   },
   "plugins": {
     "updater": {
