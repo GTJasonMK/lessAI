@@ -3,6 +3,7 @@ use tauri::{AppHandle, State};
 
 use crate::{
     models::{ChunkStatus, DocumentSession, SuggestionDecision},
+    rewrite_jobs::validate_session_writeback,
     state::{with_session_lock, AppState},
     storage,
 };
@@ -43,6 +44,7 @@ pub fn apply_suggestion(
             }
         }
 
+        validate_session_writeback(&session)?;
         session.updated_at = now;
         storage::save_session(&app, &session)?;
         Ok(session)

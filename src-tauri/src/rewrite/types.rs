@@ -1,3 +1,5 @@
+use crate::models::ChunkPresentation;
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SegmentedChunk {
     pub text: String,
@@ -13,4 +15,5 @@ pub struct SegmentedChunk {
     /// - 代码块/配置片段属于“格式/语义强约束内容”，让模型改写极易改坏；
     /// - 与其提示模型“不要改”，不如直接跳过，保持原样。
     pub skip_rewrite: bool,
+    pub presentation: Option<ChunkPresentation>,
 }

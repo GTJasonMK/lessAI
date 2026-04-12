@@ -11,6 +11,7 @@ import type {
 import type { SessionStats } from "../lib/helpers";
 import type { ReviewView } from "../lib/constants";
 import { groupSuggestionsByChunk, isSettingsReady } from "../lib/helpers";
+import type { EditorChunkOverrides } from "../lib/editorChunks";
 import { DocumentPanel } from "./workbench/DocumentPanel";
 import { ReviewPanel } from "./workbench/ReviewPanel";
 import type { DocumentEditorHandle } from "./workbench/document/DocumentEditor";
@@ -28,6 +29,7 @@ interface WorkbenchStageProps {
   busyAction: string | null;
   editorMode: boolean;
   editorText: string;
+  editorChunkOverrides: EditorChunkOverrides;
   editorDirty: boolean;
   editorHasSelection: boolean;
   editorRef: MutableRefObject<DocumentEditorHandle | null>;
@@ -48,6 +50,7 @@ interface WorkbenchStageProps {
   onOpenSettings: () => void;
   onEnterEditor: () => void;
   onChangeEditorText: (value: string) => void;
+  onChangeEditorChunkText: (index: number, value: string) => void;
   onChangeEditorHasSelection: (value: boolean) => void;
   onSaveEditor: () => void;
   onSaveEditorAndExit: () => void;
@@ -69,6 +72,7 @@ export const WorkbenchStage = memo(function WorkbenchStage({
   busyAction,
   editorMode,
   editorText,
+  editorChunkOverrides,
   editorDirty,
   editorHasSelection,
   editorRef,
@@ -89,6 +93,7 @@ export const WorkbenchStage = memo(function WorkbenchStage({
   onOpenSettings,
   onEnterEditor,
   onChangeEditorText,
+  onChangeEditorChunkText,
   onChangeEditorHasSelection,
   onSaveEditor,
   onSaveEditorAndExit,
@@ -179,6 +184,7 @@ export const WorkbenchStage = memo(function WorkbenchStage({
             busyAction={busyAction}
             editorMode={editorMode}
             editorText={editorText}
+            editorChunkOverrides={editorChunkOverrides}
             editorDirty={editorDirty}
             editorHasSelection={editorHasSelection}
             editorRef={editorRef}
@@ -194,6 +200,7 @@ export const WorkbenchStage = memo(function WorkbenchStage({
             onResetSession={onResetSession}
             onEnterEditor={onEnterEditor}
             onChangeEditorText={onChangeEditorText}
+            onChangeEditorChunkText={onChangeEditorChunkText}
             onChangeEditorHasSelection={onChangeEditorHasSelection}
             onSaveEditor={onSaveEditor}
             onSaveEditorAndExit={onSaveEditorAndExit}

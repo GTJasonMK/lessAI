@@ -225,6 +225,8 @@ cd src-tauri
 cargo test
 ```
 
+完整测试清单见 [docs/testing-guide.md](docs/testing-guide.md)。
+
 ### 构建产物目录
 
 - `src-tauri/target/release/bundle/`

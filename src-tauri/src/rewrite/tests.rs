@@ -1,7 +1,32 @@
 use crate::adapters::markdown::MarkdownAdapter;
+use crate::adapters::{tex::TexAdapter, TextRegion};
+use crate::documents::RegionSegmentationStrategy;
 use crate::models::{ChunkPreset, DiffType, DocumentFormat};
 
 use super::*;
+
+fn segment_text(
+    text: &str,
+    preset: ChunkPreset,
+    format: DocumentFormat,
+    rewrite_headings: bool,
+) -> Vec<SegmentedChunk> {
+    let regions = match format {
+        DocumentFormat::PlainText => vec![TextRegion {
+            body: text.to_string(),
+            skip_rewrite: false,
+            presentation: None,
+        }],
+        DocumentFormat::Markdown => MarkdownAdapter::split_regions(text, rewrite_headings),
+        DocumentFormat::Tex => TexAdapter::split_regions(text, rewrite_headings),
+    };
+    segment_regions_with_strategy(
+        regions,
+        preset,
+        format,
+        RegionSegmentationStrategy::FormatAware,
+    )
+}
 
 #[test]
 fn normalize_text_collapses_blank_lines() {
@@ -404,6 +429,36 @@ fn clause_preset_does_not_split_on_fullwidth_colon_time() {
     assert_eq!(editable_chunks.len(), 2);
     assert_eq!(editable_chunks[0].text, "会议时间 12：30，");
     assert_eq!(editable_chunks[1].text, "地点 A。");
+}
+
+#[test]
+fn clause_preset_does_not_split_on_dunhao_enumeration() {
+    let text = "系统采用“计算-验证”解耦架构，实现远程状态监测、算力调控与智能优化决策三大功能。";
+    let chunks = segment_text(text, ChunkPreset::Clause, DocumentFormat::PlainText, false);
+    let editable_chunks: Vec<&SegmentedChunk> = chunks.iter().filter(|c| !c.skip_rewrite).collect();
+    assert_eq!(editable_chunks.len(), 2);
+    assert_eq!(editable_chunks[0].text, "系统采用“计算-验证”解耦架构，");
+    assert_eq!(
+        editable_chunks[1].text,
+        "实现远程状态监测、算力调控与智能优化决策三大功能。"
+    );
+}
+
+#[test]
+fn clause_preset_does_not_split_on_introductory_fullwidth_colon() {
+    let text = "硬件部署：认知节点部署于 Dell PowerEdge R750xa，运行 Neo4j + ChromaDB；验证节点部署于 Lenovo ThinkStation P3。";
+    let chunks = segment_text(text, ChunkPreset::Clause, DocumentFormat::PlainText, false);
+    let editable_chunks: Vec<&SegmentedChunk> = chunks.iter().filter(|c| !c.skip_rewrite).collect();
+    assert_eq!(editable_chunks.len(), 3);
+    assert_eq!(
+        editable_chunks[0].text,
+        "硬件部署：认知节点部署于 Dell PowerEdge R750xa，"
+    );
+    assert_eq!(editable_chunks[1].text, "运行 Neo4j + ChromaDB；");
+    assert_eq!(
+        editable_chunks[2].text,
+        "验证节点部署于 Lenovo ThinkStation P3。"
+    );
 }
 
 #[test]

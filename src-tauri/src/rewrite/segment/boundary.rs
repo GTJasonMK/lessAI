@@ -110,8 +110,7 @@ fn looks_like_english_sentence_starter(chars: &[char], period_index: usize) -> b
     let lower = word.to_ascii_lowercase();
     matches!(
         lower.as_str(),
-        "i"
-            | "we"
+        "i" | "we"
             | "you"
             | "he"
             | "she"
@@ -226,11 +225,13 @@ fn is_period_after_common_abbreviation(chars: &[char], index: usize) -> bool {
         return false;
     }
 
-    let word = chars[start..index].iter().collect::<String>().to_ascii_lowercase();
+    let word = chars[start..index]
+        .iter()
+        .collect::<String>()
+        .to_ascii_lowercase();
     let is_known = matches!(
         word.as_str(),
-        "mr"
-            | "mrs"
+        "mr" | "mrs"
             | "ms"
             | "dr"
             | "prof"
@@ -333,92 +334,6 @@ fn is_period_after_numeric_list_marker(chars: &[char], index: usize) -> bool {
     true
 }
 
-fn is_colon_in_url_scheme(chars: &[char], index: usize) -> bool {
-    // `https://` / `http://` / `file://` 等：`:` 不应触发小句切分。
-    chars.get(index) == Some(&':')
-        && chars.get(index + 1) == Some(&'/')
-        && chars.get(index + 2) == Some(&'/')
-}
-
-fn is_fullwidth_colon_in_url_scheme(chars: &[char], index: usize) -> bool {
-    // 容错：`http：//`（全角冒号）在复制/输入法里偶尔出现。
-    chars.get(index) == Some(&'：')
-        && chars.get(index + 1) == Some(&'/')
-        && chars.get(index + 2) == Some(&'/')
-}
-
-fn is_colon_in_windows_drive(chars: &[char], index: usize) -> bool {
-    // `E:\Code` / `C:/Windows`：`:` 不应触发小句切分。
-    if chars.get(index) != Some(&':') {
-        return false;
-    }
-
-    let prev_is_letter = index
-        .checked_sub(1)
-        .and_then(|prev| chars.get(prev))
-        .map(|value| value.is_ascii_alphabetic())
-        .unwrap_or(false);
-    if !prev_is_letter {
-        return false;
-    }
-
-    matches!(chars.get(index + 1), Some('\\') | Some('/'))
-}
-
-fn is_fullwidth_colon_in_windows_drive(chars: &[char], index: usize) -> bool {
-    // 容错：`E：\Code`（全角冒号）
-    if chars.get(index) != Some(&'：') {
-        return false;
-    }
-
-    let prev_is_letter = index
-        .checked_sub(1)
-        .and_then(|prev| chars.get(prev))
-        .map(|value| value.is_ascii_alphabetic())
-        .unwrap_or(false);
-    if !prev_is_letter {
-        return false;
-    }
-
-    matches!(chars.get(index + 1), Some('\\') | Some('/'))
-}
-
-fn is_colon_in_time_like(chars: &[char], index: usize) -> bool {
-    // `12:30` / `1:2`：`:` 不应触发小句切分。
-    if chars.get(index) != Some(&':') {
-        return false;
-    }
-
-    let prev_is_digit = index
-        .checked_sub(1)
-        .and_then(|prev| chars.get(prev))
-        .map(|value| value.is_ascii_digit())
-        .unwrap_or(false);
-    let next_is_digit = chars
-        .get(index + 1)
-        .map(|value| value.is_ascii_digit())
-        .unwrap_or(false);
-    prev_is_digit && next_is_digit
-}
-
-fn is_fullwidth_colon_in_time_like(chars: &[char], index: usize) -> bool {
-    // `12：30` / `1：2`：`：`（全角冒号）不应触发小句切分。
-    if chars.get(index) != Some(&'：') {
-        return false;
-    }
-
-    let prev_is_digit = index
-        .checked_sub(1)
-        .and_then(|prev| chars.get(prev))
-        .map(|value| value.is_ascii_digit())
-        .unwrap_or(false);
-    let next_is_digit = chars
-        .get(index + 1)
-        .map(|value| value.is_ascii_digit())
-        .unwrap_or(false);
-    prev_is_digit && next_is_digit
-}
-
 fn is_inside_url_token(chars: &[char], index: usize) -> bool {
     // 粗略判断某个字符是否位于 URL token 内（避免在 URL 的 `?` 等处断句）。
     // 规则：从当前位置向两侧扩展到空白边界，token 内包含 `://` 则认为是 URL。
@@ -456,28 +371,12 @@ pub(super) fn is_sentence_boundary(chars: &[char], index: usize) -> bool {
 }
 
 pub(super) fn is_clause_boundary(chars: &[char], index: usize) -> bool {
-    let ch = chars[index];
     if is_sentence_boundary(chars, index) {
         return true;
     }
 
-    match ch {
+    match chars[index] {
         '，' => !is_punct_quoted_as_literal(chars, index) && !is_numeric_punctuation(chars, index),
-        '、' | '；' => !is_punct_quoted_as_literal(chars, index),
-        ';' => !is_punct_quoted_as_literal(chars, index) && !is_inside_url_token(chars, index),
-        '：' => {
-            !is_punct_quoted_as_literal(chars, index)
-                && !is_fullwidth_colon_in_url_scheme(chars, index)
-                && !is_fullwidth_colon_in_windows_drive(chars, index)
-                && !is_fullwidth_colon_in_time_like(chars, index)
-        }
-        ':' => {
-            !is_punct_quoted_as_literal(chars, index)
-                && !is_colon_in_url_scheme(chars, index)
-                && !is_inside_url_token(chars, index)
-                && !is_colon_in_windows_drive(chars, index)
-                && !is_colon_in_time_like(chars, index)
-        }
         ',' => !is_numeric_punctuation(chars, index) && !is_punct_quoted_as_literal(chars, index),
         _ => false,
     }

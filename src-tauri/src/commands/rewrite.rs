@@ -21,13 +21,8 @@ pub async fn start_rewrite(
 
     match mode {
         RewriteMode::Manual => {
-            rewrite_jobs::run_manual_rewrite(
-                &app,
-                state.inner(),
-                &session,
-                target_chunk_indices,
-            )
-            .await
+            rewrite_jobs::run_manual_rewrite(&app, state.inner(), &session, target_chunk_indices)
+                .await
         }
         RewriteMode::Auto => {
             rewrite_jobs::run_auto_rewrite(app, state, session, target_chunk_indices)

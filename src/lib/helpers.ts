@@ -431,6 +431,20 @@ export function isPdfPath(path: string) {
   return fileExtensionLower(path) === "pdf";
 }
 
+export function rewriteBlockedReason(session: DocumentSession | null) {
+  if (!session) return null;
+  if (isPdfPath(session.documentPath)) return null;
+  if (session.writeBackSupported) return null;
+  return (
+    session.writeBackBlockReason ??
+    "当前文档暂不支持安全写回覆盖，因此不允许继续 AI 改写。"
+  );
+}
+
+export function canRewriteSession(session: DocumentSession | null) {
+  return rewriteBlockedReason(session) == null;
+}
+
 // ── 文件名清理 ───────────────────────────────────────────
 
 export function sanitizeFileName(name: string) {

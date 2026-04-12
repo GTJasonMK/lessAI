@@ -104,17 +104,17 @@ export function useDocumentFinalizeActions(options: {
       return;
     }
 
-    if (isDocxPath(session.documentPath)) {
-      showNotice(
-        "warning",
-        "docx 暂不支持写回覆盖（会破坏文件结构）。请先“导出”为纯文本后再写回。"
-      );
-      return;
-    }
     if (isPdfPath(session.documentPath)) {
       showNotice(
         "warning",
         "pdf 暂不支持写回覆盖（PDF 不是纯文本格式）。请先“导出”为 .txt 再进行后续排版。"
+      );
+      return;
+    }
+    if (!session.writeBackSupported) {
+      showNotice(
+        "warning",
+        session.writeBackBlockReason ?? "当前文档暂不支持安全写回覆盖。"
       );
       return;
     }
@@ -129,6 +129,9 @@ export function useDocumentFinalizeActions(options: {
       "该操作会把【已应用】的修改覆盖写回原文件，并删除该文档的全部历史记录（修改对、进度）。",
       "不可撤销，建议你先“导出”做一份备份。",
       "写回成功后会自动重新打开该文件（以全新会话展示）。",
+      isDocxPath(session.documentPath)
+        ? "简单 docx 会按原段落结构写回；如果原文件已在外部变化，系统会直接报错并拒绝覆盖。"
+        : "",
       "",
       `文件：${formatDisplayPath(session.documentPath)}`,
       `已应用：${stats.chunksApplied}/${stats.total}`,

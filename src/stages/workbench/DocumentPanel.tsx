@@ -6,9 +6,16 @@ import type {
   EditSuggestion,
   RewriteMode
 } from "../../lib/types";
+import type { EditorChunkOverrides } from "../../lib/editorChunks";
 import type { SessionStats } from "../../lib/helpers";
-import { countCharacters, isDocxPath, isPdfPath } from "../../lib/helpers";
 import {
+  canRewriteSession,
+  countCharacters,
+  isPdfPath,
+  rewriteBlockedReason
+} from "../../lib/helpers";
+import {
+  countSelectedChunkUnits,
   findAutoPendingTargetChunks,
   findNextManualTargetChunk,
   hasSelectedChunks
@@ -35,6 +42,7 @@ interface DocumentPanelProps {
   busyAction: string | null;
   editorMode: boolean;
   editorText: string;
+  editorChunkOverrides: EditorChunkOverrides;
   editorDirty: boolean;
   editorHasSelection: boolean;
   editorRef: MutableRefObject<DocumentEditorHandle | null>;
@@ -50,6 +58,7 @@ interface DocumentPanelProps {
   onResetSession: () => void;
   onEnterEditor: () => void;
   onChangeEditorText: (value: string) => void;
+  onChangeEditorChunkText: (index: number, value: string) => void;
   onChangeEditorHasSelection: (value: boolean) => void;
   onSaveEditor: () => void;
   onSaveEditorAndExit: () => void;
@@ -73,6 +82,7 @@ export const DocumentPanel = memo(function DocumentPanel({
   busyAction,
   editorMode,
   editorText,
+  editorChunkOverrides,
   editorDirty,
   editorHasSelection,
   editorRef,
@@ -88,6 +98,7 @@ export const DocumentPanel = memo(function DocumentPanel({
   onResetSession,
   onEnterEditor,
   onChangeEditorText,
+  onChangeEditorChunkText,
   onChangeEditorHasSelection,
   onSaveEditor,
   onSaveEditorAndExit,
@@ -101,9 +112,7 @@ export const DocumentPanel = memo(function DocumentPanel({
   const rewriteRunning = currentSession?.status === "running";
   const rewritePaused = currentSession?.status === "paused";
   const readOnlyDocument = Boolean(
-    currentSession &&
-      (isDocxPath(currentSession.documentPath) ||
-        isPdfPath(currentSession.documentPath))
+    currentSession && isPdfPath(currentSession.documentPath)
   );
   const anyBusy = Boolean(busyAction);
 
@@ -120,6 +129,19 @@ export const DocumentPanel = memo(function DocumentPanel({
   const showCancelAction = rewriteRunning || rewritePaused;
   const hasAppliedEdits = Boolean(currentStats && currentStats.suggestionsApplied > 0);
   const hasChunkSelection = hasSelectedChunks(selectedChunkIndices);
+  const effectiveChunkPreset = currentSession?.chunkPreset ?? settings.chunkPreset;
+  const selectedDisplayCount = useMemo(
+    () =>
+      currentSession
+        ? countSelectedChunkUnits(
+            currentSession.chunks,
+            selectedChunkIndices,
+            effectiveChunkPreset
+          )
+        : 0,
+    [currentSession, effectiveChunkPreset, selectedChunkIndices]
+  );
+  const rewriteBlockReason = rewriteBlockedReason(currentSession);
   const nextManualTargetChunk = useMemo(
     () =>
       currentSession
@@ -138,6 +160,7 @@ export const DocumentPanel = memo(function DocumentPanel({
   const canStartRewrite = Boolean(
     settingsReady &&
       currentSession &&
+      canRewriteSession(currentSession) &&
       !rewriteRunning &&
       !rewritePaused &&
       (settings.rewriteMode === "manual"
@@ -164,13 +187,14 @@ export const DocumentPanel = memo(function DocumentPanel({
     if (rewritePaused) return "继续自动任务";
     if (!currentSession) return "请先打开一个文档";
     if (!settingsReady) return "请先在设置里配置 Base URL / Key / Model";
+    if (rewriteBlockReason) return rewriteBlockReason;
     if (settings.rewriteMode === "manual" && !nextManualTargetChunk) {
       return hasChunkSelection ? "所选片段已处理完成" : "全部片段已生成，可在右侧审阅并导出";
     }
     if (settings.rewriteMode === "auto" && autoPendingTargetChunks.length === 0) {
       return hasChunkSelection ? "所选片段已处理完成" : "全部片段已生成，可在右侧审阅并导出";
     }
-    if (hasChunkSelection) return `处理所选 ${selectedChunkIndices.length} 段`;
+    if (hasChunkSelection) return `处理所选 ${selectedDisplayCount} 段`;
     return settings.rewriteMode === "auto" ? "自动批处理生成并应用" : "生成下一条修改对";
   }, [
     autoPendingTargetChunks.length,
@@ -179,7 +203,8 @@ export const DocumentPanel = memo(function DocumentPanel({
     nextManualTargetChunk,
     rewritePaused,
     rewriteRunning,
-    selectedChunkIndices.length,
+    rewriteBlockReason,
+    selectedDisplayCount,
     settings.rewriteMode,
     settingsReady
   ]);
@@ -192,6 +217,7 @@ export const DocumentPanel = memo(function DocumentPanel({
   const canEnterEditor = Boolean(
     currentSession &&
       !readOnlyDocument &&
+      currentSession.plainTextEditorSafe &&
       !rewriteRunning &&
       !rewritePaused &&
       currentSession.status === "idle" &&
@@ -204,11 +230,14 @@ export const DocumentPanel = memo(function DocumentPanel({
 
   const enterEditorTitle = useMemo(() => {
     if (!currentSession) return "请先打开一个文档";
-    if (isDocxPath(currentSession.documentPath)) {
-      return "docx 目前仅支持导入/改写/导出，暂不支持终稿编辑或写回覆盖";
-    }
     if (isPdfPath(currentSession.documentPath)) {
       return "pdf 目前仅支持导入/改写/导出，暂不支持终稿编辑或写回覆盖";
+    }
+    if (!currentSession.plainTextEditorSafe) {
+      return (
+        currentSession.plainTextEditorBlockReason ??
+        "当前文档暂不支持进入编辑模式。"
+      );
     }
     if (rewriteRunning || rewritePaused) {
       return "请先取消自动任务后再编辑终稿";
@@ -237,9 +266,6 @@ export const DocumentPanel = memo(function DocumentPanel({
 
   const finalizeTitle = useMemo(() => {
     if (finalizeBusy) return "正在写回原文件…";
-    if (currentSession && isDocxPath(currentSession.documentPath)) {
-      return "docx 暂不支持写回覆盖，请导出为纯文本后再写回";
-    }
     if (currentSession && isPdfPath(currentSession.documentPath)) {
       return "pdf 暂不支持写回覆盖，请导出为 .txt 后再进行后续排版";
     }
@@ -393,10 +419,13 @@ export const DocumentPanel = memo(function DocumentPanel({
             {editorMode ? (
               <DocumentEditor
                 ref={editorRef}
+                session={currentSession}
                 value={editorText}
+                chunkOverrides={editorChunkOverrides}
                 dirty={editorDirty}
                 busy={anyBusy}
                 onChange={onChangeEditorText}
+                onChangeChunkText={onChangeEditorChunkText}
                 onSave={onSaveEditor}
                 onSelectionChange={onChangeEditorHasSelection}
               />
@@ -404,8 +433,11 @@ export const DocumentPanel = memo(function DocumentPanel({
               <DocumentFlow
                 sessionId={currentSession.id}
                 chunks={currentSession.chunks}
+                chunkPreset={effectiveChunkPreset}
                 documentView={documentView}
                 documentFormat={documentFormat}
+                rewriteEnabled={!rewriteBlockReason}
+                rewriteBlockedReason={rewriteBlockReason}
                 showMarkers={showMarkers}
                 suggestionsByChunk={suggestionsByChunk}
                 runningIndexSet={runningIndexSet}

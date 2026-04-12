@@ -2,6 +2,7 @@ import { invoke } from "@tauri-apps/api/core";
 import type {
   AppSettings,
   DocumentSession,
+  EditorChunkEdit,
   ProviderCheckResult,
   RewriteMode
 } from "./types";
@@ -80,6 +81,18 @@ export async function finalizeDocument(sessionId: string) {
 
 export async function saveDocumentEdits(sessionId: string, content: string) {
   return invoke<DocumentSession>("save_document_edits", { sessionId, content });
+}
+
+export async function validateDocumentEdits(sessionId: string, content: string) {
+  return invoke<void>("validate_document_edits", { sessionId, content });
+}
+
+export async function validateDocumentChunkEdits(sessionId: string, edits: EditorChunkEdit[]) {
+  return invoke<void>("validate_document_chunk_edits", { sessionId, edits });
+}
+
+export async function saveDocumentChunkEdits(sessionId: string, edits: EditorChunkEdit[]) {
+  return invoke<DocumentSession>("save_document_chunk_edits", { sessionId, edits });
 }
 
 export async function rewriteSnippet(sessionId: string, text: string) {

@@ -1,6 +1,10 @@
 import { useCallback } from "react";
 import type { MutableRefObject } from "react";
-import { rewriteSnippet } from "../../lib/api";
+import {
+  rewriteSnippet,
+  validateDocumentChunkEdits,
+  validateDocumentEdits
+} from "../../lib/api";
 import type { DocumentSession } from "../../lib/types";
 import { countCharacters, readableError } from "../../lib/helpers";
 import type { ConfirmModalOptions } from "../../components/ConfirmModal";
@@ -96,6 +100,18 @@ export function useEditorSelectionRewrite(options: {
       const rewritten = await withBusy("rewrite-selection", () =>
         rewriteSnippet(session.id, snapshot.text)
       );
+      const preview = editor.previewSelectionReplacement(snapshot, rewritten);
+      if (!preview.ok) {
+        showNotice("warning", preview.error);
+        return;
+      }
+
+      await withBusy("validate-document-edits", () => {
+        if (preview.chunkEdits) {
+          return validateDocumentChunkEdits(session.id, preview.chunkEdits);
+        }
+        return validateDocumentEdits(session.id, preview.value);
+      });
 
       const applied = editor.applySelectionReplacement(snapshot, rewritten);
       if (!applied.ok) {

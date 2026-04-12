@@ -1,5 +1,5 @@
 import { useCallback } from "react";
-import type { AppSettings, PromptTemplate, ProviderCheckResult } from "../../lib/types";
+import type { AppSettings, DocumentSession, PromptTemplate, ProviderCheckResult } from "../../lib/types";
 import { isSettingsReady, readableError } from "../../lib/helpers";
 import { saveSettings, testProvider } from "../../lib/api";
 import type { NoticeTone } from "../../lib/constants";
@@ -14,19 +14,31 @@ export function useSettingsHandlers(options: {
   settings: AppSettings;
   setSettings: React.Dispatch<React.SetStateAction<AppSettings>>;
   setProviderStatus: React.Dispatch<React.SetStateAction<ProviderCheckResult | null>>;
+  currentSession: DocumentSession | null;
   showNotice: ShowNotice;
   withBusy: <T>(action: string, fn: () => Promise<T>) => Promise<T>;
   closeSettings: () => void;
   readChunkStrategyLockedReason: () => string | null;
+  refreshSessionState: (
+    sessionId: string,
+    options?: {
+      preserveChunk?: boolean;
+      preferredChunkIndex?: number;
+      preserveSuggestion?: boolean;
+      preferredSuggestionId?: string | null;
+    }
+  ) => Promise<DocumentSession>;
 }) {
   const {
     settings,
     setSettings,
     setProviderStatus,
+    currentSession,
     showNotice,
     withBusy,
     closeSettings,
-    readChunkStrategyLockedReason
+    readChunkStrategyLockedReason,
+    refreshSessionState
   } = options;
 
   const handleUpdateStringSetting = useCallback(
@@ -141,17 +153,45 @@ export function useSettingsHandlers(options: {
   );
 
   const handleSaveSettings = useCallback(async () => {
+    const shouldRefreshCurrentSession =
+      !!currentSession &&
+      (currentSession.chunkPreset !== settings.chunkPreset ||
+        currentSession.rewriteHeadings !== settings.rewriteHeadings);
+
     try {
       const saved = await withBusy("save-settings", () => saveSettings(settings));
       setSettings(saved);
-      showNotice("success", "配置已保存，后续打开的文档会沿用当前接口与模型。");
+
+      if (shouldRefreshCurrentSession && currentSession) {
+        try {
+          await refreshSessionState(currentSession.id, {
+            preserveChunk: false,
+            preserveSuggestion: true
+          });
+          showNotice("success", "配置已保存，当前文档已按新的切段策略刷新。");
+        } catch (error) {
+          showNotice("error", `配置已保存，但刷新当前文档失败：${readableError(error)}`);
+          return;
+        }
+      } else {
+        showNotice("success", "配置已保存，后续打开的文档会沿用当前接口与模型。");
+      }
+
       if (isSettingsReady(saved)) {
         closeSettings();
       }
     } catch (error) {
       showNotice("error", `保存失败：${readableError(error)}`);
     }
-  }, [closeSettings, settings, setSettings, showNotice, withBusy]);
+  }, [
+    closeSettings,
+    currentSession,
+    refreshSessionState,
+    settings,
+    setSettings,
+    showNotice,
+    withBusy
+  ]);
 
   const handleTestProvider = useCallback(async () => {
     try {
@@ -177,4 +217,3 @@ export function useSettingsHandlers(options: {
     handleTestProvider
   } as const;
 }
-

@@ -1,5 +1,5 @@
 use std::{
-    collections::HashSet,
+    collections::{HashMap, HashSet},
     path::Path,
     sync::{atomic::Ordering, Arc},
 };
@@ -9,18 +9,23 @@ use tauri::{AppHandle, Emitter, Manager, State};
 use uuid::Uuid;
 
 use crate::{
-    documents::document_format,
+    adapters::{self, TextRegion},
+    documents::{
+        document_format, ensure_document_can_ai_rewrite_safely, is_docx_path,
+        load_verified_writeback_bytes,
+    },
     models::{
         ChunkCompletedEvent, ChunkStatus, DocumentSession, EditSuggestion, RewriteFailedEvent,
         RewriteMode, RewriteProgress, RunningState, SessionEvent, SuggestionDecision,
     },
-    rewrite_targets,
-    rewrite,
+    rewrite, rewrite_targets,
+    session_repair::load_session_with_snapshot_repairs,
     state::{with_session_lock, AppState, JobControl},
     storage,
 };
 
 const MAX_MAX_CONCURRENCY: usize = 8;
+const DOCX_BLOCK_SEPARATOR: &str = "\n\n";
 
 fn clamp_max_concurrency(value: usize) -> usize {
     value.clamp(1, MAX_MAX_CONCURRENCY)
@@ -30,6 +35,26 @@ fn snapshot_running_indices(in_flight: &HashSet<usize>) -> Vec<usize> {
     let mut indices = in_flight.iter().copied().collect::<Vec<_>>();
     indices.sort_unstable();
     indices
+}
+
+fn ensure_session_can_rewrite(session: &DocumentSession) -> Result<(), String> {
+    ensure_document_can_ai_rewrite_safely(
+        Path::new(&session.document_path),
+        &session.source_text,
+        session.source_snapshot.as_ref(),
+        session.write_back_supported,
+        session.write_back_block_reason.as_deref(),
+    )
+}
+
+fn load_rewrite_ready_session(
+    app: &AppHandle,
+    state: &AppState,
+    session_id: &str,
+) -> Result<DocumentSession, String> {
+    let session = load_session_with_snapshot_repairs(app, state, session_id)?;
+    ensure_session_can_rewrite(&session)?;
+    Ok(session)
 }
 
 fn emit_rewrite_progress(
@@ -64,7 +89,7 @@ pub(crate) async fn prepare_session_for_rewrite(
     state: &AppState,
     session_id: &str,
 ) -> Result<DocumentSession, String> {
-    with_session_lock(state, session_id, || storage::load_session(app, session_id))
+    load_rewrite_ready_session(app, state, session_id)
 }
 
 pub(crate) async fn run_manual_rewrite(
@@ -79,14 +104,15 @@ pub(crate) async fn run_manual_rewrite(
 
     let target_indices =
         rewrite_targets::resolve_target_indices(&session.chunks, target_chunk_indices)?;
-    let next_chunk = rewrite_targets::find_next_manual_chunk(&session.chunks, target_indices.as_ref())
-        .ok_or_else(|| {
-            if target_indices.is_some() {
-                "所选片段已处理完成。".to_string()
-            } else {
-                "没有可继续处理的片段，当前文档可能已经全部完成。".to_string()
-            }
-        })?;
+    let next_chunk =
+        rewrite_targets::find_next_manual_chunk(&session.chunks, target_indices.as_ref())
+            .ok_or_else(|| {
+                if target_indices.is_some() {
+                    "所选片段已处理完成。".to_string()
+                } else {
+                    "没有可继续处理的片段，当前文档可能已经全部完成。".to_string()
+                }
+            })?;
 
     process_chunk(app, state, &session.id, next_chunk, false).await?;
     with_session_lock(state, &session.id, || {
@@ -174,6 +200,10 @@ async fn run_auto_loop(
 ) -> Result<(), String> {
     let state = app.state::<AppState>();
     let app_state = state.inner();
+    if let Err(error) = load_rewrite_ready_session(&app, app_state, &session_id) {
+        mark_session_failed(&app, app_state, &session_id, error.clone())?;
+        return Err(error);
+    }
 
     let settings = storage::load_settings(&app)?;
     let max_concurrency = clamp_max_concurrency(settings.max_concurrency);
@@ -197,8 +227,10 @@ async fn run_auto_loop(
                 storage::save_session(&app, &session)?;
             }
 
-            let total =
-                rewrite_targets::count_target_total_chunks(&session.chunks, target_indices.as_ref());
+            let total = rewrite_targets::count_target_total_chunks(
+                &session.chunks,
+                target_indices.as_ref(),
+            );
             let completed = rewrite_targets::count_target_completed_chunks(
                 &session.chunks,
                 target_indices.as_ref(),
@@ -266,6 +298,12 @@ async fn run_auto_loop(
                 break;
             };
 
+            if let Err(error) = load_rewrite_ready_session(&app, app_state, &session_id) {
+                tasks.abort_all();
+                in_flight_indices.clear();
+                mark_session_failed(&app, app_state, &session_id, error.clone())?;
+                return Err(error);
+            }
             mark_chunk_running(&app, app_state, &session_id, index)?;
             in_flight_indices.insert(index);
 
@@ -312,7 +350,7 @@ async fn run_auto_loop(
             Ok(Some(joined)) => match joined {
                 Ok((index, Ok(candidate_text))) => {
                     in_flight_indices.remove(&index);
-                    let (suggestion_id, suggestion_sequence) = commit_chunk_success(
+                    let (suggestion_id, suggestion_sequence) = match commit_chunk_success(
                         &app,
                         app_state,
                         &session_id,
@@ -320,7 +358,21 @@ async fn run_auto_loop(
                         candidate_text,
                         SuggestionDecision::Applied,
                         None,
-                    )?;
+                    ) {
+                        Ok(result) => result,
+                        Err(error) => {
+                            tasks.abort_all();
+                            commit_chunk_failure(
+                                &app,
+                                app_state,
+                                &session_id,
+                                index,
+                                error.clone(),
+                            )?;
+                            reset_running_chunks_to_idle(&app, app_state, &session_id)?;
+                            return Err(error);
+                        }
+                    };
                     completed_chunks = completed_chunks.saturating_add(1);
                     app.emit(
                         "chunk_completed",
@@ -392,19 +444,14 @@ pub(crate) async fn process_chunk(
     auto_approve: bool,
 ) -> Result<(), String> {
     let settings = storage::load_settings(app)?;
+    let session = load_rewrite_ready_session(app, state, session_id)?;
+    let chunk = session
+        .chunks
+        .get(index)
+        .ok_or_else(|| "片段索引越界。".to_string())?;
+    let source_text = chunk.source_text.clone();
+    let format = document_format(Path::new(&session.document_path));
     mark_chunk_running(app, state, session_id, index)?;
-
-    let source_text = with_session_lock(state, session_id, || {
-        let session = storage::load_session(app, session_id)?;
-        let chunk = session
-            .chunks
-            .get(index)
-            .ok_or_else(|| "片段索引越界。".to_string())?;
-        let format = document_format(Path::new(&session.document_path));
-        Ok((chunk.source_text.clone(), format))
-    })?;
-
-    let (source_text, format) = source_text;
 
     match rewrite::rewrite_chunk(&settings, &source_text, format).await {
         Ok(candidate_text) => {
@@ -419,7 +466,7 @@ pub(crate) async fn process_chunk(
                 Some(RunningState::Idle)
             };
 
-            let (suggestion_id, suggestion_sequence) = commit_chunk_success(
+            let (suggestion_id, suggestion_sequence) = match commit_chunk_success(
                 app,
                 state,
                 session_id,
@@ -427,7 +474,13 @@ pub(crate) async fn process_chunk(
                 candidate_text,
                 decision,
                 set_status,
-            )?;
+            ) {
+                Ok(result) => result,
+                Err(error) => {
+                    commit_chunk_failure(app, state, session_id, index, error.clone())?;
+                    return Err(error);
+                }
+            };
 
             app.emit(
                 "chunk_completed",
@@ -460,22 +513,24 @@ fn commit_chunk_success(
 ) -> Result<(String, u64), String> {
     with_session_lock(state, session_id, || {
         let mut latest = storage::load_session(app, session_id)?;
-        let chunk = latest
+        let chunk_source_text = latest
             .chunks
-            .get_mut(index)
+            .get(index)
             .ok_or_else(|| "片段索引越界。".to_string())?;
+        let chunk_source_text = chunk_source_text.source_text.clone();
 
         let line_ending = rewrite::detect_line_ending(&latest.source_text);
         let mut candidate_text = candidate_text;
-        if !rewrite::has_trailing_spaces_per_line(&chunk.source_text) {
+        if !rewrite::has_trailing_spaces_per_line(&chunk_source_text) {
             candidate_text = rewrite::strip_trailing_spaces_per_line(&candidate_text);
         }
         let source_has_line_break =
-            chunk.source_text.contains('\n') || chunk.source_text.contains('\r');
+            chunk_source_text.contains('\n') || chunk_source_text.contains('\r');
         if !source_has_line_break {
             candidate_text = rewrite::collapse_line_breaks_to_spaces(&candidate_text);
         }
         candidate_text = rewrite::convert_line_endings(&candidate_text, line_ending);
+        validate_candidate_writeback(&latest, index, &candidate_text)?;
 
         let now = Utc::now();
         let suggestion_id = Uuid::new_v4().to_string();
@@ -497,14 +552,18 @@ fn commit_chunk_success(
             id: suggestion_id.clone(),
             sequence: suggestion_sequence,
             chunk_index: index,
-            before_text: chunk.source_text.clone(),
+            before_text: chunk_source_text.clone(),
             after_text: candidate_text.clone(),
-            diff_spans: rewrite::build_diff(&chunk.source_text, &candidate_text),
+            diff_spans: rewrite::build_diff(&chunk_source_text, &candidate_text),
             decision,
             created_at: now,
             updated_at: now,
         });
 
+        let chunk = latest
+            .chunks
+            .get_mut(index)
+            .ok_or_else(|| "片段索引越界。".to_string())?;
         chunk.status = ChunkStatus::Done;
         chunk.error_message = None;
         latest.updated_at = now;
@@ -675,6 +734,78 @@ fn compute_session_state(session: &DocumentSession) -> RunningState {
     RunningState::Idle
 }
 
+pub(crate) fn validate_session_writeback(session: &DocumentSession) -> Result<(), String> {
+    let path = Path::new(&session.document_path);
+    let current_bytes = load_verified_writeback_bytes(
+        path,
+        &session.source_text,
+        session.source_snapshot.as_ref(),
+    )?;
+    if !is_docx_path(path) {
+        return Ok(());
+    }
+
+    let updated_regions = build_merged_regions(session);
+    adapters::docx::DocxAdapter::write_updated_regions(
+        &current_bytes,
+        &session.source_text,
+        &updated_regions,
+    )
+    .map(|_| ())
+}
+
+pub(crate) fn validate_candidate_writeback(
+    session: &DocumentSession,
+    index: usize,
+    candidate_text: &str,
+) -> Result<(), String> {
+    let preview = build_candidate_preview_session(session, index, candidate_text)?;
+    validate_session_writeback(&preview)
+}
+
+fn build_candidate_preview_session(
+    session: &DocumentSession,
+    index: usize,
+    candidate_text: &str,
+) -> Result<DocumentSession, String> {
+    let mut preview = session.clone();
+    let before_text = preview
+        .chunks
+        .get(index)
+        .ok_or_else(|| "片段索引越界。".to_string())?
+        .source_text
+        .clone();
+    replace_applied_preview_suggestion(&mut preview, index, before_text, candidate_text);
+    Ok(preview)
+}
+
+fn replace_applied_preview_suggestion(
+    session: &mut DocumentSession,
+    index: usize,
+    before_text: String,
+    candidate_text: &str,
+) {
+    let now = Utc::now();
+    for suggestion in session.suggestions.iter_mut() {
+        if suggestion.chunk_index == index && suggestion.decision == SuggestionDecision::Applied {
+            suggestion.decision = SuggestionDecision::Dismissed;
+            suggestion.updated_at = now;
+        }
+    }
+
+    session.suggestions.push(EditSuggestion {
+        id: "__preview__".to_string(),
+        sequence: session.next_suggestion_sequence,
+        chunk_index: index,
+        before_text: before_text.clone(),
+        after_text: candidate_text.to_string(),
+        diff_spans: rewrite::build_diff(&before_text, candidate_text),
+        decision: SuggestionDecision::Applied,
+        created_at: now,
+        updated_at: now,
+    });
+}
+
 pub(crate) fn build_merged_text(session: &DocumentSession) -> String {
     let mut merged = String::new();
 
@@ -696,3 +827,165 @@ pub(crate) fn build_merged_text(session: &DocumentSession) -> String {
 
     merged
 }
+
+pub(crate) fn build_merged_regions(session: &DocumentSession) -> Vec<TextRegion> {
+    build_merged_regions_with_overrides(session, &HashMap::new())
+}
+
+pub(crate) fn build_merged_regions_with_overrides(
+    session: &DocumentSession,
+    overrides: &HashMap<usize, String>,
+) -> Vec<TextRegion> {
+    let mut regions: Vec<TextRegion> = Vec::new();
+    let mut force_new_region = false;
+
+    for chunk in session.chunks.iter() {
+        let body = merged_chunk_body(session, chunk, overrides);
+
+        append_merged_region_piece(
+            &mut regions,
+            &body,
+            RegionAppendOptions {
+                skip_rewrite: chunk.skip_rewrite,
+                presentation: chunk.presentation.clone(),
+                force_new_region,
+                preserve_empty: true,
+            },
+        );
+        append_chunk_separator_regions(
+            &mut regions,
+            &chunk.separator_after,
+            chunk.skip_rewrite,
+            chunk.presentation.clone(),
+            force_new_region && body.is_empty(),
+        );
+        force_new_region = chunk.separator_after.contains("\n\n");
+    }
+
+    regions
+}
+
+fn merged_chunk_body(
+    session: &DocumentSession,
+    chunk: &crate::models::ChunkTask,
+    overrides: &HashMap<usize, String>,
+) -> String {
+    if let Some(value) = overrides.get(&chunk.index) {
+        return value.clone();
+    }
+
+    session
+        .suggestions
+        .iter()
+        .filter(|item| {
+            item.chunk_index == chunk.index && item.decision == SuggestionDecision::Applied
+        })
+        .max_by_key(|item| item.sequence)
+        .map(|item| item.after_text.clone())
+        .unwrap_or_else(|| chunk.source_text.clone())
+}
+
+fn append_chunk_separator_regions(
+    regions: &mut Vec<TextRegion>,
+    separator_after: &str,
+    skip_rewrite: bool,
+    presentation: Option<crate::models::ChunkPresentation>,
+    force_new_region: bool,
+) {
+    let (current_piece, extra_empty_paragraphs) = split_separator_for_writeback(separator_after);
+    append_merged_region_piece(
+        regions,
+        &current_piece,
+        RegionAppendOptions {
+            skip_rewrite,
+            presentation,
+            force_new_region,
+            preserve_empty: false,
+        },
+    );
+    for separator in extra_empty_paragraphs {
+        append_merged_region_piece(
+            regions,
+            &separator,
+            RegionAppendOptions {
+                skip_rewrite: false,
+                presentation: None,
+                force_new_region: true,
+                preserve_empty: false,
+            },
+        );
+    }
+}
+
+fn split_separator_for_writeback(separator_after: &str) -> (String, Vec<String>) {
+    let Some(first_block_index) = separator_after.find(DOCX_BLOCK_SEPARATOR) else {
+        return (separator_after.to_string(), Vec::new());
+    };
+    let first_end = first_block_index + DOCX_BLOCK_SEPARATOR.len();
+    let mut current_piece = separator_after[..first_end].to_string();
+    let mut extra_empty_paragraphs = Vec::new();
+    let mut remaining = &separator_after[first_end..];
+
+    while remaining.starts_with(DOCX_BLOCK_SEPARATOR) {
+        extra_empty_paragraphs.push(DOCX_BLOCK_SEPARATOR.to_string());
+        remaining = &remaining[DOCX_BLOCK_SEPARATOR.len()..];
+    }
+
+    if !remaining.is_empty() {
+        if let Some(last) = extra_empty_paragraphs.last_mut() {
+            last.push_str(remaining);
+        } else {
+            current_piece.push_str(remaining);
+        }
+    }
+
+    (current_piece, extra_empty_paragraphs)
+}
+
+#[derive(Clone)]
+struct RegionAppendOptions {
+    skip_rewrite: bool,
+    presentation: Option<crate::models::ChunkPresentation>,
+    force_new_region: bool,
+    preserve_empty: bool,
+}
+
+fn append_merged_region_piece(
+    regions: &mut Vec<TextRegion>,
+    text: &str,
+    options: RegionAppendOptions,
+) {
+    if let Some(last) = matching_last_region(regions, &options) {
+        last.body.push_str(text);
+        return;
+    }
+    if text.is_empty() && !options.preserve_empty {
+        return;
+    }
+
+    regions.push(TextRegion {
+        body: text.to_string(),
+        skip_rewrite: options.skip_rewrite,
+        presentation: options.presentation,
+    });
+}
+
+fn matching_last_region<'a>(
+    regions: &'a mut [TextRegion],
+    options: &RegionAppendOptions,
+) -> Option<&'a mut TextRegion> {
+    if options.force_new_region {
+        return None;
+    }
+    let last = regions.last_mut()?;
+    if last.skip_rewrite == options.skip_rewrite
+        && last.presentation.as_ref() == options.presentation.as_ref()
+    {
+        return Some(last);
+    }
+    None
+}
+
+#[cfg(test)]
+#[path = "rewrite_jobs_tests.rs"]
+mod tests;

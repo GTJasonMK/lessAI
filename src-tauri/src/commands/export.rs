@@ -3,9 +3,15 @@ use std::{fs, path::PathBuf};
 use tauri::{AppHandle, State};
 
 use crate::{
-    documents::ensure_document_can_write_back,
+    adapters::docx::DocxAdapter,
+    atomic_write::write_bytes_atomically,
+    documents::{
+        ensure_document_can_write_back, is_docx_path, load_verified_writeback_bytes,
+        write_document_content,
+    },
     models::RunningState,
     rewrite, rewrite_jobs,
+    session_repair::{repair_session_snapshot_if_needed, SnapshotRepairOutcome},
     state::{with_session_lock, AppState},
     storage,
 };
@@ -32,7 +38,7 @@ pub fn export_document(
         fs::create_dir_all(parent).map_err(|error| error.to_string())?;
     }
 
-    fs::write(&path_buf, content).map_err(|error| error.to_string())?;
+    write_bytes_atomically(&path_buf, content.as_bytes())?;
     Ok(path)
 }
 
@@ -54,29 +60,49 @@ pub fn finalize_document(
     }
 
     with_session_lock(state.inner(), &session_id, || {
-        let session = storage::load_session(&app, &session_id)?;
+        let mut session = storage::load_session(&app, &session_id)?;
+        if repair_session_snapshot_if_needed(&app, &mut session)? != SnapshotRepairOutcome::None {
+            storage::save_session(&app, &session)?;
+        }
 
         if matches!(session.status, RunningState::Running | RunningState::Paused) {
             return Err("当前文档正在执行自动任务，请先暂停并取消后再写回原文件。".to_string());
         }
 
         ensure_document_can_write_back(&session.document_path)?;
-
-        let line_ending = rewrite::detect_line_ending(&session.source_text);
-        let mut content = rewrite_jobs::build_merged_text(&session);
-        if !rewrite::has_trailing_spaces_per_line(&session.source_text) {
-            content = rewrite::strip_trailing_spaces_per_line(&content);
+        if !session.write_back_supported {
+            return Err(session
+                .write_back_block_reason
+                .clone()
+                .unwrap_or_else(|| "当前文档暂不支持安全写回覆盖。".to_string()));
         }
-        content = rewrite::convert_line_endings(&content, line_ending);
+
         let target = PathBuf::from(&session.document_path);
-
-        // 保险起见：确保父目录存在（大多数情况下本来就存在）。
-        if let Some(parent) = target.parent() {
-            fs::create_dir_all(parent).map_err(|error| error.to_string())?;
+        let mut content = rewrite_jobs::build_merged_text(&session);
+        if is_docx_path(&target) {
+            let bytes = load_verified_writeback_bytes(
+                &target,
+                &session.source_text,
+                session.source_snapshot.as_ref(),
+            )?;
+            let updated_regions = rewrite_jobs::build_merged_regions(&session);
+            let updated =
+                DocxAdapter::write_updated_regions(&bytes, &session.source_text, &updated_regions)?;
+            write_bytes_atomically(&target, &updated)?;
+        } else {
+            let line_ending = rewrite::detect_line_ending(&session.source_text);
+            if !rewrite::has_trailing_spaces_per_line(&session.source_text) {
+                content = rewrite::strip_trailing_spaces_per_line(&content);
+            }
+            content = rewrite::convert_line_endings(&content, line_ending);
+            // 覆盖写回原文件：只写入“已应用”的修改，未应用的候选不会进入文件。
+            write_document_content(
+                &target,
+                &session.source_text,
+                session.source_snapshot.as_ref(),
+                &content,
+            )?;
         }
-
-        // 覆盖写回原文件：只写入“已应用”的修改，未应用的候选不会进入文件。
-        fs::write(&target, content).map_err(|error| error.to_string())?;
 
         // 写回成功后再清理记录，避免“写失败但记录被删”的风险。
         storage::delete_session(&app, &session_id)?;

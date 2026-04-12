@@ -310,8 +310,8 @@
   border-radius: 8px;
   -webkit-box-decoration-break: clone;
   box-decoration-break: clone;
-  background: rgba(239, 193, 34, 0.18);
-  box-shadow: inset 0 0 0 1px rgba(239, 193, 34, 0.52);
+  background: rgba(236, 227, 211, 0.78);
+  box-shadow: inset 0 0 0 1px rgba(20, 20, 20, 0.18);
 }
 
 .document-flow-wrap {
@@ -372,11 +372,6 @@
   box-shadow: inset 0 0 0 1px rgba(20, 20, 20, 0.18);
 }
 
-.legend-chip.is-inline-protected {
-  background: rgba(239, 193, 34, 0.18);
-  box-shadow: inset 0 0 0 1px rgba(239, 193, 34, 0.52);
-}
-
 .legend-chip.is-running {
   background: rgba(134, 93, 255, 0.12);
   box-shadow: inset 0 0 0 1px rgba(134, 93, 255, 0.32);
@@ -413,7 +408,42 @@
   box-shadow: inset 0 0 0 1px rgba(23, 68, 207, 0.12);
 }
 
+.doc-paragraph-chunk {
+  display: inline;
+  padding: 3px 6px;
+}
+
+.doc-paragraph-fragment {
+  cursor: pointer;
+  border-radius: 6px;
+  padding: 0 1px;
+  -webkit-box-decoration-break: slice;
+  box-decoration-break: slice;
+}
+
+.doc-paragraph-fragment.is-fragment-protected {
+  background: rgba(236, 227, 211, 0.86);
+  box-shadow: inset 0 0 0 1px rgba(20, 20, 20, 0.16);
+}
+
+.doc-paragraph-fragment.is-fragment-active {
+  box-shadow: inset 0 -2px 0 rgba(23, 68, 207, 0.3);
+}
+
+.doc-paragraph-fragment.is-fragment-running {
+  background: rgba(134, 93, 255, 0.12);
+}
+
+.doc-paragraph-fragment.is-fragment-failed {
+  background: rgba(214, 45, 32, 0.1);
+}
+
 .document-flow-wrap.is-quiet .doc-chunk {
+  background: transparent;
+  box-shadow: none;
+}
+
+.document-flow-wrap.is-quiet .doc-paragraph-fragment:not(.is-fragment-protected) {
   background: transparent;
   box-shadow: none;
 }
@@ -642,6 +672,52 @@
   flex-wrap: wrap;
   color: var(--muted);
   font-size: 0.86rem;
+}
+
+.docx-editor-flow {
+  min-height: 100%;
+  white-space: pre-wrap;
+  line-height: 1.92;
+}
+
+.docx-editor-chunk {
+  display: inline;
+  border-radius: 10px;
+  outline: none;
+}
+
+.docx-editor-chunk.is-editable {
+  padding: 0.05em 0.12em;
+  background: rgba(23, 68, 207, 0.06);
+}
+
+.docx-editor-chunk.is-editable:focus {
+  background: rgba(23, 68, 207, 0.12);
+  box-shadow: inset 0 0 0 1px rgba(23, 68, 207, 0.32);
+}
+
+.docx-editor-chunk.is-locked {
+  padding: 0.05em 0.16em;
+  background: rgba(20, 20, 20, 0.08);
+  color: var(--muted);
+}
+
+.docx-editor-chunk.is-bold {
+  font-weight: 700;
+}
+
+.docx-editor-chunk.is-italic {
+  font-style: italic;
+}
+
+.docx-editor-chunk.is-underline,
+.docx-editor-chunk.is-link {
+  text-decoration: underline;
+  text-decoration-thickness: 1.5px;
+}
+
+.docx-editor-chunk.is-link {
+  color: rgb(23, 68, 207);
 }
 
 .paper-content {

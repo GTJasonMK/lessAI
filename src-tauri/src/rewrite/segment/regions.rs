@@ -1,58 +1,59 @@
 use crate::adapters::TextRegion;
-use crate::models::ChunkPreset;
+use crate::documents::RegionSegmentationStrategy;
+use crate::models::{ChunkPreset, DocumentFormat};
 
+use super::guards::{NoopBoundaryGuard, TexBraceBoundaryGuard};
+use super::postprocess::merge_left_binding_punctuation_chunks;
+use super::stream::{segment_region_stream, SegmentRegion};
 use super::SegmentedChunk;
 
-pub fn segment_regions(regions: Vec<TextRegion>, preset: ChunkPreset) -> Vec<SegmentedChunk> {
-    let original = regions
-        .iter()
-        .map(|region| region.body.as_str())
-        .collect::<String>();
-
-    let mut chunks: Vec<SegmentedChunk> = Vec::new();
-    for region in regions.into_iter() {
-        if region.body.is_empty() {
-            continue;
-        }
-
-        if region.skip_rewrite {
-            append_raw_chunk(&mut chunks, &region.body, true);
-            continue;
-        }
-
-        let mut pieces = super::plain::segment_plain_text(&region.body, preset);
-        if !chunks.is_empty() && !pieces.is_empty() && pieces[0].text.is_empty() {
-            let leading = pieces.remove(0).separator_after;
-            if !leading.is_empty() {
-                if let Some(last) = chunks.last_mut() {
-                    last.separator_after.push_str(&leading);
-                }
-            }
-        }
-        chunks.extend(pieces);
-    }
-
-    if chunks.is_empty() {
-        vec![SegmentedChunk {
-            text: original,
-            separator_after: String::new(),
-            skip_rewrite: false,
-        }]
-    } else {
-        chunks
-    }
+fn segment_preserved_regions(regions: Vec<TextRegion>, preset: ChunkPreset) -> Vec<SegmentedChunk> {
+    let stream = regions
+        .into_iter()
+        .filter(|region| !region.body.is_empty())
+        .map(|region| {
+            SegmentRegion::isolated(region.body, region.skip_rewrite, region.presentation)
+        })
+        .collect::<Vec<_>>();
+    segment_region_stream::<NoopBoundaryGuard>(stream, preset)
 }
 
-fn append_raw_chunk(chunks: &mut Vec<SegmentedChunk>, text: &str, skip_rewrite: bool) {
-    let (body, trailing_ws) = super::split_trailing_whitespace(text);
-    if body.is_empty() {
-        super::append_separator_to_last(chunks, trailing_ws);
-        return;
-    }
+pub fn segment_regions_with_strategy(
+    regions: Vec<TextRegion>,
+    preset: ChunkPreset,
+    format: DocumentFormat,
+    strategy: RegionSegmentationStrategy,
+) -> Vec<SegmentedChunk> {
+    let chunks = match strategy {
+        RegionSegmentationStrategy::PreserveBoundaries => {
+            segment_preserved_regions(regions, preset)
+        }
+        RegionSegmentationStrategy::FormatAware => segment_text_regions(regions, preset, format),
+    };
+    merge_left_binding_punctuation_chunks(chunks)
+}
 
-    chunks.push(SegmentedChunk {
-        text: body,
-        separator_after: trailing_ws,
-        skip_rewrite,
-    });
+fn segment_text_regions(
+    regions: Vec<TextRegion>,
+    preset: ChunkPreset,
+    format: DocumentFormat,
+) -> Vec<SegmentedChunk> {
+    let stream = match format {
+        DocumentFormat::PlainText => regions
+            .into_iter()
+            .filter(|region| !region.body.is_empty())
+            .map(|region| {
+                SegmentRegion::flow(region.body, region.skip_rewrite, region.presentation)
+            })
+            .collect::<Vec<_>>(),
+        DocumentFormat::Markdown => super::markdown::build_markdown_stream(regions),
+        DocumentFormat::Tex => super::tex::build_tex_stream(regions),
+    };
+
+    match format {
+        DocumentFormat::Tex => segment_region_stream::<TexBraceBoundaryGuard>(stream, preset),
+        DocumentFormat::PlainText | DocumentFormat::Markdown => {
+            segment_region_stream::<NoopBoundaryGuard>(stream, preset)
+        }
+    }
 }

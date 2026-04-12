@@ -13,9 +13,11 @@ import type {
   RewriteProgress
 } from "../../lib/types";
 import {
+  canRewriteSession,
   countCharacters,
   getLatestSuggestion,
   readableError,
+  rewriteBlockedReason,
   selectDefaultChunkIndex
 } from "../../lib/helpers";
 import {
@@ -175,6 +177,14 @@ export function useRewriteActions(options: {
         showNotice("warning", "请先打开一个文档。");
         return;
       }
+      if (!canRewriteSession(session)) {
+        showNotice(
+          "warning",
+          rewriteBlockedReason(session) ??
+            "当前文档暂不支持安全写回覆盖，因此不允许继续 AI 改写。"
+        );
+        return;
+      }
 
       const targetChunkIndices = hasSelectedChunks(selectedChunkIndicesRef.current)
         ? selectedChunkIndicesRef.current
@@ -311,6 +321,14 @@ export function useRewriteActions(options: {
     const session = currentSessionRef.current;
     const chunk = session?.chunks[activeChunkIndexRef.current];
     if (!session || !chunk) return;
+    if (!canRewriteSession(session)) {
+      showNotice(
+        "warning",
+        rewriteBlockedReason(session) ??
+          "当前文档暂不支持安全写回覆盖，因此不允许继续 AI 改写。"
+      );
+      return;
+    }
     try {
       const updated = await withBusy("retry-chunk", () => retryChunk(session.id, chunk.index));
       const suggestion = getLatestSuggestion(updated);

@@ -2,7 +2,16 @@ use std::{fs, path::Path};
 
 use uuid::Uuid;
 
-use crate::{adapters, models};
+use crate::{
+    adapters, atomic_write::write_bytes_atomically,
+    document_snapshot::ensure_document_snapshot_matches, models,
+};
+
+const PDF_WRITE_BACK_UNSUPPORTED: &str = "当前文件为 .pdf：暂不支持写回覆盖（PDF 不是纯文本格式）。请使用“导出”为 .txt 后再进行后续排版。";
+const WRITEBACK_SOURCE_MISMATCH_ERROR: &str =
+    "原文件内容与当前会话不一致，文件可能已在外部发生变化。为避免误写，请重新导入。";
+const DOCX_WRITEBACK_SOURCE_MISMATCH_ERROR: &str =
+    "docx 原文件内容与当前会话不一致，文件可能已在外部发生变化。为避免误写，请重新导入。";
 
 pub(crate) fn document_session_id(document_path: &str) -> String {
     // 用 UUID v5 将“文档路径”稳定映射为 session id：
@@ -43,9 +52,62 @@ pub(crate) fn document_format(path: &Path) -> models::DocumentFormat {
     }
 }
 
+pub(crate) fn is_docx_path(path: &Path) -> bool {
+    path_extension_lower(path).as_deref() == Some("docx")
+}
+
+pub(crate) fn is_pdf_path(path: &Path) -> bool {
+    path_extension_lower(path).as_deref() == Some("pdf")
+}
+
 pub(crate) struct LoadedDocumentSource {
     pub(crate) source_text: String,
-    pub(crate) regions: Option<Vec<adapters::TextRegion>>,
+    pub(crate) regions: Vec<adapters::TextRegion>,
+    pub(crate) region_segmentation_strategy: RegionSegmentationStrategy,
+    pub(crate) write_back_supported: bool,
+    pub(crate) write_back_block_reason: Option<String>,
+    pub(crate) plain_text_editor_safe: bool,
+    pub(crate) plain_text_editor_block_reason: Option<String>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum RegionSegmentationStrategy {
+    FormatAware,
+    PreserveBoundaries,
+}
+
+fn plain_text_regions(text: &str) -> Vec<adapters::TextRegion> {
+    vec![adapters::TextRegion {
+        body: text.to_string(),
+        skip_rewrite: false,
+        presentation: None,
+    }]
+}
+
+pub(crate) fn detect_document_capabilities(
+    path: &Path,
+) -> Result<(bool, Option<String>, bool, Option<String>), String> {
+    if is_pdf_path(path) {
+        return Ok((
+            false,
+            Some(PDF_WRITE_BACK_UNSUPPORTED.to_string()),
+            false,
+            Some(PDF_WRITE_BACK_UNSUPPORTED.to_string()),
+        ));
+    }
+    if !is_docx_path(path) {
+        return Ok((true, None, true, None));
+    }
+
+    let bytes = fs::read(path).map_err(|error| error.to_string())?;
+    let write_back_block_reason = adapters::docx::DocxAdapter::validate_writeback(&bytes).err();
+    let plain_text_editor_block_reason = write_back_block_reason.clone();
+    Ok((
+        write_back_block_reason.is_none(),
+        write_back_block_reason,
+        plain_text_editor_block_reason.is_none(),
+        plain_text_editor_block_reason,
+    ))
 }
 
 fn decode_utf16_payload(payload: &[u8], little_endian: bool) -> Result<String, String> {
@@ -116,9 +178,17 @@ pub(crate) fn load_document_source(
                         .to_string(),
                 );
             }
+            let write_back_block_reason =
+                adapters::docx::DocxAdapter::validate_writeback(&bytes).err();
+            let plain_text_editor_block_reason = write_back_block_reason.clone();
             Ok(LoadedDocumentSource {
                 source_text,
-                regions: Some(regions),
+                regions,
+                region_segmentation_strategy: RegionSegmentationStrategy::PreserveBoundaries,
+                write_back_supported: write_back_block_reason.is_none(),
+                write_back_block_reason,
+                plain_text_editor_safe: plain_text_editor_block_reason.is_none(),
+                plain_text_editor_block_reason,
             })
         }
         Some("doc") => {
@@ -128,8 +198,13 @@ pub(crate) fn load_document_source(
             let bytes = fs::read(path).map_err(|error| error.to_string())?;
             let source_text = adapters::pdf::PdfAdapter::extract_text(&bytes)?;
             Ok(LoadedDocumentSource {
+                regions: plain_text_regions(&source_text),
                 source_text,
-                regions: None,
+                region_segmentation_strategy: RegionSegmentationStrategy::FormatAware,
+                write_back_supported: false,
+                write_back_block_reason: Some(PDF_WRITE_BACK_UNSUPPORTED.to_string()),
+                plain_text_editor_safe: false,
+                plain_text_editor_block_reason: Some(PDF_WRITE_BACK_UNSUPPORTED.to_string()),
             })
         }
         Some(other) => {
@@ -141,64 +216,174 @@ pub(crate) fn load_document_source(
             }
             let bytes = fs::read(path).map_err(|error| error.to_string())?;
             let source_text = decode_text_file(&bytes)?;
+            let regions = match other {
+                "md" | "markdown" => adapters::markdown::MarkdownAdapter::split_regions(
+                    &source_text,
+                    rewrite_headings,
+                ),
+                "tex" | "latex" => {
+                    adapters::tex::TexAdapter::split_regions(&source_text, rewrite_headings)
+                }
+                _ => plain_text_regions(&source_text),
+            };
             Ok(LoadedDocumentSource {
                 source_text,
-                regions: None,
+                regions,
+                region_segmentation_strategy: RegionSegmentationStrategy::FormatAware,
+                write_back_supported: true,
+                write_back_block_reason: None,
+                plain_text_editor_safe: true,
+                plain_text_editor_block_reason: None,
             })
         }
         None => {
             let bytes = fs::read(path).map_err(|error| error.to_string())?;
             let source_text = decode_text_file(&bytes)?;
+            let regions = plain_text_regions(&source_text);
             Ok(LoadedDocumentSource {
                 source_text,
-                regions: None,
+                regions,
+                region_segmentation_strategy: RegionSegmentationStrategy::FormatAware,
+                write_back_supported: true,
+                write_back_block_reason: None,
+                plain_text_editor_safe: true,
+                plain_text_editor_block_reason: None,
             })
         }
     }
 }
 
 pub(crate) fn ensure_document_can_write_back(path: &str) -> Result<(), String> {
-    let ext = path_extension_lower(Path::new(path)).unwrap_or_default();
-    if ext == "docx" {
-        return Err(
-            "当前文件为 .docx：暂不支持写回覆盖（会破坏文件结构）。请使用“导出”为 .txt/.md 或另存为纯文本后再写回。"
-                .to_string(),
-        );
+    if is_pdf_path(Path::new(path)) {
+        return Err(PDF_WRITE_BACK_UNSUPPORTED.to_string());
     }
-    if ext == "pdf" {
-        return Err("当前文件为 .pdf：暂不支持写回覆盖（PDF 不是纯文本格式）。请使用“导出”为 .txt 后再进行后续排版。".to_string());
+    Ok(())
+}
+
+pub(crate) fn ensure_document_can_ai_rewrite(
+    path: &Path,
+    write_back_supported: bool,
+    write_back_block_reason: Option<&str>,
+) -> Result<(), String> {
+    if is_pdf_path(path) {
+        return Ok(());
+    }
+    if write_back_supported {
+        return Ok(());
+    }
+    Err(write_back_block_reason
+        .unwrap_or("当前文档暂不支持安全写回覆盖，因此不允许继续 AI 改写。")
+        .to_string())
+}
+
+pub(crate) fn ensure_document_source_matches_session(
+    path: &Path,
+    expected_source_text: &str,
+    expected_source_snapshot: Option<&models::DocumentSnapshot>,
+) -> Result<(), String> {
+    if is_pdf_path(path) {
+        return Ok(());
+    }
+    load_verified_writeback_bytes(path, expected_source_text, expected_source_snapshot).map(|_| ())
+}
+
+pub(crate) fn ensure_document_can_ai_rewrite_safely(
+    path: &Path,
+    expected_source_text: &str,
+    expected_source_snapshot: Option<&models::DocumentSnapshot>,
+    write_back_supported: bool,
+    write_back_block_reason: Option<&str>,
+) -> Result<(), String> {
+    ensure_document_can_ai_rewrite(path, write_back_supported, write_back_block_reason)?;
+    ensure_document_source_matches_session(path, expected_source_text, expected_source_snapshot)
+}
+
+pub(crate) fn write_document_content(
+    path: &Path,
+    expected_source_text: &str,
+    expected_source_snapshot: Option<&models::DocumentSnapshot>,
+    updated_text: &str,
+) -> Result<(), String> {
+    if let Some(parent) = path.parent() {
+        fs::create_dir_all(parent).map_err(|error| error.to_string())?;
+    }
+
+    let current_bytes =
+        load_verified_writeback_bytes(path, expected_source_text, expected_source_snapshot)?;
+
+    if is_docx_path(path) {
+        let updated = adapters::docx::DocxAdapter::write_updated_text(
+            &current_bytes,
+            expected_source_text,
+            updated_text,
+        )?;
+        write_bytes_atomically(path, &updated)?;
+        return Ok(());
+    }
+
+    write_bytes_atomically(path, updated_text.as_bytes())
+}
+
+pub(crate) fn write_document_regions(
+    path: &Path,
+    expected_source_text: &str,
+    expected_source_snapshot: Option<&models::DocumentSnapshot>,
+    updated_regions: &[adapters::TextRegion],
+) -> Result<(), String> {
+    if let Some(parent) = path.parent() {
+        fs::create_dir_all(parent).map_err(|error| error.to_string())?;
+    }
+    let current_bytes =
+        load_verified_writeback_bytes(path, expected_source_text, expected_source_snapshot)?;
+    if !is_docx_path(path) {
+        return Err("当前仅 docx 支持按片段写回。".to_string());
+    }
+
+    let updated = adapters::docx::DocxAdapter::write_updated_regions(
+        &current_bytes,
+        expected_source_text,
+        updated_regions,
+    )?;
+    write_bytes_atomically(path, &updated)
+}
+
+pub(crate) fn load_verified_writeback_bytes(
+    path: &Path,
+    expected_source_text: &str,
+    expected_source_snapshot: Option<&models::DocumentSnapshot>,
+) -> Result<Vec<u8>, String> {
+    if expected_source_snapshot.is_some() {
+        return ensure_document_snapshot_matches(path, expected_source_snapshot);
+    }
+
+    let bytes = fs::read(path).map_err(|error| error.to_string())?;
+    verify_writeback_source_matches(path, &bytes, expected_source_text)?;
+    Ok(bytes)
+}
+
+fn verify_writeback_source_matches(
+    path: &Path,
+    bytes: &[u8],
+    expected_source_text: &str,
+) -> Result<(), String> {
+    if is_docx_path(path) {
+        let current = adapters::docx::DocxAdapter::extract_writeback_source_text(bytes)?;
+        if current != expected_source_text {
+            return Err(DOCX_WRITEBACK_SOURCE_MISMATCH_ERROR.to_string());
+        }
+        return Ok(());
+    }
+
+    let current = decode_text_file(bytes)?;
+    if current != expected_source_text {
+        return Err(WRITEBACK_SOURCE_MISMATCH_ERROR.to_string());
     }
     Ok(())
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn decode_utf8_bom_text_file() {
-        let bytes = [0xEF, 0xBB, 0xBF, b'a', b'b', b'c'];
-        assert_eq!(decode_text_file(&bytes).unwrap(), "abc");
-    }
-
-    #[test]
-    fn decode_utf16_le_bom_text_file() {
-        // "A\n" in UTF-16LE with BOM
-        let bytes = [0xFF, 0xFE, b'A', 0x00, b'\n', 0x00];
-        assert_eq!(decode_text_file(&bytes).unwrap(), "A\n");
-    }
-
-    #[test]
-    fn decode_utf16_be_bom_text_file() {
-        // "A\n" in UTF-16BE with BOM
-        let bytes = [0xFE, 0xFF, 0x00, b'A', 0x00, b'\n'];
-        assert_eq!(decode_text_file(&bytes).unwrap(), "A\n");
-    }
-
-    #[test]
-    fn decode_invalid_text_file_returns_error() {
-        // Invalid UTF-8 and no BOM
-        let bytes = [0xFF, 0xFF, 0xFF];
-        assert!(decode_text_file(&bytes).is_err());
-    }
-}
+#[path = "documents_tests.rs"]
+mod tests;
+#[cfg(test)]
+#[path = "documents_writeback_tests.rs"]
+mod writeback_tests;

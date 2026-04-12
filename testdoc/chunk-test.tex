@@ -1,6 +1,6 @@
-% LessAI 分块测试（TeX）
-% 生成时间：2026-03-26
-% 目的：尽量覆盖常见论文/作业结构，并观察 chunk 在“段落/整句/小句”预设下的表现。
+% LessAI 综合测试（TeX）
+% 生成时间：2026-04-09
+% 目标：覆盖标题、列表、链接、强调、代码、数学、表格、参考文献和写回敏感区。
 
 \documentclass[a4paper,11pt]{article}
 \usepackage{ctex}
@@ -19,189 +19,148 @@
   frame=single
 }
 
-\title{LessAI 分块测试（TeX）}
+\title{LessAI 综合测试（TeX）}
 \author{示例作者}
-\date{2026-03-26}
+\date{2026-04-09}
 
 \begin{document}
 \maketitle
-
-\begin{abstract}
-这是一份用于 \textbf{LessAI 分块/审阅} 的 TeX 测试文档。
-它的目标不是展示排版技巧，而是覆盖常见论文/作业输入，并验证以下几点：
-(1) 段落级 chunk 是否以 \textbf{空行或 \texttt{\textbackslash par}} 为边界；
-(2) 整句/小句是否只在段落内部改变边界；
-(3) 数学、代码、表格、环境等保护区是否能 \textbf{在同一个 chunk 内高亮显示}，而不是把 chunk 高亮切断。
-\end{abstract}
-
 \tableofcontents
 
-\section{阅读说明（标题默认应受保护）}
+\section{文档说明与测试目标}
 
-这一份文档的目标不是“让 TeX 可读”，而是让工作台能用它来测试分块与审阅。
-你可以依次切换预设：空白分段（段落）、整句、小句；每次切换后建议点一次“重置记录”。
+这份文档用于验证 TeX 源码在导入后是否还能保持可读结构、稳定分块和安全写回。
+建议分别切换段落、整句、小句三种粒度，并观察自然语言区域和命令保护区的边界是否清晰。
 
-注意：在 TeX 源码中，\textbf{单个换行}通常只代表段内空格，而\textbf{空行（或 \texttt{\textbackslash par}）}才代表段落边界。
-因此段落级分块应该更贴近渲染后的 PDF 段落语义，而不是逐行切碎。
+TeX 的关键点在于：命令、环境、数学、代码和注释不能被误改；正文中的自然语言又不能被这些结构切得支离破碎。
 
-\section{段落边界：空行与 \texttt{\textbackslash par}}
+\section{标题层级与普通段落}
 
-第一段：这段故意在源码里换行，
-但在渲染后的 PDF 里仍应属于同一段（单换行视为段内空格）。
-数值 3.14、版本号 v1.2.3 不应触发“句号误切”。
+\subsection{小标题示例}
 
-第二段：这一段与上一段之间有一个空行，因此在段落预设下应该切成两个 chunk。
-这段包含引号“引用内容”、括号（例如：A、B、C）、以及书名号《多元统计分析》。
+这一段是普通正文。它包含中文句号、问号和感叹号，也包含小数 3.14、日期 2026-04-09、版本号 v2.3.7。整句模式下，句末应成为主要边界；段落模式下，这一整段应保持连续。
 
+下一段继续模拟报告正文：先描述背景，再给出判断，最后补一句限制条件。这里的目标不是考验排版，而是观察长句在不同粒度下是否仍然可读。
+
+\section{标点边界与数字边界}
+
+这一段包含中英混排：Dr.\ Wang 在 U.S.A.\ 完成实验后，于 2025-12-31 提交了 draft v1.0.2。若整句模式对缩写处理不够理想，可以记录问题，但段落级阅读不应被破坏。
+
+还要观察括号、引号和书名号的连续性：例如“引用内容”、（局部说明）、《示例报告》。这些成对符号不应被错误吞掉。
+
+\section{列表与段内换行}
+
+下面先给一个显式段落，再用 \texttt{\textbackslash par} 制造真正的段落边界。
 \par
-
-第三段：这里用显式 \texttt{\textbackslash par} 分段。
-如果你在编辑器里只插入一个空行，diff 的最小单元也应当稳定。
-
-\section{行内保护区：数学、命令、链接}
-
-本段包含行内数学 $E=mc^2$，以及更复杂的表达 $\alpha+\beta\to\gamma$。
-还包含一段命令 token：\texttt{cargo fmt --check}，以及路径 \texttt{E:\\Code\\LessAI\\testdoc}。
-
-这段还包含一个链接：\href{https://example.com/docs}{https://example.com/docs}。
-理想情况是：这些结构被标成保护区（不可改写），但 chunk 高亮仍保持连续可读。
-
-\section{行间数学：应在同一段落内保持连续}
-
-第四段：本段先给一句话，然后紧跟一个行间公式（这是典型的“保护区在块内”的场景）：
-\[
-  \hat{\mu} = \frac{1}{n}\sum_{i=1}^{n} x_i,\qquad
-  \hat{\Sigma} = \frac{1}{n-1}\sum_{i=1}^{n} (x_i-\hat{\mu})(x_i-\hat{\mu})^\top.
-\]
-公式后面还有一句话：按渲染直觉，它仍然属于同一段落，而不是被公式切断成两块。
-
-第五段：这里再给一个数学环境（equation），用来测试环境块的保护与合并策略。
-\begin{equation}
-  \label{eq:test}
-  p = 2\left[1-\Phi(2.6980)\right].
-\end{equation}
-公式后继续一句话：引用式子 \eqref{eq:test} 只是示例（不要求真的有 \texttt{\textbackslash Phi} 的定义）。
-
-\section{列表：段落、整句、小句的层级关系}
-
-第六段：下面是一个 enumerate 列表。段落级分块不应因为 \texttt{\textbackslash item} 而强行切碎；
-但整句/小句模式可以在列表项正文内部切分。
+这一段用于验证：段落级分块应更接近渲染后的段落，而不是逐行切碎。
 
 \begin{enumerate}
-  \item 列表项 1：这一项包含两个整句。第一句结束。第二句继续，用于测试整句边界。
-
-  \item 列表项 2：这一项包含逗号、分号；用于测试小句边界：例如，我们希望在“，”“；”“：”附近切开，但不要改坏骨架。
-
-  \item 列表项 3：这一项包含一个“换行命令”的可选参数：\\[0.5em]
-  它不应被误识别为数学块的起始（避免把 \\[1em] 当作 \[...\]）。
+  \item 列表项 1：包含两个整句。第一句结束。第二句继续，用于观察整句边界。
+  \item 列表项 2：包含逗号、分号；用于观察小句边界：例如，我们希望在“，”“；”“：”附近切开，但不要改坏骨架。
+  \item 列表项 3：包含一个换行命令：\\[0.5em]
+  它不应被误识别为数学块的开始。
 \end{enumerate}
 
-\section{表格与代码环境：典型保护区（不要被模型改坏）}
+\begin{itemize}
+  \item 项目 A：包含路径 \texttt{E:\textbackslash Code\textbackslash LessAI\textbackslash testdoc}。
+  \item 项目 B：包含命令 token \texttt{cargo fmt --check}。
+  \item 项目 C：包含一个链接 \href{https://example.com/list}{https://example.com/list}。
+\end{itemize}
 
-第七段：下面是一个 tabular（通常属于保护区或应强锁定）。
+\section{链接与可读正文}
+
+这一段集中放常见链接命令：\href{https://example.com/docs}{官方说明页}、\url{https://example.com/url-only}、\path|E:/Code/LessAI/src-tauri|。这些结构应该被锁定，但不应打断上下文阅读。
+
+如果你只改动这段里的自然语言，例如把“集中放”改成“专门放”，理想效果是链接命令仍保持原样，局部 diff 也只发生在正文区域。
+
+\section{行内强调与常见样式}
+
+这里放常见文本命令：\textbf{加粗内容}、\emph{强调内容}、\underline{下划线内容}、\textit{斜体内容}、\texttt{monospace}，以及脚注\footnote{脚注正文通常也是文章的一部分，但命令骨架不应被改坏。}。
+
+这些命令的语法骨架需要保留，命令包裹的自然语言应尽量维持正常阅读和稳定分块。
+
+\section{代码、命令与原样内容}
+
+本节先测试行内原样命令：\verb|pnpm run tauri:dev|、\lstinline|cargo test docx -- --nocapture|。
+
+\begin{lstlisting}
+pnpm install
+pnpm run tauri:dev
+cargo test
+echo "a%b"
+\end{lstlisting}
+
+\begin{verbatim}
+if score >= 90:
+    level = "A"
+else:
+    level = "B"
+\end{verbatim}
+
+代码环境应整体保护，环境前后的正文则应恢复正常分块。
+
+\section{数学与公式相关内容}
+
+这一段包含行内公式 $E=mc^2$、$\alpha+\beta\to\gamma$，以及另一种写法 \(\bar{x}=\frac{1}{n}\sum_{i=1}^{n}x_i\)。这些公式不应被正文改写破坏。
+
+\[
+  \hat{\mu} = \frac{1}{n}\sum_{i=1}^{n} x_i,\qquad
+  \hat{\Sigma} = \frac{1}{n-1}\sum_{i=1}^{n}(x_i-\hat{\mu})(x_i-\hat{\mu})^\top
+\]
+
+\begin{equation}
+  p = 2\left[1-\Phi(2.6980)\right]
+\end{equation}
+
+\begin{align}
+  \bar{x} &= \frac{1}{n}\sum_{i=1}^{n} x_i, \\
+  s^2 &= \frac{1}{n-1}\sum_{i=1}^{n}(x_i-\bar{x})^2
+\end{align}
+
+公式前后的自然语言仍应能连续阅读，而不是被切成毫无关联的小碎块。
+
+\section{表格与非正文结构}
+
+下面是一个 \texttt{tabular}，它通常应作为结构性强的保护区保留原样：
 \begin{center}
 \begin{tabular}{l|c|c}
 项目 & 期望行为 & 备注 \\
 \hline
-空白分段 & 只在空行/\texttt{\textbackslash par} 分段 & 段落最自然 \\
-整句 & 在 。！？； 等处切分 & 适合长段落 \\
-小句 & 在 ，；： 等处更积极切分 & 审阅更细 \\
+标题 & 保留命令骨架 & 不要误删反斜杠 \\
+链接 & 保留目标与显示文本 & 不要改坏 URL \\
+数学 & 保留公式边界 & 前后正文可读 \\
 \end{tabular}
 \end{center}
-
-第八段：下面是 lstlisting（多行强约束，必须整体保护）。
-\begin{lstlisting}
-# shell / pseudo code
-cargo fmt --check
-cargo test
-
-# percent sign inside code should not be treated as TeX comment here
-echo "a%b"
-\end{lstlisting}
-
-第九段：下面是 verbatim（同样必须整体保护）。
-\begin{verbatim}
-for i in range(3):
-    print(i)
-# The next line contains a percent sign: 100%
-\end{verbatim}
-
-\section{注释行：不应把同一段切碎}
-
-第十段：这一段用来测试注释。注释行不应当被当成空行分段证据。
-% 这是一行注释：它不应切断段落，也不应触发新 chunk
-这一句仍应与上一句在同一段落内（除非你在这里插入空行）。
-
-\section{论文常见写法：引用、脚注、强调（不要误切段落）}
-
-第十一段：这一段模拟“论文正文”的常见写法：包含引用（\cite{ref1}）、脚注\footnote{脚注内容通常包含编号与标点，不希望被模型随意改坏。}，
-以及强调 \emph{important} / \textbf{bold} / \texttt{monospace}。
-在段落级预设下，它仍应作为一个 chunk；在整句/小句预设下，只应在句内切分。
-
-第十二段：同一段内的行尾注释测试。TeX 里行尾的 \texttt{\%} 会吞掉换行，这会影响“看起来像空行”的直觉：
-这一句末尾有注释% 这段是注释，不应出现在渲染文本里
-下一行在渲染时仍会紧接在上一句后面（这是一种常见但容易误解的写法）。
-
-\section{更多数学环境：align / cases / matrix（保护区在块内）}
-
-第十三段：这一段包含一个 align 环境（多行数学），它通常应被保护，但应尽量与段落前后的自然语言保持在同一个 chunk 内：
-\begin{align}
-  \bar{x} &= \frac{1}{n}\sum_{i=1}^{n} x_i, \\
-  s^2 &= \frac{1}{n-1}\sum_{i=1}^{n}(x_i-\bar{x})^2.
-\end{align}
-环境结束后继续一句话：如果这里被切成多个段落 chunk，阅读会断裂，这正是你想避免的问题。
-
-第十四段：cases 与矩阵（用于测试括号、逗号、分号等符号的稳定性）：
-\[
-  f(x)=
-  \begin{cases}
-    x^2, & x \ge 0,\\
-    -x, & x < 0.
-  \end{cases}
-  \qquad
-  A=
-  \begin{bmatrix}
-    1 & 0 & 0\\
-    0 & 1 & 0\\
-    0 & 0 & 1
-  \end{bmatrix}.
-\]
-
-\section{更多列表：itemize / description（骨架要稳定）}
-
-第十五段：下面是 itemize（项目符号列表）。段落级分块不应因为列表出现就把每一行都拆成独立 chunk；
-你可以在整句/小句模式下观察列表项内部的边界变化。
-\begin{itemize}
-  \item 项目 1：包含两个整句。第一句结束。第二句继续。
-  \item 项目 2：包含一个行内公式 $a_i=\frac{1}{n}$，以及命令 token \texttt{git status}。
-  \item 项目 3：包含一个链接 \href{https://example.com}{https://example.com}（结构通常应保护）。
-\end{itemize}
-
-第十六段：下面是 description（“术语：解释”结构），它在作业/报告中很常见：
-\begin{description}
-  \item[术语 A] 定义一句话；补充一句话。
-  \item[术语 B] 定义里包含括号（例如：A、B、C）与分号；用于测试小句切分。
-\end{description}
-
-\section{视觉空白命令：不等于段落（不应作为硬分块证据）}
-
-第十七段：下面演示几种常见的“看起来像分段”的写法，但它们不一定等于段落边界。
-例如，\texttt{\textbackslash smallskip}、\texttt{\textbackslash medskip}、\texttt{\textbackslash bigskip} 会插入垂直间距，
-但如果用户没有写空行或 \texttt{\textbackslash par}，你不应盲目把它当作段落边界硬切分。
-
-\smallskip
-这一句在源码中与上一段之间插入了 \texttt{\textbackslash smallskip}，用于观察“渲染上有间距，但语义上仍可能是一段”的情况。
-
-\medskip
-这一句与上一句之间插入了 \texttt{\textbackslash medskip}（同理）。
-
-\section{参考文献环境：结构块（通常应保护）}
 
 \begin{thebibliography}{9}
 \bibitem{ref1} Example Author. \emph{An Example Book}. 2026.
 \bibitem{ref2} Another Author. ``A short paper title.'' 2025.
 \end{thebibliography}
 
-最后一段：参考文献之后的正文应继续正常分块。
+\section{混合段落与锁定区穿插}
+
+这一段故意把多种结构放在一起：先写普通正文，再插入 \href{https://example.com/mixed}{链接文本}，再插入 \texttt{git status}、\verb|pnpm run build|、$a_i=\frac{1}{n}$，最后补一句“这些保护区不应打断整体可读性”。
+
+% 这是一行注释：它不应把同一段误切成新块
+这一句与上一句之间只有注释，没有真正的段落边界，因此段落模式下仍应视为同一段。
+
+\smallskip
+这一句前面只有视觉空白命令，不应自动变成新的段落块。
+
+\section{写回敏感区}
+
+请只做下面一种最小修改：把某个逗号改成分号，或者在两句之间插入一个空行，或者把问号改成感叹号。
+
+短句 A，用来观察局部 diff。
+短句 B，用来观察空行边界。
+短句 C？
+
+\par
+
+如果写回后重新导入，短句顺序、空行位置和相邻段落边界都应保持稳定。
+
+\section{长段落与压力观察区}
+
+这一整段故意写得比较长，用来观察 TeX 正文在复杂混排下的稳定性：当一段文字同时包含中文叙述、English phrases、缩写 e.g.\ 和 i.e.、数字 0.618、日期 2024-2026、链接 \url{https://example.com/report/final}、命令 \texttt{cargo test}、路径 \path|/mnt/e/code/lessai/testdoc|、公式 $f(x)=x^2$、以及括号（例如这里的补充说明）时，段落模式应优先保证整体可读，整句模式应主要在真正句末切开，小句模式则可以在逗号、分号、冒号附近进一步细分，但任何一种模式都不应遗漏命令、误识别命令，或把一个自然段打成一串无意义的小块。
 
 \end{document}

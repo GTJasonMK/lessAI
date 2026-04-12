@@ -1,33 +1,15 @@
+mod blocks;
 mod boundary;
+mod guards;
 mod markdown;
-mod plain;
+mod masked;
+mod postprocess;
 mod regions;
+pub(crate) mod stream;
 mod tex;
 
-use crate::models::{ChunkPreset, DocumentFormat};
-
 use super::SegmentedChunk;
-
-#[derive(Debug, Clone)]
-struct ParagraphBlock {
-    body: String,
-    separator_after: String,
-}
-
-pub fn segment_text(
-    text: &str,
-    preset: ChunkPreset,
-    format: DocumentFormat,
-    rewrite_headings: bool,
-) -> Vec<SegmentedChunk> {
-    match format {
-        DocumentFormat::PlainText => plain::segment_plain_text(text, preset),
-        DocumentFormat::Markdown => markdown::segment_markdown_text(text, preset, rewrite_headings),
-        DocumentFormat::Tex => tex::segment_tex_text(text, preset, rewrite_headings),
-    }
-}
-
-pub use regions::segment_regions;
+pub use regions::segment_regions_with_strategy;
 
 fn split_trailing_whitespace(text: &str) -> (String, String) {
     let trimmed = text.trim_end_matches(|ch: char| ch.is_whitespace());
@@ -49,6 +31,7 @@ fn append_separator_to_last(chunks: &mut Vec<SegmentedChunk>, separator: String)
             // 纯分隔符 chunk（例如文件头部的空行/空白行）。
             // 不应进入重写队列，否则会导致无意义调用或格式抖动风险。
             skip_rewrite: true,
+            presentation: None,
         });
     }
 }

@@ -17,15 +17,22 @@ import type {
 import { DEFAULT_SETTINGS } from "./lib/constants";
 import type { ReviewView } from "./lib/constants";
 import {
+  canRewriteSession,
   formatDisplayPath,
   getLatestSuggestion,
   getSessionStats,
+  isDocxPath,
   isSettingsReady,
   normalizeNewlines,
   readableError,
   selectDefaultChunkIndex,
 } from "./lib/helpers";
 import { normalizeSelectedChunkIndices } from "./lib/chunkSelection";
+import {
+  applyEditorChunkOverride,
+  buildEditorTextFromChunks,
+  type EditorChunkOverrides,
+} from "./lib/editorChunks";
 import { useNotice } from "./hooks/useNotice";
 import { useBusyAction } from "./hooks/useBusyAction";
 import { useTauriEvents } from "./hooks/useTauriEvents";
@@ -66,6 +73,7 @@ export default function App() {
   const [liveProgress, setLiveProgress] = useState<RewriteProgress | null>(null);
   const [editorBaselineText, setEditorBaselineText] = useState("");
   const [editorText, setEditorText] = useState("");
+  const [editorChunkOverrides, setEditorChunkOverrides] = useState<EditorChunkOverrides>({});
   const [editorHasSelection, setEditorHasSelection] = useState(false);
 
   const { notice, showNotice, dismissNotice } = useNotice();
@@ -101,6 +109,8 @@ export default function App() {
   editorTextRef.current = editorText;
   const editorBaselineTextRef = useRef(editorBaselineText);
   editorBaselineTextRef.current = editorBaselineText;
+  const editorChunkOverridesRef = useRef(editorChunkOverrides);
+  editorChunkOverridesRef.current = editorChunkOverrides;
   const editorRef = useRef<DocumentEditorHandle | null>(null);
 
   const editorDirty = editorText !== editorBaselineText;
@@ -110,6 +120,25 @@ export default function App() {
   const handleChangeEditorText = useCallback((value: string) => {
     setEditorText(normalizeNewlines(value));
   }, []);
+
+  const handleChangeEditorChunkText = useCallback((index: number, value: string) => {
+    const session = currentSessionRef.current;
+    if (!session || !isDocxPath(session.documentPath)) return;
+    const chunk = session.chunks.find((item) => item.index === index);
+    if (!chunk || chunk.skipRewrite) return;
+
+    const normalized = normalizeNewlines(value);
+    const nextOverrides = applyEditorChunkOverride(
+      editorChunkOverridesRef.current,
+      chunk,
+      normalized
+    );
+
+    startTransition(() => {
+      setEditorChunkOverrides(nextOverrides);
+      setEditorText(buildEditorTextFromChunks(session.chunks, nextOverrides));
+    });
+  }, [currentSessionRef, editorChunkOverridesRef]);
 
   // ── 派生值（useMemo）────────────────────────────────
 
@@ -329,6 +358,7 @@ export default function App() {
           setSettingsOpen(false);
           setEditorBaselineText("");
           setEditorText("");
+          setEditorChunkOverrides({});
         });
       } catch (error) {
         showNotice("error", `初始化失败：${readableError(error)}`);
@@ -351,8 +381,16 @@ export default function App() {
 
   useEffect(() => {
     if (!currentSession) return;
+    if (!canRewriteSession(currentSession)) {
+      setSelectedChunkIndices([]);
+      return;
+    }
     setSelectedChunkIndices((current) => {
-      const normalized = normalizeSelectedChunkIndices(currentSession.chunks, current);
+      const normalized = normalizeSelectedChunkIndices(
+        currentSession.chunks,
+        current,
+        currentSession.chunkPreset
+      );
       const unchanged =
         current.length === normalized.length &&
         current.every((value, index) => value === normalized[index]);
@@ -376,10 +414,12 @@ export default function App() {
     settings,
     setSettings,
     setProviderStatus,
+    currentSession,
     showNotice,
     withBusy,
     closeSettings,
-    readChunkStrategyLockedReason
+    readChunkStrategyLockedReason,
+    refreshSessionState
   });
 
   // ── Document / Rewrite / Suggestion handlers ─────────
@@ -397,11 +437,13 @@ export default function App() {
     editorDirtyRef,
     editorTextRef,
     editorBaselineTextRef,
+    editorChunkOverridesRef,
     applySessionState,
     setStage,
     setReviewView,
     setEditorBaselineText,
     setEditorText,
+    setEditorChunkOverrides,
     setLiveProgress,
     setSettingsOpen,
     closeSettings,
@@ -518,6 +560,7 @@ export default function App() {
               busyAction={busyAction}
               editorMode={stage === "editor"}
               editorText={editorText}
+              editorChunkOverrides={editorChunkOverrides}
               editorDirty={editorDirty}
               editorHasSelection={editorHasSelection}
               editorRef={editorRef}
@@ -538,6 +581,7 @@ export default function App() {
               onOpenSettings={openSettings}
               onEnterEditor={handleEnterEditor}
               onChangeEditorText={handleChangeEditorText}
+              onChangeEditorChunkText={handleChangeEditorChunkText}
               onChangeEditorHasSelection={setEditorHasSelection}
               onSaveEditor={() => void handleSaveEditor()}
               onSaveEditorAndExit={() =>

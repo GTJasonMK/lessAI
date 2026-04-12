@@ -36,6 +36,7 @@ impl MarkdownAdapter {
             regions.push(TextRegion {
                 body: std::mem::take(buffer),
                 skip_rewrite: skip,
+                presentation: None,
             });
         };
 
@@ -52,6 +53,7 @@ impl MarkdownAdapter {
                         regions.push(TextRegion {
                             body: fm,
                             skip_rewrite: true,
+                            presentation: None,
                         });
                         index = end + 1;
                         continue;
@@ -87,6 +89,7 @@ impl MarkdownAdapter {
                     regions.push(TextRegion {
                         body: table,
                         skip_rewrite: true,
+                        presentation: None,
                     });
                     continue;
                 }
@@ -377,6 +380,7 @@ fn split_inline_protected_regions(text: &str, rewrite_headings: bool) -> Vec<Tex
                         TextRegion {
                             body: line[..close_end].to_string(),
                             skip_rewrite: true,
+                            presentation: None,
                         },
                     );
                     emitted_prefix = true;
@@ -389,6 +393,7 @@ fn split_inline_protected_regions(text: &str, rewrite_headings: bool) -> Vec<Tex
                     TextRegion {
                         body: full.to_string(),
                         skip_rewrite: true,
+                        presentation: None,
                     },
                 );
                 in_indented_code_block = false;
@@ -410,6 +415,7 @@ fn split_inline_protected_regions(text: &str, rewrite_headings: bool) -> Vec<Tex
                     TextRegion {
                         body: format!("{comment}{ending}"),
                         skip_rewrite: true,
+                        presentation: None,
                     },
                 );
                 in_html_comment = true;
@@ -429,6 +435,7 @@ fn split_inline_protected_regions(text: &str, rewrite_headings: bool) -> Vec<Tex
                         full.to_string()
                     },
                     skip_rewrite: true,
+                    presentation: None,
                 },
             );
 
@@ -453,6 +460,7 @@ fn split_inline_protected_regions(text: &str, rewrite_headings: bool) -> Vec<Tex
                         full.to_string()
                     },
                     skip_rewrite: true,
+                    presentation: None,
                 },
             );
             in_math_block = true;
@@ -472,6 +480,7 @@ fn split_inline_protected_regions(text: &str, rewrite_headings: bool) -> Vec<Tex
                         full.to_string()
                     },
                     skip_rewrite: true,
+                    presentation: None,
                 },
             );
             in_indented_code_block = false;
@@ -490,6 +499,7 @@ fn split_inline_protected_regions(text: &str, rewrite_headings: bool) -> Vec<Tex
                         full.to_string()
                     },
                     skip_rewrite: true,
+                    presentation: None,
                 },
             );
             in_indented_code_block = false;
@@ -508,6 +518,7 @@ fn split_inline_protected_regions(text: &str, rewrite_headings: bool) -> Vec<Tex
                         full.to_string()
                     },
                     skip_rewrite: true,
+                    presentation: None,
                 },
             );
             in_indented_code_block = false;
@@ -532,6 +543,7 @@ fn split_inline_protected_regions(text: &str, rewrite_headings: bool) -> Vec<Tex
                             full.to_string()
                         },
                         skip_rewrite: true,
+                        presentation: None,
                     },
                 );
                 index += 1;
@@ -552,6 +564,7 @@ fn split_inline_protected_regions(text: &str, rewrite_headings: bool) -> Vec<Tex
                         full.to_string()
                     },
                     skip_rewrite: true,
+                    presentation: None,
                 },
             );
             index += 1;
@@ -573,6 +586,7 @@ fn split_inline_protected_regions(text: &str, rewrite_headings: bool) -> Vec<Tex
                             full.to_string()
                         },
                         skip_rewrite: true,
+                        presentation: None,
                     },
                 );
                 in_indented_code_block = false;
@@ -602,6 +616,7 @@ fn process_markdown_line(out: &mut Vec<TextRegion>, line: &str, ending: &str) {
             TextRegion {
                 body: prefix.to_string(),
                 skip_rewrite: true,
+                presentation: None,
             },
         );
     }
@@ -623,6 +638,7 @@ fn process_markdown_line(out: &mut Vec<TextRegion>, line: &str, ending: &str) {
             TextRegion {
                 body: core[start..end].to_string(),
                 skip_rewrite: true,
+                presentation: None,
             },
         );
         cursor = end;
@@ -644,6 +660,7 @@ fn append_line_ending(out: &mut Vec<TextRegion>, ending: &str) {
         out.push(TextRegion {
             body: ending.to_string(),
             skip_rewrite: true,
+            presentation: None,
         });
     }
 }
@@ -773,6 +790,7 @@ fn push_rewriteable_markdown_text(out: &mut Vec<TextRegion>, text: &str) {
                 TextRegion {
                     body: text[cursor..open].to_string(),
                     skip_rewrite: false,
+                    presentation: None,
                 },
             );
         }
@@ -782,6 +800,7 @@ fn push_rewriteable_markdown_text(out: &mut Vec<TextRegion>, text: &str) {
             TextRegion {
                 body: marker.to_string(),
                 skip_rewrite: true,
+                presentation: None,
             },
         );
 
@@ -797,6 +816,7 @@ fn push_rewriteable_markdown_text(out: &mut Vec<TextRegion>, text: &str) {
             TextRegion {
                 body: marker.to_string(),
                 skip_rewrite: true,
+                presentation: None,
             },
         );
 
@@ -810,6 +830,7 @@ fn push_rewriteable_markdown_text(out: &mut Vec<TextRegion>, text: &str) {
             TextRegion {
                 body: text[cursor..].to_string(),
                 skip_rewrite: false,
+                presentation: None,
             },
         );
     }

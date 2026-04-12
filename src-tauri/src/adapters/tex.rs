@@ -18,6 +18,7 @@ impl TexAdapter {
             return vec![TextRegion {
                 body: String::new(),
                 skip_rewrite: false,
+                presentation: None,
             }];
         }
 
@@ -162,6 +163,7 @@ impl TexAdapter {
             vec![TextRegion {
                 body: text.to_string(),
                 skip_rewrite: false,
+                presentation: None,
             }]
         } else {
             regions
@@ -182,6 +184,7 @@ fn push_region(regions: &mut Vec<TextRegion>, body: &str, skip: bool) {
     regions.push(TextRegion {
         body: body.to_string(),
         skip_rewrite: skip,
+        presentation: None,
     });
 }
 
@@ -545,10 +548,7 @@ fn split_text_command_regions(
         "footnote" | "emph" | "textbf" | "textit" | "underline" | "textrm" | "textsf" | "textsc"
     );
 
-    // 特例：\href{url}{text} —— 第一个参数是 URL，第二个参数是可读文本。
-    let allow_href = name == "href";
-
-    if !is_heading_command && !allow_single_arg && !allow_href {
+    if !is_heading_command && !allow_single_arg {
         return None;
     }
 
@@ -566,85 +566,44 @@ fn split_text_command_regions(
         break;
     }
 
-    if !allow_href {
-        if bytes.get(pos) != Some(&b'{') {
-            return None;
-        }
-        let group_end = parse_brace_group(text, pos)?;
-        if group_end <= pos + 1 {
-            return None;
-        }
-        let content_start = pos + 1;
-        let content_end = group_end - 1;
-
-        if is_heading_command && !rewrite_headings {
-            return Some((
-                group_end,
-                vec![TextRegion {
-                    body: text[index..group_end].to_string(),
-                    skip_rewrite: true,
-                }],
-            ));
-        }
-
-        let mut out: Vec<TextRegion> = Vec::new();
-        out.push(TextRegion {
-            body: text[index..content_start].to_string(),
-            skip_rewrite: true,
-        });
-
-        let inner = TexAdapter::split_regions(&text[content_start..content_end], rewrite_headings);
-        out.extend(inner);
-
-        out.push(TextRegion {
-            body: text[content_end..group_end].to_string(),
-            skip_rewrite: true,
-        });
-
-        return Some((group_end, out));
-    }
-
-    // \href{url}{text}
     if bytes.get(pos) != Some(&b'{') {
         return None;
     }
-    let first_end = parse_brace_group(text, pos)?;
+    let group_end = parse_brace_group(text, pos)?;
+    if group_end <= pos + 1 {
+        return None;
+    }
+    let content_start = pos + 1;
+    let content_end = group_end - 1;
 
-    let mut pos2 = first_end;
-    loop {
-        pos2 = consume_whitespace(text, pos2);
-        if pos2 >= bytes.len() {
-            return None;
-        }
-        if bytes[pos2] == b'[' {
-            pos2 = parse_bracket_group(text, pos2)?;
-            continue;
-        }
-        break;
+    if is_heading_command && !rewrite_headings {
+        return Some((
+            group_end,
+            vec![TextRegion {
+                body: text[index..group_end].to_string(),
+                skip_rewrite: true,
+                presentation: None,
+            }],
+        ));
     }
-    if bytes.get(pos2) != Some(&b'{') {
-        return None;
-    }
-    let second_end = parse_brace_group(text, pos2)?;
-    if second_end <= pos2 + 1 {
-        return None;
-    }
-    let content_start = pos2 + 1;
-    let content_end = second_end - 1;
 
     let mut out: Vec<TextRegion> = Vec::new();
     out.push(TextRegion {
         body: text[index..content_start].to_string(),
         skip_rewrite: true,
-    });
-    let inner = TexAdapter::split_regions(&text[content_start..content_end], rewrite_headings);
-    out.extend(inner);
-    out.push(TextRegion {
-        body: text[content_end..second_end].to_string(),
-        skip_rewrite: true,
+        presentation: None,
     });
 
-    Some((second_end, out))
+    let inner = TexAdapter::split_regions(&text[content_start..content_end], rewrite_headings);
+    out.extend(inner);
+
+    out.push(TextRegion {
+        body: text[content_end..group_end].to_string(),
+        skip_rewrite: true,
+        presentation: None,
+    });
+
+    Some((group_end, out))
 }
 
 fn parse_command_name(text: &str, index: usize) -> Option<(Option<&str>, usize)> {
@@ -796,15 +755,25 @@ mod tests {
     }
 
     #[test]
-    fn keeps_href_url_as_skip_but_allows_text_argument() {
-        let text = "见 \\href{https://example.com}{这里}。";
+    fn marks_href_as_skip_rewrite() {
+        let text = "见 \\href{https://example.com/docs}{https://example.com/docs}。";
+        let regions = TexAdapter::split_regions(text, false);
+        assert!(regions.iter().any(|r| {
+            r.skip_rewrite
+                && r.body
+                    .contains("\\href{https://example.com/docs}{https://example.com/docs}")
+        }));
+        let rebuilt = regions.iter().map(|r| r.body.as_str()).collect::<String>();
+        assert_eq!(rebuilt, text);
+    }
+
+    #[test]
+    fn marks_texttt_as_skip_rewrite() {
+        let text = "命令 \\texttt{cargo fmt --check} 示例。";
         let regions = TexAdapter::split_regions(text, false);
         assert!(regions
             .iter()
-            .any(|r| r.skip_rewrite && r.body.contains("https://example.com")));
-        assert!(regions
-            .iter()
-            .any(|r| !r.skip_rewrite && r.body.contains("这里")));
+            .any(|r| r.skip_rewrite && r.body.contains("\\texttt{cargo fmt --check}")));
         let rebuilt = regions.iter().map(|r| r.body.as_str()).collect::<String>();
         assert_eq!(rebuilt, text);
     }

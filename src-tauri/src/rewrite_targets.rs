@@ -102,6 +102,7 @@ mod tests {
             source_text: format!("chunk-{index}"),
             separator_after: "\n".to_string(),
             skip_rewrite,
+            presentation: None,
             status,
             error_message: None,
         }

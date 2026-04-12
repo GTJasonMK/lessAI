@@ -10,10 +10,8 @@ const SYSTEM_PROMPT_HUMANIZER_ZH: &str =
 // 这类内容会直接污染正文并进入审阅记录，因此：
 // - prompt 里追加硬约束（不允许自我介绍）
 // - 输出阶段做一次“验收”，不合格则自动重试（温度降为 0）并加强约束
-pub(super) const EXTRA_CONSTRAINT_NO_MODEL_META: &str =
-    "不要自我介绍，不要描述你是 AI/模型/助手，不要输出任何免责声明或客套话；只输出与原文对应的改写正文，不要插入与原文无关的内容。";
-pub(super) const EXTRA_CONSTRAINT_NO_MODEL_META_RETRY: &str =
-    "再次强调：禁止输出自我介绍/免责声明/客套话（例如“I am Claude...”“As an AI language model...”）。如果不确定该写什么，就尽量贴近原文表达。";
+pub(super) const EXTRA_CONSTRAINT_NO_MODEL_META: &str = "不要自我介绍，不要描述你是 AI/模型/助手，不要输出任何免责声明或客套话；只输出与原文对应的改写正文，不要插入与原文无关的内容。";
+pub(super) const EXTRA_CONSTRAINT_NO_MODEL_META_RETRY: &str = "再次强调：禁止输出自我介绍/免责声明/客套话（例如“I am Claude...”“As an AI language model...”）。如果不确定该写什么，就尽量贴近原文表达。";
 
 pub(super) fn resolve_system_prompt(settings: &AppSettings) -> String {
     let preset_id = settings.prompt_preset_id.trim();

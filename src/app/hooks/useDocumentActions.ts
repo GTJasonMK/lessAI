@@ -1,7 +1,8 @@
 import { open } from "@tauri-apps/plugin-dialog";
 import { startTransition, useCallback } from "react";
-import { openDocument, saveDocumentEdits } from "../../lib/api";
+import { openDocument, saveDocumentChunkEdits, saveDocumentEdits } from "../../lib/api";
 import type { DocumentSession, RewriteProgress } from "../../lib/types";
+import { buildEditorChunkEdits, buildEditorTextFromChunks } from "../../lib/editorChunks";
 import {
   isDocxPath,
   isPdfPath,
@@ -32,11 +33,13 @@ export function useDocumentActions(options: {
   editorDirtyRef: React.MutableRefObject<boolean>;
   editorTextRef: React.MutableRefObject<string>;
   editorBaselineTextRef: React.MutableRefObject<string>;
+  editorChunkOverridesRef: React.MutableRefObject<Record<number, string>>;
   applySessionState: ApplySessionState;
   setStage: React.Dispatch<React.SetStateAction<"workbench" | "editor">>;
   setReviewView: React.Dispatch<React.SetStateAction<"diff" | "source" | "candidate">>;
   setEditorBaselineText: React.Dispatch<React.SetStateAction<string>>;
   setEditorText: React.Dispatch<React.SetStateAction<string>>;
+  setEditorChunkOverrides: React.Dispatch<React.SetStateAction<Record<number, string>>>;
   setLiveProgress: React.Dispatch<React.SetStateAction<RewriteProgress | null>>;
   setSettingsOpen: React.Dispatch<React.SetStateAction<boolean>>;
   closeSettings: () => void;
@@ -50,11 +53,13 @@ export function useDocumentActions(options: {
     editorDirtyRef,
     editorTextRef,
     editorBaselineTextRef,
+    editorChunkOverridesRef,
     applySessionState,
     setStage,
     setReviewView,
     setEditorBaselineText,
     setEditorText,
+    setEditorChunkOverrides,
     setLiveProgress,
     setSettingsOpen,
     closeSettings,
@@ -101,6 +106,7 @@ export function useDocumentActions(options: {
       setStage("workbench");
       setEditorBaselineText("");
       setEditorText("");
+      setEditorChunkOverrides({});
       closeSettings();
       showNotice(
         "success",
@@ -115,6 +121,7 @@ export function useDocumentActions(options: {
     currentSessionRef,
     editorDirtyRef,
     setEditorBaselineText,
+    setEditorChunkOverrides,
     setEditorText,
     setReviewView,
     setStage,
@@ -130,17 +137,17 @@ export function useDocumentActions(options: {
       return;
     }
 
-    if (isDocxPath(session.documentPath)) {
-      showNotice(
-        "warning",
-        "docx 目前仅支持导入/改写/导出，暂不支持终稿编辑或写回覆盖。"
-      );
-      return;
-    }
     if (isPdfPath(session.documentPath)) {
       showNotice(
         "warning",
         "pdf 目前仅支持导入/改写/导出，暂不支持终稿编辑或写回覆盖。"
+      );
+      return;
+    }
+    if (!session.plainTextEditorSafe) {
+      showNotice(
+        "warning",
+        session.plainTextEditorBlockReason ?? "当前文档暂不支持进入编辑模式。"
       );
       return;
     }
@@ -170,17 +177,27 @@ export function useDocumentActions(options: {
 
     startTransition(() => {
       setStage("editor");
-      const normalized = normalizeNewlines(session.sourceText);
-      setEditorBaselineText(normalized);
-      setEditorText(normalized);
+      const baseline = isDocxPath(session.documentPath)
+        ? buildEditorTextFromChunks(session.chunks, {})
+        : normalizeNewlines(session.sourceText);
+      setEditorChunkOverrides({});
+      setEditorBaselineText(baseline);
+      setEditorText(baseline);
       setLiveProgress(null);
       setSettingsOpen(false);
     });
+    if (isDocxPath(session.documentPath)) {
+      showNotice(
+        "info",
+        "docx 编辑模式已按可写回片段开放：锁定内容保持只读，可编辑范围与 AI 改写和写回范围一致。"
+      );
+    }
   }, [
     busyAction,
     currentSessionRef,
     setEditorBaselineText,
     setEditorText,
+    setEditorChunkOverrides,
     setLiveProgress,
     setSettingsOpen,
     setStage,
@@ -194,10 +211,18 @@ export function useDocumentActions(options: {
       return;
     }
     startTransition(() => {
+      setEditorChunkOverrides({});
       setEditorText(editorBaselineTextRef.current);
     });
     showNotice("warning", "已放弃未保存的修改。");
-  }, [editorBaselineTextRef, editorDirtyRef, setEditorText, showNotice, stageRef]);
+  }, [
+    editorBaselineTextRef,
+    editorDirtyRef,
+    setEditorChunkOverrides,
+    setEditorText,
+    showNotice,
+    stageRef
+  ]);
 
   const handleExitEditor = useCallback(() => {
     if (stageRef.current !== "editor") return;
@@ -227,16 +252,29 @@ export function useDocumentActions(options: {
       const content = editorTextRef.current;
 
       try {
-        const updated = await withBusy(actionKey, () => saveDocumentEdits(session.id, content));
+        const updated = await withBusy(actionKey, () => {
+          if (!isDocxPath(session.documentPath)) {
+            return saveDocumentEdits(session.id, content);
+          }
+
+          const edits = buildEditorChunkEdits(
+            session.chunks,
+            editorChunkOverridesRef.current
+          );
+          return saveDocumentChunkEdits(session.id, edits);
+        });
 
         applySessionState(updated, selectDefaultChunkIndex(updated));
         setReviewView("diff");
         setLiveProgress(null);
 
         startTransition(() => {
-          const normalized = normalizeNewlines(updated.sourceText);
-          setEditorBaselineText(normalized);
-          setEditorText(normalized);
+          const baseline = isDocxPath(updated.documentPath)
+            ? buildEditorTextFromChunks(updated.chunks, {})
+            : normalizeNewlines(updated.sourceText);
+          setEditorChunkOverrides({});
+          setEditorBaselineText(baseline);
+          setEditorText(baseline);
         });
 
         if (returnToWorkbench) {
@@ -254,8 +292,10 @@ export function useDocumentActions(options: {
       applySessionState,
       currentSessionRef,
       editorDirtyRef,
+      editorChunkOverridesRef,
       editorTextRef,
       setEditorBaselineText,
+      setEditorChunkOverrides,
       setEditorText,
       setLiveProgress,
       setReviewView,

@@ -1,8 +1,11 @@
 import { useCallback } from "react";
 import { applySuggestion, deleteSuggestion, dismissSuggestion } from "../../lib/api";
 import type { DocumentSession } from "../../lib/types";
-import { getLatestSuggestion, readableError } from "../../lib/helpers";
-import { toggleSelectedChunkIndex } from "../../lib/chunkSelection";
+import { canRewriteSession, getLatestSuggestion, readableError } from "../../lib/helpers";
+import {
+  resolveSelectionTargetChunkIndices,
+  toggleSelectedChunkIndices
+} from "../../lib/chunkSelection";
 import type { NoticeTone } from "../../lib/constants";
 
 type ShowNotice = (
@@ -54,8 +57,15 @@ export function useSuggestionActions(options: {
 
       const chunk = session.chunks[index];
       if (options?.multiSelect) {
-        if (chunk && !chunk.skipRewrite) {
-          setSelectedChunkIndices((current) => toggleSelectedChunkIndex(current, index));
+        if (chunk && !chunk.skipRewrite && canRewriteSession(session)) {
+          const targetIndices = resolveSelectionTargetChunkIndices(
+            session.chunks,
+            index,
+            session.chunkPreset
+          );
+          setSelectedChunkIndices((current) =>
+            toggleSelectedChunkIndices(current, targetIndices)
+          );
         }
       } else {
         setSelectedChunkIndices([]);

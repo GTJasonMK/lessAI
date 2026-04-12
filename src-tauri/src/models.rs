@@ -31,6 +31,14 @@ fn default_prompt_preset_id() -> String {
     "humanizer_zh".to_string()
 }
 
+fn default_write_back_supported() -> bool {
+    true
+}
+
+fn default_plain_text_editor_safe() -> bool {
+    true
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct PromptTemplate {
@@ -61,12 +69,8 @@ impl Default for AppSettings {
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "lowercase")]
 pub enum ChunkPreset {
-    // 兼容历史配置：早期版本可能用 small/medium/large 表达粒度
-    #[serde(alias = "small")]
     Clause,
-    #[serde(alias = "medium")]
     Sentence,
-    #[serde(alias = "large", alias = "question")]
     Paragraph,
 }
 
@@ -128,6 +132,29 @@ pub struct DiffSpan {
     pub text: String,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct ChunkPresentation {
+    #[serde(default)]
+    pub bold: bool,
+    #[serde(default)]
+    pub italic: bool,
+    #[serde(default)]
+    pub underline: bool,
+    #[serde(default)]
+    pub href: Option<String>,
+    #[serde(default)]
+    pub protect_kind: Option<String>,
+    #[serde(default)]
+    pub writeback_key: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct DocumentSnapshot {
+    pub sha256: String,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ChunkTask {
@@ -136,8 +163,17 @@ pub struct ChunkTask {
     pub separator_after: String,
     #[serde(default)]
     pub skip_rewrite: bool,
+    #[serde(default)]
+    pub presentation: Option<ChunkPresentation>,
     pub status: ChunkStatus,
     pub error_message: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct EditorChunkEdit {
+    pub index: usize,
+    pub text: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -161,7 +197,21 @@ pub struct DocumentSession {
     pub title: String,
     pub document_path: String,
     pub source_text: String,
+    #[serde(default)]
+    pub source_snapshot: Option<DocumentSnapshot>,
     pub normalized_text: String,
+    #[serde(default = "default_write_back_supported")]
+    pub write_back_supported: bool,
+    #[serde(default)]
+    pub write_back_block_reason: Option<String>,
+    #[serde(default = "default_plain_text_editor_safe")]
+    pub plain_text_editor_safe: bool,
+    #[serde(default)]
+    pub plain_text_editor_block_reason: Option<String>,
+    #[serde(default)]
+    pub chunk_preset: Option<ChunkPreset>,
+    #[serde(default)]
+    pub rewrite_headings: Option<bool>,
     pub chunks: Vec<ChunkTask>,
     pub suggestions: Vec<EditSuggestion>,
     pub next_suggestion_sequence: u64,
@@ -210,4 +260,37 @@ pub struct RewriteFailedEvent {
 #[serde(rename_all = "camelCase")]
 pub struct SessionEvent {
     pub session_id: String,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::ChunkPreset;
+
+    #[test]
+    fn rejects_legacy_chunk_preset_aliases() {
+        for legacy in ["small", "medium", "large", "question"] {
+            let payload = format!("\"{legacy}\"");
+            let parsed = serde_json::from_str::<ChunkPreset>(&payload);
+            assert!(
+                parsed.is_err(),
+                "legacy preset should be rejected: {legacy}"
+            );
+        }
+    }
+
+    #[test]
+    fn accepts_current_chunk_preset_values() {
+        assert_eq!(
+            serde_json::from_str::<ChunkPreset>("\"clause\"").unwrap(),
+            ChunkPreset::Clause
+        );
+        assert_eq!(
+            serde_json::from_str::<ChunkPreset>("\"sentence\"").unwrap(),
+            ChunkPreset::Sentence
+        );
+        assert_eq!(
+            serde_json::from_str::<ChunkPreset>("\"paragraph\"").unwrap(),
+            ChunkPreset::Paragraph
+        );
+    }
 }

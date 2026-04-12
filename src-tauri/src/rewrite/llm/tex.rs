@@ -39,8 +39,7 @@ pub(super) async fn rewrite_tex_chunk_with_client(
             .await;
     }
 
-    let placeholder_rule =
-        "文本中可能包含形如 ⟦LESSAI_LOCK_1⟧ 的占位符。必须逐字原样保留它们（不得改动/不得删除/不得复制到别处/不得移动顺序）。";
+    let placeholder_rule = "文本中可能包含形如 ⟦LESSAI_LOCK_1⟧ 的占位符。必须逐字原样保留它们（不得改动/不得删除/不得复制到别处/不得移动顺序）。";
     let candidate_masked = super::plain::rewrite_plain_chunk_with_client(
         client,
         settings,

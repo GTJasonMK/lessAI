@@ -37,6 +37,19 @@ export interface DiffSpan {
   text: string;
 }
 
+export interface ChunkPresentation {
+  bold: boolean;
+  italic: boolean;
+  underline: boolean;
+  href: string | null;
+  protectKind: string | null;
+  writebackKey?: string | null;
+}
+
+export interface DocumentSnapshot {
+  sha256: string;
+}
+
 export interface ChunkTask {
   index: number;
   sourceText: string;
@@ -44,8 +57,14 @@ export interface ChunkTask {
   separatorAfter: string;
   /** 是否跳过 AI 改写（例如 Markdown fenced code block） */
   skipRewrite: boolean;
+  presentation: ChunkPresentation | null;
   status: ChunkStatus;
   errorMessage: string | null;
+}
+
+export interface EditorChunkEdit {
+  index: number;
+  text: string;
 }
 
 export interface EditSuggestion {
@@ -65,7 +84,14 @@ export interface DocumentSession {
   title: string;
   documentPath: string;
   sourceText: string;
+  sourceSnapshot?: DocumentSnapshot | null;
   normalizedText: string;
+  writeBackSupported: boolean;
+  writeBackBlockReason: string | null;
+  plainTextEditorSafe: boolean;
+  plainTextEditorBlockReason: string | null;
+  chunkPreset?: ChunkPreset | null;
+  rewriteHeadings?: boolean | null;
   chunks: ChunkTask[];
   suggestions: EditSuggestion[];
   nextSuggestionSequence: number;
