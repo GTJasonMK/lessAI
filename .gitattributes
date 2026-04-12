@@ -5,8 +5,18 @@
 *.ps1 text eol=crlf
 
 *.png binary
+*.bmp binary
+*.gif binary
+*.jpg binary
+*.jpeg binary
 *.ico binary
 *.icns binary
+*.pdf binary
+*.doc binary
+*.docx binary
+*.ppt binary
+*.pptx binary
+*.xls binary
+*.xlsx binary
 *.woff binary
 *.woff2 binary
-

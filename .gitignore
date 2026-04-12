@@ -21,6 +21,11 @@ dist/
 # Tauri / Rust build artifacts
 src-tauri/target/
 src-tauri/.tauri/
+src-tauri/tauri.release.conf.json
+
+# Release / CI temp outputs
+artifacts/
+release-assets/
 
 # Tauri updater signing keys (never commit)
 src-tauri/updater.key
@@ -46,3 +51,11 @@ Desktop.ini
 # AI / agent tooling (local only)
 .claude/
 .codex/
+.superpowers/
+
+# Temp / patch leftovers
+*.tmp
+*.temp
+*.bak
+*.orig
+*.rej
