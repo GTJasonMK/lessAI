@@ -108,7 +108,7 @@ export const WorkspaceBar = memo(function WorkspaceBar({
             <span className="context-chip">应用：{topbarProgress}</span>
             {liveProgress && currentSession && liveProgress.sessionId === currentSession.id ? (
               <span className="context-chip">
-                进度 {liveProgress.completedChunks}/{liveProgress.totalChunks}
+                进度 {liveProgress.completedUnits}/{liveProgress.totalUnits}
                 {liveProgress.inFlight > 0 ? ` · 进行中 ${liveProgress.inFlight}` : ""}
                 {liveProgress.maxConcurrency > 1 ? ` · 并发 ${liveProgress.maxConcurrency}` : ""}
               </span>

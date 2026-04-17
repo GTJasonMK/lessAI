@@ -1,4 +1,5 @@
-use std::{collections::HashMap, path::Path};
+use std::path::Path;
+use std::collections::HashSet;
 
 use log::{error, info};
 
@@ -9,21 +10,19 @@ use crate::{
     },
     models::{DocumentSession, SuggestionDecision},
     observability::{document_kind_label, writeback_mode_label},
-    rewrite_permissions::ensure_chunk_can_rewrite,
-    rewrite_permissions::CHUNK_INDEX_OUT_OF_RANGE_ERROR,
-    rewrite_projection::{
-        apply_preview_suggestion, build_merged_regions, chunks_preserve_docx_paragraph_boundaries,
-        merged_text_from_regions,
-    },
+    rewrite_permissions::ensure_rewrite_unit_can_rewrite,
+    rewrite_projection::{apply_preview_suggestion, build_applied_slot_projection},
+    rewrite_unit::{merged_text_from_slots, RewriteUnitResponse},
 };
 
 type SessionWritebackPlan = OwnedDocumentWriteback;
 
 pub(crate) fn validate_candidate_batch_writeback(
     session: &DocumentSession,
-    overrides: &HashMap<usize, String>,
+    responses: &[RewriteUnitResponse],
 ) -> Result<(), String> {
-    let preview = build_preview_session(session, overrides)?;
+    validate_unique_batch_slot_updates(responses)?;
+    let preview = build_preview_session(session, responses)?;
     execute_session_writeback(&preview, WritebackMode::Validate)
 }
 
@@ -51,7 +50,7 @@ pub(crate) fn execute_session_writeback(
             session.write_back_block_reason.as_deref(),
         )?;
 
-        let plan = build_session_writeback_plan(session);
+        let plan = build_session_writeback_plan(session)?;
         execute_document_writeback(
             path,
             &session.source_text,
@@ -83,45 +82,43 @@ pub(crate) fn execute_session_writeback(
 
 fn build_preview_session(
     session: &DocumentSession,
-    overrides: &HashMap<usize, String>,
+    responses: &[RewriteUnitResponse],
 ) -> Result<DocumentSession, String> {
-    ensure_override_targets_rewriteable(session, overrides.keys().copied())?;
     let mut preview = session.clone();
-    for (index, candidate_text) in overrides {
-        let before_text = preview
-            .chunks
-            .get(*index)
-            .ok_or_else(|| CHUNK_INDEX_OUT_OF_RANGE_ERROR.to_string())?
-            .source_text
-            .clone();
-        apply_preview_suggestion(&mut preview, *index, before_text, candidate_text);
+    for response in responses {
+        ensure_rewrite_unit_can_rewrite(&preview, &response.rewrite_unit_id)?;
+        apply_preview_suggestion(
+            &mut preview,
+            &response.rewrite_unit_id,
+            response.updates.clone(),
+        )?;
     }
     Ok(preview)
 }
 
-fn build_session_writeback_plan(session: &DocumentSession) -> SessionWritebackPlan {
-    if !is_docx_path(Path::new(&session.document_path)) {
-        return SessionWritebackPlan::Text(merged_text_from_regions(&build_merged_regions(
-            session, None,
-        )));
-    }
-
-    let updated_regions = build_merged_regions(session, None);
-    if chunks_preserve_docx_paragraph_boundaries(session, None) {
-        return SessionWritebackPlan::Regions(updated_regions);
-    }
-
-    SessionWritebackPlan::Text(merged_text_from_regions(&updated_regions))
-}
-
-fn ensure_override_targets_rewriteable(
-    session: &DocumentSession,
-    indices: impl IntoIterator<Item = usize>,
-) -> Result<(), String> {
-    for index in indices {
-        ensure_chunk_can_rewrite(session, index)?;
+fn validate_unique_batch_slot_updates(responses: &[RewriteUnitResponse]) -> Result<(), String> {
+    let mut seen = HashSet::new();
+    for response in responses {
+        for update in &response.updates {
+            if seen.insert(update.slot_id.as_str()) {
+                continue;
+            }
+            return Err(format!(
+                "写回内容与原结构不一致：batch 内存在重复 slot 更新：{}。",
+                update.slot_id
+            ));
+        }
     }
     Ok(())
+}
+
+fn build_session_writeback_plan(session: &DocumentSession) -> Result<SessionWritebackPlan, String> {
+    let updated_slots = build_applied_slot_projection(session)?;
+    if !is_docx_path(Path::new(&session.document_path)) {
+        return Ok(SessionWritebackPlan::Text(merged_text_from_slots(&updated_slots)));
+    }
+
+    Ok(SessionWritebackPlan::Slots(updated_slots))
 }
 
 fn ensure_applied_suggestions_target_rewriteable(session: &DocumentSession) -> Result<(), String> {
@@ -130,7 +127,7 @@ fn ensure_applied_suggestions_target_rewriteable(session: &DocumentSession) -> R
         .iter()
         .filter(|item| item.decision == SuggestionDecision::Applied)
     {
-        ensure_chunk_can_rewrite(session, suggestion.chunk_index)?;
+        ensure_rewrite_unit_can_rewrite(session, &suggestion.rewrite_unit_id)?;
     }
     Ok(())
 }

@@ -1,10 +1,16 @@
-export type ChunkPreset = "clause" | "sentence" | "paragraph";
+export type SegmentationPreset = "clause" | "sentence" | "paragraph";
 export type RewriteMode = "manual" | "auto";
 export type PromptPresetId = "aigc_v1" | "humanizer_zh" | (string & {});
-export type ChunkStatus = "idle" | "running" | "done" | "failed";
+export type RewriteUnitStatus = "idle" | "running" | "done" | "failed";
 export type DiffType = "unchanged" | "insert" | "delete";
 export type RunningState = "idle" | "running" | "paused" | "completed" | "cancelled" | "failed";
 export type SuggestionDecision = "proposed" | "applied" | "dismissed";
+export type WritebackSlotRole =
+  | "editableText"
+  | "lockedText"
+  | "syntaxToken"
+  | "inlineObject"
+  | "paragraphBreak";
 
 export interface PromptTemplate {
   id: string;
@@ -23,12 +29,12 @@ export interface AppSettings {
   updateProxy: string;
   timeoutMs: number;
   temperature: number;
-  chunkPreset: ChunkPreset;
+  segmentationPreset: SegmentationPreset;
   /** 是否允许改写标题/章节标题等结构性文本 */
   rewriteHeadings: boolean;
   rewriteMode: RewriteMode;
   maxConcurrency: number;
-  chunksPerRequest: number;
+  unitsPerBatch: number;
   promptPresetId: PromptPresetId;
   customPrompts: PromptTemplate[];
 }
@@ -38,7 +44,7 @@ export interface DiffSpan {
   text: string;
 }
 
-export interface ChunkPresentation {
+export interface TextPresentation {
   bold: boolean;
   italic: boolean;
   underline: boolean;
@@ -51,31 +57,46 @@ export interface DocumentSnapshot {
   sha256: string;
 }
 
-export interface ChunkTask {
-  index: number;
-  sourceText: string;
-  /** 片段后的拼接分隔符，用于导出时还原段落/句子边界 */
+export interface WritebackSlot {
+  id: string;
+  order: number;
+  text: string;
+  editable: boolean;
+  role: WritebackSlotRole;
+  presentation: TextPresentation | null;
+  anchor: string | null;
   separatorAfter: string;
-  /** 是否跳过 AI 改写（例如 Markdown fenced code block） */
-  skipRewrite: boolean;
-  presentation: ChunkPresentation | null;
-  status: ChunkStatus;
+}
+
+export interface RewriteUnit {
+  id: string;
+  order: number;
+  slotIds: string[];
+  displayText: string;
+  segmentationPreset: SegmentationPreset;
+  status: RewriteUnitStatus;
   errorMessage: string | null;
 }
 
-export interface EditorChunkEdit {
-  index: number;
+export interface SlotUpdate {
+  slotId: string;
   text: string;
 }
 
-export interface EditSuggestion {
+export interface EditorSlotEdit {
+  slotId: string;
+  text: string;
+}
+
+export interface RewriteSuggestion {
   id: string;
   sequence: number;
-  chunkIndex: number;
+  rewriteUnitId: string;
   beforeText: string;
   afterText: string;
   diffSpans: DiffSpan[];
   decision: SuggestionDecision;
+  slotUpdates: SlotUpdate[];
   createdAt: string;
   updatedAt: string;
 }
@@ -91,10 +112,11 @@ export interface DocumentSession {
   writeBackBlockReason: string | null;
   plainTextEditorSafe: boolean;
   plainTextEditorBlockReason: string | null;
-  chunkPreset?: ChunkPreset | null;
+  segmentationPreset?: SegmentationPreset | null;
   rewriteHeadings?: boolean | null;
-  chunks: ChunkTask[];
-  suggestions: EditSuggestion[];
+  writebackSlots: WritebackSlot[];
+  rewriteUnits: RewriteUnit[];
+  suggestions: RewriteSuggestion[];
   nextSuggestionSequence: number;
   status: RunningState;
   createdAt: string;
@@ -103,10 +125,10 @@ export interface DocumentSession {
 
 export interface RewriteProgress {
   sessionId: string;
-  completedChunks: number;
+  completedUnits: number;
   inFlight: number;
-  runningIndices: number[];
-  totalChunks: number;
+  runningUnitIds: string[];
+  totalUnits: number;
   mode: RewriteMode;
   runningState: RunningState;
   maxConcurrency: number;

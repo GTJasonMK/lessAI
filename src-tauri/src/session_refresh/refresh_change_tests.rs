@@ -1,15 +1,14 @@
 use std::path::Path;
 
-use chrono::Utc;
-
 use super::refresh_session_from_loaded;
 use crate::{
-    adapters::TextRegion,
-    documents::{LoadedDocumentSource, RegionSegmentationStrategy},
-    models::{ChunkPreset, DocumentSnapshot, EditSuggestion, RunningState, SuggestionDecision},
+    documents::LoadedDocumentSource,
+    models::{SegmentationPreset, DocumentSnapshot, RunningState, SuggestionDecision},
+    rewrite_unit::SlotUpdate,
     session_refresh::test_support::{
         dirty_session_with_applied_suggestion, loaded_docx, sample_session,
     },
+    test_support::{editable_slot, locked_slot, rewrite_suggestion},
 };
 
 #[test]
@@ -23,7 +22,7 @@ fn rebuilds_clean_session_when_snapshot_changes_even_if_text_is_same() {
         &existing,
         Path::new("/tmp/example.docx"),
         loaded_docx(),
-        ChunkPreset::Paragraph,
+        SegmentationPreset::Paragraph,
         false,
         Some(DocumentSnapshot {
             sha256: "new".to_string(),
@@ -39,7 +38,8 @@ fn rebuilds_clean_session_when_snapshot_changes_even_if_text_is_same() {
             .map(|item| item.sha256.as_str()),
         Some("new")
     );
-    assert_eq!(refreshed.session.chunks.len(), 3);
+    assert_eq!(refreshed.session.writeback_slots.len(), 3);
+    assert_eq!(refreshed.session.rewrite_units.len(), 1);
     assert!(refreshed.session.write_back_supported);
     assert_eq!(refreshed.session.write_back_block_reason, None);
 }
@@ -52,7 +52,7 @@ fn blocks_dirty_session_when_snapshot_changes_even_if_text_is_same() {
         &existing,
         Path::new("/tmp/example.docx"),
         loaded_docx(),
-        ChunkPreset::Paragraph,
+        SegmentationPreset::Paragraph,
         false,
         Some(DocumentSnapshot {
             sha256: "new".to_string(),
@@ -83,24 +83,11 @@ fn rebuilds_snapshotless_clean_session_when_source_changes() {
     let existing = sample_session();
     let loaded = LoadedDocumentSource {
         source_text: "新前文E=mc^2新后文".to_string(),
-        regions: vec![
-            TextRegion {
-                body: "新前文".to_string(),
-                skip_rewrite: false,
-                presentation: None,
-            },
-            TextRegion {
-                body: "E=mc^2".to_string(),
-                skip_rewrite: true,
-                presentation: None,
-            },
-            TextRegion {
-                body: "新后文".to_string(),
-                skip_rewrite: false,
-                presentation: None,
-            },
+        writeback_slots: vec![
+            editable_slot("slot-0", 0, "新前文"),
+            locked_slot("slot-1", 1, "E=mc^2"),
+            editable_slot("slot-2", 2, "新后文"),
         ],
-        region_segmentation_strategy: RegionSegmentationStrategy::PreserveBoundaries,
         write_back_supported: true,
         write_back_block_reason: None,
         plain_text_editor_safe: true,
@@ -111,7 +98,7 @@ fn rebuilds_snapshotless_clean_session_when_source_changes() {
         &existing,
         Path::new("/tmp/example.docx"),
         loaded,
-        ChunkPreset::Paragraph,
+        SegmentationPreset::Paragraph,
         false,
         Some(DocumentSnapshot {
             sha256: "new".to_string(),
@@ -134,27 +121,23 @@ fn rebuilds_snapshotless_clean_session_when_source_changes() {
 #[test]
 fn blocks_snapshotless_dirty_session_when_source_changes() {
     let mut existing = sample_session();
-    existing.suggestions.push(EditSuggestion {
-        id: "suggestion-1".to_string(),
-        sequence: 1,
-        chunk_index: 0,
-        before_text: existing.source_text.clone(),
-        after_text: "改写后正文".to_string(),
-        diff_spans: Vec::new(),
-        decision: SuggestionDecision::Applied,
-        created_at: Utc::now(),
-        updated_at: Utc::now(),
-    });
+    existing.suggestions.push(rewrite_suggestion(
+        "suggestion-1",
+        1,
+        "unit-0",
+        &existing.source_text,
+        "改写后正文",
+        SuggestionDecision::Applied,
+        vec![
+            SlotUpdate::new("slot-0", "改写后"),
+            SlotUpdate::new("slot-2", "正文"),
+        ],
+    ));
     existing.status = RunningState::Completed;
 
     let loaded = LoadedDocumentSource {
         source_text: "新前文E=mc^2新后文".to_string(),
-        regions: vec![TextRegion {
-            body: "新前文E=mc^2新后文".to_string(),
-            skip_rewrite: false,
-            presentation: None,
-        }],
-        region_segmentation_strategy: RegionSegmentationStrategy::PreserveBoundaries,
+        writeback_slots: vec![editable_slot("slot-0", 0, "新前文E=mc^2新后文")],
         write_back_supported: true,
         write_back_block_reason: None,
         plain_text_editor_safe: true,
@@ -165,7 +148,7 @@ fn blocks_snapshotless_dirty_session_when_source_changes() {
         &existing,
         Path::new("/tmp/example.docx"),
         loaded,
-        ChunkPreset::Paragraph,
+        SegmentationPreset::Paragraph,
         false,
         Some(DocumentSnapshot {
             sha256: "new".to_string(),
@@ -182,24 +165,25 @@ fn blocks_snapshotless_dirty_session_when_source_changes() {
 #[test]
 fn blocks_snapshotless_dirty_session_even_when_source_text_is_unchanged() {
     let mut existing = sample_session();
-    existing.suggestions.push(EditSuggestion {
-        id: "suggestion-1".to_string(),
-        sequence: 1,
-        chunk_index: 0,
-        before_text: existing.source_text.clone(),
-        after_text: "改写后正文".to_string(),
-        diff_spans: Vec::new(),
-        decision: SuggestionDecision::Applied,
-        created_at: Utc::now(),
-        updated_at: Utc::now(),
-    });
+    existing.suggestions.push(rewrite_suggestion(
+        "suggestion-1",
+        1,
+        "unit-0",
+        &existing.source_text,
+        "改写后正文",
+        SuggestionDecision::Applied,
+        vec![
+            SlotUpdate::new("slot-0", "改写后"),
+            SlotUpdate::new("slot-2", "正文"),
+        ],
+    ));
     existing.status = RunningState::Completed;
 
     let refreshed = refresh_session_from_loaded(
         &existing,
         Path::new("/tmp/example.docx"),
         loaded_docx(),
-        ChunkPreset::Paragraph,
+        SegmentationPreset::Paragraph,
         false,
         Some(DocumentSnapshot {
             sha256: "new".to_string(),

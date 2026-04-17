@@ -1,108 +1,112 @@
 use tauri::AppHandle;
 
 use crate::{
-    models::{ChunkStatus, DocumentSession, RunningState},
-    rewrite_permissions::CHUNK_INDEX_OUT_OF_RANGE_ERROR,
-    session_access::CurrentSessionRequest,
-    session_edit::{mutate_session_cloned_now, mutate_session_now, save_session_value},
+    models::{RewriteUnitStatus, DocumentSession, RunningState},
+    rewrite_permissions::REWRITE_UNIT_NOT_FOUND_ERROR,
+    session_access::{mutate_current_session, CurrentSessionRequest},
+    session_edit::SessionMutation,
     state::AppState,
 };
 
-pub(crate) fn clear_running_chunks(session: &mut DocumentSession) -> bool {
-    update_running_chunks(session, ChunkStatus::Idle, None)
+pub(crate) fn clear_running_units(session: &mut DocumentSession) -> bool {
+    update_running_units(session, RewriteUnitStatus::Idle, None)
 }
 
-pub(crate) fn fail_running_chunks(session: &mut DocumentSession, error: &str) -> bool {
-    update_running_chunks(session, ChunkStatus::Failed, Some(error))
+pub(crate) fn fail_running_units(session: &mut DocumentSession, error: &str) -> bool {
+    update_running_units(session, RewriteUnitStatus::Failed, Some(error))
 }
 
-fn update_running_chunks(
+fn update_running_units(
     session: &mut DocumentSession,
-    status: ChunkStatus,
+    status: RewriteUnitStatus,
     error_message: Option<&str>,
 ) -> bool {
     let mut touched = false;
     let error_message = error_message.map(str::to_string);
-    for chunk in &mut session.chunks {
-        if chunk.status != ChunkStatus::Running {
+    for unit in &mut session.rewrite_units {
+        if unit.status != RewriteUnitStatus::Running {
             continue;
         }
-        chunk.status = status;
-        chunk.error_message = error_message.clone();
+        unit.status = status;
+        unit.error_message = error_message.clone();
         touched = true;
     }
     touched
 }
 
-pub(crate) fn update_target_chunks(
+pub(crate) fn update_target_units(
     session: &mut DocumentSession,
-    indices: &[usize],
-    status: ChunkStatus,
+    rewrite_unit_ids: &[String],
+    status: RewriteUnitStatus,
     error_message: Option<&str>,
 ) -> Result<(), String> {
-    for index in indices.iter().copied() {
-        if session.chunks.get(index).is_none() {
-            return Err(CHUNK_INDEX_OUT_OF_RANGE_ERROR.to_string());
+    for rewrite_unit_id in rewrite_unit_ids {
+        if !session.rewrite_units.iter().any(|unit| &unit.id == rewrite_unit_id) {
+            return Err(REWRITE_UNIT_NOT_FOUND_ERROR.to_string());
         }
     }
 
     let error_message = error_message.map(str::to_string);
-    for index in indices.iter().copied() {
-        let chunk = session
-            .chunks
-            .get_mut(index)
-            .ok_or_else(|| CHUNK_INDEX_OUT_OF_RANGE_ERROR.to_string())?;
-        chunk.status = status;
-        chunk.error_message = error_message.clone();
+    for rewrite_unit_id in rewrite_unit_ids {
+        let unit = session
+            .rewrite_units
+            .iter_mut()
+            .find(|unit| &unit.id == rewrite_unit_id)
+            .ok_or_else(|| REWRITE_UNIT_NOT_FOUND_ERROR.to_string())?;
+        unit.status = status;
+        unit.error_message = error_message.clone();
     }
     Ok(())
 }
 
-pub(crate) fn set_chunks_running_status(
+pub(crate) fn set_units_running_status(
     session: &mut DocumentSession,
-    indices: &[usize],
+    rewrite_unit_ids: &[String],
 ) -> Result<(), String> {
-    update_target_chunks(session, indices, ChunkStatus::Running, None)?;
+    update_target_units(session, rewrite_unit_ids, RewriteUnitStatus::Running, None)?;
     if session.status != RunningState::Paused {
         session.status = RunningState::Running;
     }
     Ok(())
 }
 
-pub(crate) fn fail_target_chunks_and_reset_other_running(
+pub(crate) fn fail_target_units_and_reset_other_running(
     session: &mut DocumentSession,
-    indices: &[usize],
+    rewrite_unit_ids: &[String],
     error: &str,
 ) -> Result<(), String> {
-    update_target_chunks(session, indices, ChunkStatus::Failed, Some(error))?;
+    update_target_units(
+        session,
+        rewrite_unit_ids,
+        RewriteUnitStatus::Failed,
+        Some(error),
+    )?;
     session.status = RunningState::Failed;
-    clear_running_chunks(session);
+    clear_running_units(session);
     Ok(())
 }
 
 pub(crate) fn compute_session_state(session: &DocumentSession) -> RunningState {
     if session
-        .chunks
+        .rewrite_units
         .iter()
-        .any(|chunk| chunk.status == ChunkStatus::Failed)
+        .any(|unit| unit.status == RewriteUnitStatus::Failed)
     {
         return RunningState::Failed;
     }
-
     if session
-        .chunks
+        .rewrite_units
         .iter()
-        .all(|chunk| chunk.status == ChunkStatus::Done)
+        .all(|unit| unit.status == RewriteUnitStatus::Done)
     {
         return RunningState::Completed;
     }
-
     RunningState::Idle
 }
 
 pub(crate) fn set_session_cancelled(session: &mut DocumentSession) {
     session.status = RunningState::Cancelled;
-    clear_running_chunks(session);
+    clear_running_units(session);
 }
 
 pub(crate) fn set_session_paused(session: &mut DocumentSession) {
@@ -113,36 +117,31 @@ pub(crate) fn set_session_running(session: &mut DocumentSession) {
     session.status = RunningState::Running;
 }
 
-fn mutate_rewrite_job_session_now<T, Mutate>(
+fn mark_session_transition(
     app: &AppHandle,
     state: &AppState,
     session_id: &str,
-    mutate: Mutate,
-) -> Result<T, String>
-where
-    Mutate: FnOnce(
-        &mut DocumentSession,
-        chrono::DateTime<chrono::Utc>,
-    ) -> Result<crate::session_edit::SessionMutation<T>, String>,
-{
-    mutate_session_now(
-        CurrentSessionRequest::stored(app, state, session_id),
-        mutate,
-    )
+    transition: fn(&mut DocumentSession),
+) -> Result<DocumentSession, String> {
+    mutate_stored_session_now(app, state, session_id, |session| {
+        transition(session);
+        Ok(session.clone())
+    })
 }
 
-fn mutate_rewrite_job_session_cloned_now<Mutate>(
+fn mutate_stored_session_now<T>(
     app: &AppHandle,
     state: &AppState,
     session_id: &str,
-    mutate: Mutate,
-) -> Result<DocumentSession, String>
-where
-    Mutate: FnOnce(&mut DocumentSession, chrono::DateTime<chrono::Utc>) -> Result<(), String>,
-{
-    mutate_session_cloned_now(
+    mutate: impl FnOnce(&mut DocumentSession) -> Result<T, String>,
+) -> Result<T, String> {
+    mutate_current_session(
         CurrentSessionRequest::stored(app, state, session_id),
-        mutate,
+        |session| {
+            let now = chrono::Utc::now();
+            let value = mutate(session)?;
+            Ok(SessionMutation::save(session, now, value))
+        },
     )
 }
 
@@ -151,10 +150,7 @@ pub(crate) fn mark_session_cancelled(
     state: &AppState,
     session_id: &str,
 ) -> Result<DocumentSession, String> {
-    mutate_rewrite_job_session_cloned_now(app, state, session_id, |session, _| {
-        set_session_cancelled(session);
-        Ok(())
-    })
+    mark_session_transition(app, state, session_id, set_session_cancelled)
 }
 
 pub(crate) fn mark_session_paused(
@@ -162,10 +158,7 @@ pub(crate) fn mark_session_paused(
     state: &AppState,
     session_id: &str,
 ) -> Result<DocumentSession, String> {
-    mutate_rewrite_job_session_cloned_now(app, state, session_id, |session, _| {
-        set_session_paused(session);
-        Ok(())
-    })
+    mark_session_transition(app, state, session_id, set_session_paused)
 }
 
 pub(crate) fn mark_session_running(
@@ -173,10 +166,7 @@ pub(crate) fn mark_session_running(
     state: &AppState,
     session_id: &str,
 ) -> Result<DocumentSession, String> {
-    mutate_rewrite_job_session_cloned_now(app, state, session_id, |session, _| {
-        set_session_running(session);
-        Ok(())
-    })
+    mark_session_transition(app, state, session_id, set_session_running)
 }
 
 pub(crate) fn finalize_auto_session(
@@ -184,22 +174,22 @@ pub(crate) fn finalize_auto_session(
     state: &AppState,
     session_id: &str,
 ) -> Result<RunningState, String> {
-    mutate_rewrite_job_session_now(app, state, session_id, |session, now| {
-        session.status = compute_session_state(session);
-        Ok(save_session_value(session, now, session.status))
-    })
+    mutate_stored_session_now(app, state, session_id, |session| {
+            session.status = compute_session_state(session);
+            Ok(session.status)
+        })
 }
 
-pub(crate) fn mark_chunks_running(
+pub(crate) fn mark_units_running(
     app: &AppHandle,
     state: &AppState,
     session_id: &str,
-    indices: &[usize],
+    rewrite_unit_ids: &[String],
 ) -> Result<(), String> {
-    mutate_rewrite_job_session_now(app, state, session_id, |session, now| {
-        set_chunks_running_status(session, indices)?;
-        Ok(save_session_value(session, now, ()))
-    })
+    mutate_stored_session_now(app, state, session_id, |session| {
+            set_units_running_status(session, rewrite_unit_ids)?;
+            Ok(())
+        })
 }
 
 pub(crate) fn mark_session_failed(
@@ -208,22 +198,22 @@ pub(crate) fn mark_session_failed(
     session_id: &str,
     error: String,
 ) -> Result<(), String> {
-    mutate_rewrite_job_session_now(app, state, session_id, |session, now| {
-        session.status = RunningState::Failed;
-        fail_running_chunks(session, &error);
-        Ok(save_session_value(session, now, ()))
-    })
+    mutate_stored_session_now(app, state, session_id, |session| {
+            session.status = RunningState::Failed;
+            fail_running_units(session, &error);
+            Ok(())
+        })
 }
 
 pub(crate) fn mark_auto_batch_failed(
     app: &AppHandle,
     state: &AppState,
     session_id: &str,
-    indices: &[usize],
+    rewrite_unit_ids: &[String],
     error: String,
 ) -> Result<(), String> {
-    mutate_rewrite_job_session_now(app, state, session_id, |session, now| {
-        fail_target_chunks_and_reset_other_running(session, indices, &error)?;
-        Ok(save_session_value(session, now, ()))
-    })
+    mutate_stored_session_now(app, state, session_id, |session| {
+            fail_target_units_and_reset_other_running(session, rewrite_unit_ids, &error)?;
+            Ok(())
+        })
 }

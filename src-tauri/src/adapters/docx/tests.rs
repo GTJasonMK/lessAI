@@ -1,15 +1,10 @@
 use super::DocxAdapter;
 use crate::{
     adapters::TextRegion,
-    documents::RegionSegmentationStrategy,
-    models::{
-        ChunkPresentation, ChunkPreset, ChunkStatus, ChunkTask, DocumentFormat, DocumentSession,
-        RunningState,
-    },
-    rewrite,
+    models::{TextPresentation, SegmentationPreset},
+    rewrite_unit::build_rewrite_units,
     test_support::{build_docx_entries, build_minimal_docx},
 };
-use chrono::Utc;
 use std::{fs, path::PathBuf};
 use zip::ZipArchive;
 
@@ -139,22 +134,38 @@ fn build_color_and_hint_fragmented_docx() -> Vec<u8> {
     build_minimal_docx(xml)
 }
 
-fn assert_single_editable_chunk_for_all_presets(regions: &[TextRegion], expected: &str) {
+fn editable_unit_texts(bytes: &[u8], preset: SegmentationPreset) -> Vec<String> {
+    let slots = DocxAdapter::extract_writeback_slots(bytes, false).expect("extract slots");
+    build_rewrite_units(&slots, preset)
+        .into_iter()
+        .filter(|unit| {
+            unit.slot_ids.iter().any(|slot_id| {
+                slots
+                    .iter()
+                    .any(|slot| slot.id == *slot_id && slot.editable)
+            })
+        })
+        .map(|unit| unit.display_text)
+        .collect()
+}
+
+fn rewrite_unit_texts(bytes: &[u8], preset: SegmentationPreset) -> Vec<String> {
+    let slots = DocxAdapter::extract_writeback_slots(bytes, false).expect("extract slots");
+    build_rewrite_units(&slots, preset)
+        .into_iter()
+        .map(|unit| unit.display_text)
+        .collect()
+}
+
+fn assert_single_editable_unit_for_all_presets(bytes: &[u8], expected: &str) {
     for preset in [
-        ChunkPreset::Clause,
-        ChunkPreset::Sentence,
-        ChunkPreset::Paragraph,
+        SegmentationPreset::Clause,
+        SegmentationPreset::Sentence,
+        SegmentationPreset::Paragraph,
     ] {
-        let chunks = rewrite::segment_regions_with_strategy(
-            regions.to_vec(),
-            preset,
-            DocumentFormat::PlainText,
-            RegionSegmentationStrategy::PreserveBoundaries,
-        );
-        let editable_chunks: Vec<&crate::rewrite::SegmentedChunk> =
-            chunks.iter().filter(|chunk| !chunk.skip_rewrite).collect();
-        assert_eq!(editable_chunks.len(), 1);
-        assert_eq!(editable_chunks[0].text, expected);
+        let editable_units = editable_unit_texts(bytes, preset);
+        assert_eq!(editable_units.len(), 1);
+        assert_eq!(editable_units[0], expected);
     }
 }
 
@@ -235,6 +246,24 @@ fn keeps_empty_paragraphs_as_blank_lines() {
     let bytes = build_minimal_docx(xml);
     let text = DocxAdapter::extract_text(&bytes).expect("extract text");
     assert_eq!(text, "\n\n正文");
+}
+
+#[test]
+fn imports_empty_paragraphs_as_locked_separators() {
+    let xml = r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">
+  <w:body>
+    <w:p></w:p>
+    <w:p><w:r><w:t>正文</w:t></w:r></w:p>
+  </w:body>
+</w:document>"#;
+    let bytes = build_minimal_docx(xml);
+
+    let regions = DocxAdapter::extract_regions(&bytes, false).expect("extract regions");
+
+    assert_eq!(regions.first().map(|region| region.body.as_str()), Some("\n\n"));
+    assert!(regions.first().is_some_and(|region| region.skip_rewrite));
+    assert!(regions.first().and_then(|region| region.presentation.as_ref()).is_none());
 }
 
 #[test]
@@ -398,6 +427,9 @@ fn imports_report_template_with_locked_non_article_objects() {
     let regions = DocxAdapter::extract_regions(&bytes, false).expect("import template");
 
     assert_has_substantive_editable_article_regions(&regions);
+    assert!(!regions
+        .iter()
+        .any(|region| !region.skip_rewrite && region.body.trim().is_empty()));
     assert!(regions
         .iter()
         .any(|region| protect_kind_of(region) == Some("image")));
@@ -486,7 +518,7 @@ fn report_template_keeps_first_heading_numbered_as_chapter_one() {
 }
 
 #[test]
-fn imports_underlined_blank_runs_as_editable_underlined_text() {
+fn imports_underlined_blank_runs_as_locked_underlined_text() {
     let xml = r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">
   <w:body>
@@ -513,9 +545,78 @@ fn imports_underlined_blank_runs_as_editable_underlined_text() {
         .expect("underlined blank presentation");
 
     assert_eq!(rebuilt, "填写日期：　　　　");
-    assert!(!blank_region.skip_rewrite);
+    assert!(blank_region.skip_rewrite);
     assert!(presentation.underline);
     assert_eq!(presentation.protect_kind.as_deref(), None);
+}
+
+#[test]
+fn splits_underlined_run_edge_whitespace_into_locked_regions() {
+    let xml = r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">
+  <w:body>
+    <w:p>
+      <w:r><w:t>作品编号：</w:t></w:r>
+      <w:r>
+        <w:rPr><w:u w:val="single"/></w:rPr>
+        <w:t xml:space="preserve">　　ABC123　　　</w:t>
+      </w:r>
+    </w:p>
+  </w:body>
+</w:document>"#;
+    let bytes = build_minimal_docx(xml);
+
+    let regions = DocxAdapter::extract_regions(&bytes, false).expect("extract regions");
+    let rebuilt = joined_region_text(&regions);
+    let underlined_regions = regions
+        .iter()
+        .filter(|region| region.presentation.as_ref().is_some_and(|presentation| presentation.underline))
+        .map(|region| (region.body.as_str(), region.skip_rewrite))
+        .collect::<Vec<_>>();
+
+    assert_eq!(rebuilt, "作品编号：　　ABC123　　　");
+    assert_eq!(
+        underlined_regions,
+        vec![("　　", true), ("ABC123", false), ("　　　", true)]
+    );
+}
+
+#[test]
+fn writes_back_underlined_run_with_locked_edge_whitespace() {
+    let xml = r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">
+  <w:body>
+    <w:p>
+      <w:r><w:t>作品编号：</w:t></w:r>
+      <w:r>
+        <w:rPr><w:u w:val="single"/></w:rPr>
+        <w:t xml:space="preserve">　　ABC123　　　</w:t>
+      </w:r>
+    </w:p>
+  </w:body>
+</w:document>"#;
+    let bytes = build_minimal_docx(xml);
+    let source = DocxAdapter::extract_writeback_source_text(&bytes).expect("extract source");
+    let mut regions = DocxAdapter::extract_writeback_regions(&bytes).expect("extract regions");
+    let editable_region = regions
+        .iter_mut()
+        .find(|region| !region.skip_rewrite && region.body == "ABC123")
+        .expect("editable fill content");
+    editable_region.body = "ZX-9".to_string();
+
+    let rewritten = DocxAdapter::write_updated_regions(&bytes, &source, &regions)
+        .expect("write updated regions");
+    let extracted = DocxAdapter::extract_writeback_regions(&rewritten).expect("extract rewritten");
+    let underlined_regions = extracted
+        .iter()
+        .filter(|region| region.presentation.as_ref().is_some_and(|presentation| presentation.underline))
+        .map(|region| (region.body.as_str(), region.skip_rewrite))
+        .collect::<Vec<_>>();
+
+    assert_eq!(
+        underlined_regions,
+        vec![("　　", true), ("ZX-9", false), ("　　　", true)]
+    );
 }
 
 #[test]
@@ -1619,7 +1720,7 @@ fn writes_back_regions_around_locked_formula_without_touching_formula_xml() {
         TextRegion {
             body: "E=mc^2".to_string(),
             skip_rewrite: true,
-            presentation: Some(ChunkPresentation {
+            presentation: Some(TextPresentation {
                 bold: false,
                 italic: false,
                 underline: false,
@@ -1706,60 +1807,15 @@ fn writes_back_docx_with_adjacent_locked_formula_regions_after_chunk_roundtrip()
     let bytes = build_minimal_docx(xml);
     let source =
         DocxAdapter::extract_writeback_source_text(&bytes).expect("extract writeback source");
-    let regions = DocxAdapter::extract_regions(&bytes, false).expect("extract regions");
-
+    let slots = DocxAdapter::extract_writeback_slots(&bytes, false).expect("extract slots");
     for preset in [
-        ChunkPreset::Clause,
-        ChunkPreset::Sentence,
-        ChunkPreset::Paragraph,
+        SegmentationPreset::Clause,
+        SegmentationPreset::Sentence,
+        SegmentationPreset::Paragraph,
     ] {
-        let chunks = rewrite::segment_regions_with_strategy(
-            regions.clone(),
-            preset,
-            DocumentFormat::PlainText,
-            RegionSegmentationStrategy::PreserveBoundaries,
-        )
-        .into_iter()
-        .enumerate()
-        .map(|(index, chunk)| ChunkTask {
-            index,
-            source_text: chunk.text,
-            separator_after: chunk.separator_after,
-            skip_rewrite: chunk.skip_rewrite,
-            presentation: chunk.presentation,
-            status: if chunk.skip_rewrite {
-                ChunkStatus::Done
-            } else {
-                ChunkStatus::Idle
-            },
-            error_message: None,
-        })
-        .collect::<Vec<_>>();
-        let now = Utc::now();
-        let session = DocumentSession {
-            id: format!("adjacent-formula-{preset:?}"),
-            title: "test".to_string(),
-            document_path: "test.docx".to_string(),
-            source_text: source.clone(),
-            source_snapshot: None,
-            normalized_text: source.clone(),
-            write_back_supported: true,
-            write_back_block_reason: None,
-            plain_text_editor_safe: false,
-            plain_text_editor_block_reason: None,
-            chunk_preset: Some(crate::models::ChunkPreset::Paragraph),
-            rewrite_headings: Some(false),
-            chunks,
-            suggestions: Vec::new(),
-            next_suggestion_sequence: 1,
-            status: RunningState::Idle,
-            created_at: now,
-            updated_at: now,
-        };
-
-        let merged = crate::rewrite_projection::build_merged_regions(&session, None);
-        let rewritten = DocxAdapter::write_updated_regions(&bytes, &source, &merged)
-            .expect("write updated regions after chunk roundtrip");
+        let _ = editable_unit_texts(&bytes, preset);
+        let rewritten = DocxAdapter::write_updated_slots(&bytes, &source, &slots)
+            .expect("write updated slots after segmentation roundtrip");
         let extracted = DocxAdapter::extract_writeback_source_text(&rewritten)
             .expect("extract rewritten writeback source");
 
@@ -1793,7 +1849,7 @@ fn rejects_region_writeback_when_locked_formula_text_changes() {
         TextRegion {
             body: "被改坏的公式".to_string(),
             skip_rewrite: true,
-            presentation: Some(ChunkPresentation {
+            presentation: Some(TextPresentation {
                 bold: false,
                 italic: false,
                 underline: false,
@@ -2383,60 +2439,15 @@ fn writes_back_docx_with_empty_paragraphs_after_chunk_roundtrip() {
     let bytes = build_minimal_docx(xml);
     let source =
         DocxAdapter::extract_writeback_source_text(&bytes).expect("extract writeback source");
-    let regions = DocxAdapter::extract_regions(&bytes, false).expect("extract regions");
-
+    let slots = DocxAdapter::extract_writeback_slots(&bytes, false).expect("extract slots");
     for preset in [
-        ChunkPreset::Clause,
-        ChunkPreset::Sentence,
-        ChunkPreset::Paragraph,
+        SegmentationPreset::Clause,
+        SegmentationPreset::Sentence,
+        SegmentationPreset::Paragraph,
     ] {
-        let chunks = rewrite::segment_regions_with_strategy(
-            regions.clone(),
-            preset,
-            DocumentFormat::PlainText,
-            RegionSegmentationStrategy::PreserveBoundaries,
-        )
-        .into_iter()
-        .enumerate()
-        .map(|(index, chunk)| ChunkTask {
-            index,
-            source_text: chunk.text,
-            separator_after: chunk.separator_after,
-            skip_rewrite: chunk.skip_rewrite,
-            presentation: chunk.presentation,
-            status: if chunk.skip_rewrite {
-                ChunkStatus::Done
-            } else {
-                ChunkStatus::Idle
-            },
-            error_message: None,
-        })
-        .collect::<Vec<_>>();
-        let now = Utc::now();
-        let session = DocumentSession {
-            id: "test".to_string(),
-            title: "test".to_string(),
-            document_path: "test.docx".to_string(),
-            source_text: source.clone(),
-            source_snapshot: None,
-            normalized_text: source.clone(),
-            write_back_supported: true,
-            write_back_block_reason: None,
-            plain_text_editor_safe: false,
-            plain_text_editor_block_reason: None,
-            chunk_preset: Some(crate::models::ChunkPreset::Paragraph),
-            rewrite_headings: Some(false),
-            chunks,
-            suggestions: Vec::new(),
-            next_suggestion_sequence: 1,
-            status: RunningState::Idle,
-            created_at: now,
-            updated_at: now,
-        };
-
-        let merged = crate::rewrite_projection::build_merged_regions(&session, None);
-        let rewritten = DocxAdapter::write_updated_regions(&bytes, &source, &merged)
-            .expect("write updated regions after chunk roundtrip");
+        let _ = editable_unit_texts(&bytes, preset);
+        let rewritten = DocxAdapter::write_updated_slots(&bytes, &source, &slots)
+            .expect("write updated slots after segmentation roundtrip");
         let extracted = DocxAdapter::extract_text(&rewritten).expect("extract rewritten text");
 
         assert_eq!(extracted, source);
@@ -2456,50 +2467,9 @@ fn writes_back_docx_with_collapsed_empty_paragraph_separators() {
     let bytes = build_minimal_docx(xml);
     let source =
         DocxAdapter::extract_writeback_source_text(&bytes).expect("extract writeback source");
-    let now = Utc::now();
-    let session = DocumentSession {
-        id: "collapsed".to_string(),
-        title: "collapsed".to_string(),
-        document_path: "collapsed.docx".to_string(),
-        source_text: source.clone(),
-        source_snapshot: None,
-        normalized_text: source.clone(),
-        write_back_supported: true,
-        write_back_block_reason: None,
-        plain_text_editor_safe: false,
-        plain_text_editor_block_reason: None,
-        chunk_preset: Some(crate::models::ChunkPreset::Paragraph),
-        rewrite_headings: Some(false),
-        chunks: vec![
-            ChunkTask {
-                index: 0,
-                source_text: "第一段".to_string(),
-                separator_after: "\n\n\n\n".to_string(),
-                skip_rewrite: false,
-                presentation: None,
-                status: ChunkStatus::Idle,
-                error_message: None,
-            },
-            ChunkTask {
-                index: 1,
-                source_text: "第二段".to_string(),
-                separator_after: String::new(),
-                skip_rewrite: false,
-                presentation: None,
-                status: ChunkStatus::Idle,
-                error_message: None,
-            },
-        ],
-        suggestions: Vec::new(),
-        next_suggestion_sequence: 1,
-        status: RunningState::Idle,
-        created_at: now,
-        updated_at: now,
-    };
-
-    let merged = crate::rewrite_projection::build_merged_regions(&session, None);
-    let rewritten = DocxAdapter::write_updated_regions(&bytes, &source, &merged)
-        .expect("write updated regions from collapsed separators");
+    let slots = DocxAdapter::extract_writeback_slots(&bytes, false).expect("extract slots");
+    let rewritten = DocxAdapter::write_updated_slots(&bytes, &source, &slots)
+        .expect("write updated slots from collapsed separators");
     let extracted = DocxAdapter::extract_text(&rewritten).expect("extract rewritten text");
 
     assert_eq!(extracted, source);
@@ -2576,7 +2546,7 @@ fn merges_adjacent_runs_when_only_rfonts_hint_differs() {
 
     assert_eq!(regions.len(), 1);
     assert_eq!(regions[0].body, "2025年（第18届）");
-    assert_single_editable_chunk_for_all_presets(&regions, "2025年（第18届）");
+    assert_single_editable_unit_for_all_presets(&bytes, "2025年（第18届）");
 }
 
 #[test]
@@ -2597,9 +2567,8 @@ fn merges_adjacent_runs_when_only_hint_only_rpr_differs_from_plain_text() {
     let bytes = build_hint_only_rpr_fragmented_docx();
     let regions = DocxAdapter::extract_regions(&bytes, false).expect("extract regions");
 
-    assert_eq!(regions.len(), 1);
-    assert_eq!(regions[0].body, "Ctrl + 0");
-    assert_single_editable_chunk_for_all_presets(&regions, "Ctrl + 0");
+    assert_eq!(joined_region_text(&regions), "Ctrl + 0");
+    assert_single_editable_unit_for_all_presets(&bytes, "Ctrl + 0");
 }
 
 #[test]
@@ -2609,7 +2578,7 @@ fn merges_adjacent_runs_when_hint_only_rfonts_is_mixed_with_real_style_propertie
 
     assert_eq!(regions.len(), 1);
     assert_eq!(regions[0].body, "建议不超过1页");
-    assert_single_editable_chunk_for_all_presets(&regions, "建议不超过1页");
+    assert_single_editable_unit_for_all_presets(&bytes, "建议不超过1页");
 }
 
 #[test]
@@ -2619,28 +2588,78 @@ fn merges_writeback_regions_when_hint_only_rfonts_would_otherwise_split_text() {
 
     assert_eq!(regions.len(), 1);
     assert_eq!(regions[0].body, "建议不超过1页");
-    assert_single_editable_chunk_for_all_presets(&regions, "建议不超过1页");
+    assert_single_editable_unit_for_all_presets(&bytes, "建议不超过1页");
 }
 
 #[test]
 fn report_template_keeps_shortcuts_and_page_counts_in_whole_chunks() {
     let bytes = load_repo_docx_fixture("04-3 作品报告（大数据应用赛，2025版）模板.docx");
-    let regions = DocxAdapter::extract_regions(&bytes, false).expect("extract regions");
-    let chunks = rewrite::segment_regions_with_strategy(
-        regions,
-        ChunkPreset::Clause,
-        DocumentFormat::PlainText,
-        RegionSegmentationStrategy::PreserveBoundaries,
-    );
-    let chunk_texts = chunks
-        .iter()
-        .map(|chunk| format!("{}{}", chunk.text, chunk.separator_after))
-        .collect::<Vec<_>>();
+    let chunk_texts = editable_unit_texts(&bytes, SegmentationPreset::Clause);
 
     assert!(chunk_texts.iter().any(|text| text.contains("Ctrl + 0")));
     assert!(chunk_texts
         .iter()
-        .any(|text| text.contains("建议不超过1页")));
+        .any(|text| text.contains("建议控制在1页内")));
+}
+
+#[test]
+fn report_template_paragraph_chunks_do_not_expose_empty_editable_chunks() {
+    let bytes = load_repo_docx_fixture("04-3 作品报告（大数据应用赛，2025版）模板.docx");
+    let chunks = editable_unit_texts(&bytes, SegmentationPreset::Paragraph);
+
+    assert!(
+        !chunks
+            .iter()
+            .any(|chunk| chunk.trim().is_empty()),
+        "expected no editable blank chunks, got:\n{:?}",
+        chunks
+    );
+}
+
+#[test]
+fn report_template_cover_image_unit_does_not_absorb_extra_empty_paragraph_breaks() {
+    let bytes = load_repo_docx_fixture("04-3 作品报告（大数据应用赛，2025版）模板.docx");
+    let units = rewrite_unit_texts(&bytes, SegmentationPreset::Paragraph);
+    let image_unit = units
+        .iter()
+        .find(|text| text.contains("[图片]"))
+        .expect("expected image placeholder unit");
+
+    assert!(
+        !image_unit.contains("\n\n\n\n"),
+        "expected cover image unit to avoid compounded blank paragraphs, got:\n{:?}\nfirst units:\n{:?}",
+        image_unit,
+        units.iter().take(12).collect::<Vec<_>>()
+    );
+}
+
+#[test]
+fn report_template_cover_units_do_not_emit_compounded_blank_gaps() {
+    let bytes = load_repo_docx_fixture("04-3 作品报告（大数据应用赛，2025版）模板.docx");
+    let units = rewrite_unit_texts(&bytes, SegmentationPreset::Paragraph);
+    let cover_units = units.iter().take(12).collect::<Vec<_>>();
+
+    assert!(
+        !cover_units.iter().any(|text| text.contains("\n\n\n\n")),
+        "expected cover units to avoid compounded blank gaps, got:\n{:?}",
+        cover_units
+    );
+}
+
+#[test]
+fn report_template_paragraph_units_do_not_include_blank_only_locked_units() {
+    let bytes = load_repo_docx_fixture("04-3 作品报告（大数据应用赛，2025版）模板.docx");
+    let units = rewrite_unit_texts(&bytes, SegmentationPreset::Paragraph);
+    let blank_only = units
+        .iter()
+        .filter(|text| !text.is_empty() && text.trim().is_empty())
+        .collect::<Vec<_>>();
+
+    assert!(
+        blank_only.is_empty(),
+        "expected no blank-only paragraph units, got:\n{:?}",
+        blank_only
+    );
 }
 
 #[test]
@@ -2751,8 +2770,7 @@ fn writes_back_hyperlink_with_tab_and_line_break_inside() {
     let regions = DocxAdapter::extract_regions(&bytes, false).expect("extract regions");
 
     assert_eq!(writeback_source, source);
-    assert_eq!(regions.len(), 1);
-    assert_eq!(regions[0].body, "甲\t乙\n丙");
+    assert_eq!(joined_region_text(&regions), "甲\t乙\n丙");
     assert_eq!(
         regions[0]
             .presentation
@@ -2953,6 +2971,65 @@ fn extracts_hyperlink_display_text_with_target_presentation() {
 
     assert!(!region.skip_rewrite);
     assert_eq!(presentation.href.as_deref(), Some("https://example.com"));
+}
+
+#[test]
+fn locks_bare_urls_inside_plain_docx_runs() {
+    let xml = r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">
+  <w:body>
+    <w:p>
+      <w:r>
+        <w:t>访问 https://chat.deepseek.com/share/lzlvnjcj3o5uees841 查看答案</w:t>
+      </w:r>
+    </w:p>
+  </w:body>
+</w:document>"#;
+    let bytes = build_minimal_docx(xml);
+
+    let regions = DocxAdapter::extract_regions(&bytes, false).expect("extract regions");
+    let parts = regions
+        .iter()
+        .map(|region| (region.body.as_str(), region.skip_rewrite))
+        .collect::<Vec<_>>();
+
+    assert_eq!(
+        parts,
+        vec![
+            ("访问 ", false),
+            ("https://chat.deepseek.com/share/lzlvnjcj3o5uees841", true),
+            (" 查看答案", false),
+        ]
+    );
+}
+
+#[test]
+fn keeps_url_with_trailing_space_as_one_locked_region() {
+    let xml = r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">
+  <w:body>
+    <w:p>
+      <w:r>
+        <w:t xml:space="preserve">https://chat.deepseek.com/share/lzlvnjcj3o5uees841 </w:t>
+      </w:r>
+    </w:p>
+  </w:body>
+</w:document>"#;
+    let bytes = build_minimal_docx(xml);
+
+    let regions = DocxAdapter::extract_regions(&bytes, false).expect("extract regions");
+    let parts = regions
+        .iter()
+        .map(|region| (region.body.as_str(), region.skip_rewrite))
+        .collect::<Vec<_>>();
+
+    assert_eq!(
+        parts,
+        vec![(
+            "https://chat.deepseek.com/share/lzlvnjcj3o5uees841 ",
+            true
+        )]
+    );
 }
 
 #[test]

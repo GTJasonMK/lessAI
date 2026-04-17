@@ -14,8 +14,8 @@ struct TestBatchSettlement {
 }
 
 impl super::BatchSettlement for TestBatchSettlement {
-    fn remove_batch_checked(&mut self, indices: &[usize]) -> Result<(), String> {
-        self.calls.push(format!("remove:{indices:?}"));
+    fn remove_batch_checked(&mut self, rewrite_unit_ids: &[String]) -> Result<(), String> {
+        self.calls.push(format!("remove:{rewrite_unit_ids:?}"));
         match self.remove_error.take() {
             Some(error) => Err(error),
             None => Ok(()),
@@ -24,10 +24,10 @@ impl super::BatchSettlement for TestBatchSettlement {
 
     fn apply_batch_result<T>(
         &mut self,
-        indices: &[usize],
+        rewrite_unit_ids: &[String],
         result: Result<T, String>,
     ) -> Result<T, String> {
-        self.calls.push(format!("batch:{indices:?}"));
+        self.calls.push(format!("batch:{rewrite_unit_ids:?}"));
         match self.batch_error.take() {
             Some(error) => Err(error),
             None => result,
@@ -54,10 +54,16 @@ fn abort_in_flight_clears_batches_and_aborts_tasks() {
         let mut tasks = tokio::task::JoinSet::new();
         tasks.spawn(async {
             tokio::time::sleep(Duration::from_secs(60)).await;
-            (vec![0], Ok(vec!["结果".to_string()]))
+            (
+                vec!["unit-0".to_string()],
+                Ok(crate::rewrite_unit::RewriteBatchResponse {
+                    batch_id: "batch-1".to_string(),
+                    results: Vec::new(),
+                }),
+            )
         });
 
-        let mut batches = vec![vec![0]];
+        let mut batches = vec![vec!["unit-0".to_string()]];
         abort_in_flight(&mut tasks, &mut batches);
 
         assert!(
@@ -79,27 +85,43 @@ fn abort_in_flight_clears_batches_and_aborts_tasks() {
 
 #[test]
 fn remove_in_flight_batch_removes_matching_batch() {
-    let mut batches = vec![vec![0, 1], vec![2]];
+    let mut batches = vec![
+        vec!["unit-0".to_string(), "unit-1".to_string()],
+        vec!["unit-2".to_string()],
+    ];
 
-    remove_in_flight_batch(&mut batches, &[0, 1]).expect("expected registered batch to be removed");
+    remove_in_flight_batch(&mut batches, &["unit-0".to_string(), "unit-1".to_string()])
+        .expect("expected registered batch to be removed");
 
-    assert_eq!(batches, vec![vec![2]]);
+    assert_eq!(batches, vec![vec!["unit-2".to_string()]]);
 }
 
 #[test]
 fn remove_in_flight_batch_rejects_unknown_batch() {
-    let mut batches = vec![vec![0, 1], vec![2]];
+    let mut batches = vec![
+        vec!["unit-0".to_string(), "unit-1".to_string()],
+        vec!["unit-2".to_string()],
+    ];
 
-    let error = remove_in_flight_batch(&mut batches, &[3])
+    let error = remove_in_flight_batch(&mut batches, &["unit-3".to_string()])
         .expect_err("expected unknown in-flight batch to be rejected");
 
     assert_eq!(error, UNKNOWN_IN_FLIGHT_BATCH_ERROR);
-    assert_eq!(batches, vec![vec![0, 1], vec![2]]);
+    assert_eq!(
+        batches,
+        vec![
+            vec!["unit-0".to_string(), "unit-1".to_string()],
+            vec!["unit-2".to_string()],
+        ]
+    );
 }
 
 #[test]
 fn ensure_in_flight_batches_drained_rejects_remaining_batches() {
-    let error = ensure_in_flight_batches_drained(&[vec![0], vec![2, 3]])
+    let error = ensure_in_flight_batches_drained(&[
+        vec!["unit-0".to_string()],
+        vec!["unit-2".to_string(), "unit-3".to_string()],
+    ])
         .expect_err("expected orphaned in-flight batches to be rejected");
 
     assert_eq!(error, TASK_SET_DRAINED_WITH_IN_FLIGHT_BATCHES_ERROR);
@@ -113,19 +135,20 @@ fn ensure_in_flight_batches_drained_allows_empty_state() {
 #[test]
 fn finish_completed_batch_steps_runs_remove_commit_then_progress() {
     let mut settlement = TestBatchSettlement::default();
+    let batch = vec!["unit-1".to_string(), "unit-2".to_string()];
 
-    super::finish_completed_batch_steps(&mut settlement, &[1, 2], |settlement| {
+    super::finish_completed_batch_steps(&mut settlement, &batch, |settlement| {
         settlement.calls.push("commit".to_string());
-        super::BatchSettlement::apply_batch_result(settlement, &[1, 2], Ok(2usize))
+        super::BatchSettlement::apply_batch_result(settlement, &batch, Ok(2usize))
     })
     .expect("expected completed batch helper to run remove, commit, then progress");
 
     assert_eq!(
         settlement.calls,
         vec![
-            "remove:[1, 2]".to_string(),
+            "remove:[\"unit-1\", \"unit-2\"]".to_string(),
             "commit".to_string(),
-            "batch:[1, 2]".to_string(),
+            "batch:[\"unit-1\", \"unit-2\"]".to_string(),
             "progress:2".to_string(),
         ]
     );
@@ -134,23 +157,25 @@ fn finish_completed_batch_steps_runs_remove_commit_then_progress() {
 #[test]
 fn finish_completed_batch_steps_stops_before_progress_when_commit_fails() {
     let mut settlement = TestBatchSettlement::default();
+    let batch = vec!["unit-3".to_string()];
 
-    let error = super::finish_completed_batch_steps(&mut settlement, &[3], |_| {
+    let error = super::finish_completed_batch_steps(&mut settlement, &batch, |_| {
         Err::<usize, String>("commit failed".to_string())
     })
     .expect_err("expected commit failure to short-circuit progress");
 
     assert_eq!(error, "commit failed");
-    assert_eq!(settlement.calls, vec!["remove:[3]".to_string()]);
+    assert_eq!(settlement.calls, vec!["remove:[\"unit-3\"]".to_string()]);
 }
 
 #[test]
 fn finish_failed_batch_steps_runs_remove_before_failure_handler() {
     let mut settlement = TestBatchSettlement::default();
+    let batch = vec!["unit-4".to_string()];
 
     let error = super::finish_failed_batch_steps::<_, ()>(
         &mut settlement,
-        &[4],
+        &batch,
         "batch failed".to_string(),
     )
     .expect_err("expected failed batch helper to surface batch failure");
@@ -158,6 +183,9 @@ fn finish_failed_batch_steps_runs_remove_before_failure_handler() {
     assert_eq!(error, "batch failed");
     assert_eq!(
         settlement.calls,
-        vec!["remove:[4]".to_string(), "batch:[4]".to_string()]
+        vec![
+            "remove:[\"unit-4\"]".to_string(),
+            "batch:[\"unit-4\"]".to_string(),
+        ]
     );
 }

@@ -8,7 +8,10 @@ use chrono::Utc;
 use uuid::Uuid;
 use zip::{write::FileOptions, ZipWriter};
 
-use crate::models::{ChunkPreset, DocumentSession, RunningState};
+use crate::{
+    models::{SegmentationPreset, RewriteUnitStatus, DiffSpan, DocumentSession, RunningState, SuggestionDecision},
+    rewrite_unit::{RewriteSuggestion, RewriteUnit, SlotUpdate, WritebackSlot},
+};
 
 pub(crate) fn unique_test_dir(name: &str) -> PathBuf {
     env::temp_dir().join(format!("lessai-{name}-{}", Uuid::new_v4()))
@@ -62,12 +65,81 @@ pub(crate) fn sample_clean_session(
         write_back_block_reason: None,
         plain_text_editor_safe: true,
         plain_text_editor_block_reason: None,
-        chunk_preset: Some(ChunkPreset::Paragraph),
+        segmentation_preset: Some(SegmentationPreset::Paragraph),
         rewrite_headings: Some(false),
-        chunks: Vec::new(),
+        writeback_slots: Vec::new(),
+        rewrite_units: Vec::new(),
         suggestions: Vec::new(),
         next_suggestion_sequence: 1,
         status: RunningState::Idle,
+        created_at: now,
+        updated_at: now,
+    }
+}
+
+pub(crate) fn editable_slot(id: &str, order: usize, text: &str) -> WritebackSlot {
+    WritebackSlot {
+        id: id.to_string(),
+        order,
+        text: text.to_string(),
+        editable: true,
+        role: crate::rewrite_unit::WritebackSlotRole::EditableText,
+        presentation: None,
+        anchor: None,
+        separator_after: String::new(),
+    }
+}
+
+pub(crate) fn locked_slot(id: &str, order: usize, text: &str) -> WritebackSlot {
+    WritebackSlot {
+        id: id.to_string(),
+        order,
+        text: text.to_string(),
+        editable: false,
+        role: crate::rewrite_unit::WritebackSlotRole::LockedText,
+        presentation: None,
+        anchor: None,
+        separator_after: String::new(),
+    }
+}
+
+pub(crate) fn rewrite_unit(
+    id: &str,
+    order: usize,
+    slot_ids: &[&str],
+    display_text: &str,
+    status: RewriteUnitStatus,
+) -> RewriteUnit {
+    RewriteUnit {
+        id: id.to_string(),
+        order,
+        slot_ids: slot_ids.iter().map(|slot_id| slot_id.to_string()).collect(),
+        display_text: display_text.to_string(),
+        segmentation_preset: SegmentationPreset::Paragraph,
+        status,
+        error_message: None,
+    }
+}
+
+pub(crate) fn rewrite_suggestion(
+    id: &str,
+    sequence: u64,
+    rewrite_unit_id: &str,
+    before_text: &str,
+    after_text: &str,
+    decision: SuggestionDecision,
+    slot_updates: Vec<SlotUpdate>,
+) -> RewriteSuggestion {
+    let now = Utc::now();
+    RewriteSuggestion {
+        id: id.to_string(),
+        sequence,
+        rewrite_unit_id: rewrite_unit_id.to_string(),
+        before_text: before_text.to_string(),
+        after_text: after_text.to_string(),
+        diff_spans: Vec::<DiffSpan>::new(),
+        decision,
+        slot_updates,
         created_at: now,
         updated_at: now,
     }

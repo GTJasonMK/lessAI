@@ -18,19 +18,19 @@ interface SettingsModalProps {
   providerStatus: ProviderCheckResult | null;
   busyAction: string | null;
   /** 切段/标题策略是否锁定（有修改记录时不允许改变） */
-  chunkStrategyLocked: boolean;
+  segmentationPresetLocked: boolean;
   /** 锁定原因提示，用于 UI 解释与 title */
-  chunkStrategyLockedReason: string;
+  segmentationPresetLockedReason: string;
   onClose: () => void;
   onUpdateStringSetting: <K extends "baseUrl" | "apiKey" | "model" | "updateProxy">(
     key: K,
     value: string
   ) => void;
   onUpdateNumberSetting: (
-    key: "timeoutMs" | "temperature" | "maxConcurrency" | "chunksPerRequest",
+    key: "timeoutMs" | "temperature" | "maxConcurrency" | "unitsPerBatch",
     value: string
   ) => void;
-  onUpdateChunkPreset: (value: AppSettings["chunkPreset"]) => void;
+  onUpdateSegmentationPreset: (value: AppSettings["segmentationPreset"]) => void;
   onUpdateRewriteHeadings: (value: boolean) => void;
   onUpdateRewriteMode: (value: AppSettings["rewriteMode"]) => void;
   onUpdatePromptPresetId: (value: AppSettings["promptPresetId"]) => void;
@@ -47,12 +47,12 @@ export const SettingsModal = memo(function SettingsModal({
   settings,
   providerStatus,
   busyAction,
-  chunkStrategyLocked,
-  chunkStrategyLockedReason,
+  segmentationPresetLocked,
+  segmentationPresetLockedReason,
   onClose,
   onUpdateStringSetting,
   onUpdateNumberSetting,
-  onUpdateChunkPreset,
+  onUpdateSegmentationPreset,
   onUpdateRewriteHeadings,
   onUpdateRewriteMode,
   onUpdatePromptPresetId,
@@ -168,9 +168,9 @@ export const SettingsModal = memo(function SettingsModal({
               <RewriteStrategyPage
                 settings={settings}
                 settingsReady={settingsReady}
-                chunkStrategyLocked={chunkStrategyLocked}
-                chunkStrategyLockedReason={chunkStrategyLockedReason}
-                onUpdateChunkPreset={onUpdateChunkPreset}
+                segmentationPresetLocked={segmentationPresetLocked}
+                segmentationPresetLockedReason={segmentationPresetLockedReason}
+                onUpdateSegmentationPreset={onUpdateSegmentationPreset}
                 onUpdateRewriteHeadings={onUpdateRewriteHeadings}
                 onUpdateRewriteMode={onUpdateRewriteMode}
                 onUpdateNumberSetting={onUpdateNumberSetting}

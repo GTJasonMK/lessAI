@@ -1,18 +1,23 @@
-import { memo, useEffect, useMemo, useState } from "react";
+import { memo, useMemo, useState } from "react";
 import type { MutableRefObject } from "react";
 import type {
   AppSettings,
-  ChunkTask,
   DocumentSession,
-  EditSuggestion,
   RewriteMode,
-  RewriteProgress
+  RewriteProgress,
+  RewriteSuggestion,
+  RewriteUnit
 } from "../lib/types";
 import type { SessionStats } from "../lib/helpers";
 import type { ReviewView } from "../lib/constants";
-import { groupSuggestionsByChunk, isSettingsReady } from "../lib/helpers";
-import { resolveOptimisticManualRunningIndex } from "../lib/chunkSelection";
-import type { EditorChunkOverrides } from "../lib/editorChunks";
+import {
+  buildRunningRewriteUnitIdSet,
+  findRewriteUnit,
+  groupSuggestionsByRewriteUnit,
+  isSettingsReady
+} from "../lib/helpers";
+import { resolveOptimisticManualRunningRewriteUnitId } from "../lib/rewriteUnitSelection";
+import type { EditorSlotOverrides } from "../lib/editorSlots";
 import { DocumentPanel } from "./workbench/DocumentPanel";
 import { ReviewPanel } from "./workbench/ReviewPanel";
 import type { DocumentEditorHandle } from "./workbench/document/DocumentEditor";
@@ -22,21 +27,21 @@ interface WorkbenchStageProps {
   currentSession: DocumentSession | null;
   liveProgress: RewriteProgress | null;
   currentStats: SessionStats | null;
-  activeChunk: ChunkTask | null;
-  activeChunkIndex: number;
+  activeRewriteUnit: RewriteUnit | null;
+  activeRewriteUnitId: string | null;
   activeSuggestionId: string | null;
-  selectedChunkIndices: number[];
+  selectedRewriteUnitIds: string[];
   reviewView: ReviewView;
   busyAction: string | null;
   editorMode: boolean;
   editorText: string;
-  editorChunkOverrides: EditorChunkOverrides;
+  editorSlotOverrides: EditorSlotOverrides;
   editorDirty: boolean;
   editorHasSelection: boolean;
   editorRef: MutableRefObject<DocumentEditorHandle | null>;
   documentScrollRef: MutableRefObject<HTMLDivElement | null>;
   onOpenDocument: () => void;
-  onSelectChunk: (index: number, options?: { multiSelect?: boolean }) => void;
+  onSelectRewriteUnit: (rewriteUnitId: string, options?: { multiSelect?: boolean }) => void;
   onSelectSuggestion: (suggestionId: string) => void;
   onSetReviewView: (view: ReviewView) => void;
   onStartRewrite: (mode: RewriteMode) => void;
@@ -52,7 +57,7 @@ interface WorkbenchStageProps {
   onOpenSettings: () => void;
   onEnterEditor: () => void;
   onChangeEditorText: (value: string) => void;
-  onChangeEditorChunkText: (index: number, value: string) => void;
+  onChangeEditorSlotText: (slotId: string, value: string) => void;
   onChangeEditorHasSelection: (value: boolean) => void;
   onSaveEditor: () => void;
   onSaveEditorAndExit: () => void;
@@ -66,21 +71,21 @@ export const WorkbenchStage = memo(function WorkbenchStage({
   currentSession,
   liveProgress,
   currentStats,
-  activeChunk,
-  activeChunkIndex,
+  activeRewriteUnit,
+  activeRewriteUnitId,
   activeSuggestionId,
-  selectedChunkIndices,
+  selectedRewriteUnitIds,
   reviewView,
   busyAction,
   editorMode,
   editorText,
-  editorChunkOverrides,
+  editorSlotOverrides,
   editorDirty,
   editorHasSelection,
   editorRef,
   documentScrollRef,
   onOpenDocument,
-  onSelectChunk,
+  onSelectRewriteUnit,
   onSelectSuggestion,
   onSetReviewView,
   onStartRewrite,
@@ -96,7 +101,7 @@ export const WorkbenchStage = memo(function WorkbenchStage({
   onOpenSettings,
   onEnterEditor,
   onChangeEditorText,
-  onChangeEditorChunkText,
+  onChangeEditorSlotText,
   onChangeEditorHasSelection,
   onSaveEditor,
   onSaveEditorAndExit,
@@ -110,8 +115,6 @@ export const WorkbenchStage = memo(function WorkbenchStage({
     try {
       const raw =
         typeof localStorage === "undefined" ? null : localStorage.getItem("lessai.showMarkers");
-      // 默认开启：分块边界/保护区/运行态/差异高亮是工作台的核心可视化信息。
-      // 用户仍可手动关闭以获得更“通读”的视图。
       if (!raw) return true;
       return raw === "1" || raw.toLowerCase() === "true";
     } catch {
@@ -119,52 +122,41 @@ export const WorkbenchStage = memo(function WorkbenchStage({
     }
   });
 
-  useEffect(() => {
-    try {
-      if (typeof localStorage === "undefined") return;
-      localStorage.setItem("lessai.showMarkers", showMarkers ? "1" : "0");
-    } catch {
-      // ignore
-    }
-  }, [showMarkers]);
-
-  const suggestionsByChunk = useMemo(
-    () => groupSuggestionsByChunk(currentSession?.suggestions ?? []),
+  const suggestionsByRewriteUnit = useMemo(
+    () => groupSuggestionsByRewriteUnit(currentSession?.suggestions ?? []),
     [currentSession?.suggestions]
   );
 
-  const runningIndexSet = useMemo(() => {
-    if (!currentSession) return new Set<number>();
-    if (!liveProgress) return new Set<number>();
-    if (liveProgress.sessionId !== currentSession.id) return new Set<number>();
-    return new Set(liveProgress.runningIndices);
-  }, [currentSession, liveProgress]);
+  const runningRewriteUnitIdSet = useMemo(
+    () => buildRunningRewriteUnitIdSet(currentSession, liveProgress),
+    [currentSession, liveProgress]
+  );
 
-  const optimisticManualRunningIndex = useMemo(() => {
+  const optimisticManualRunningRewriteUnitId = useMemo(() => {
     if (!currentSession) return null;
-    if (busyAction === "retry-chunk") {
-      return currentSession.chunks[activeChunkIndex]?.index ?? null;
+    if (busyAction === "retry-rewrite-unit") {
+      return activeRewriteUnitId;
     }
     if (busyAction !== "start-manual") {
       return null;
     }
-    return resolveOptimisticManualRunningIndex(
-      currentSession.chunks,
-      selectedChunkIndices
+    return resolveOptimisticManualRunningRewriteUnitId(
+      currentSession,
+      selectedRewriteUnitIds
     );
-  }, [activeChunkIndex, busyAction, currentSession, selectedChunkIndices]);
+  }, [activeRewriteUnitId, busyAction, currentSession, selectedRewriteUnitIds]);
 
-  const activeChunkSuggestions = useMemo(() => {
-    if (!currentSession || !activeChunk) return [];
-    return suggestionsByChunk.get(activeChunk.index) ?? [];
-  }, [activeChunk, currentSession, suggestionsByChunk]);
+  const activeRewriteUnitSuggestions = useMemo(() => {
+    if (!currentSession || !activeRewriteUnit) return [];
+    return suggestionsByRewriteUnit.get(activeRewriteUnit.id) ?? [];
+  }, [activeRewriteUnit, currentSession, suggestionsByRewriteUnit]);
 
   const orderedSuggestions = useMemo(() => {
     if (!currentSession) return [];
     return [...currentSession.suggestions].sort((a, b) => a.sequence - b.sequence);
   }, [currentSession]);
 
-  const activeSuggestion = useMemo<EditSuggestion | null>(() => {
+  const activeSuggestion = useMemo<RewriteSuggestion | null>(() => {
     if (!currentSession || !activeSuggestionId) return null;
     return currentSession.suggestions.find((item) => item.id === activeSuggestionId) ?? null;
   }, [currentSession, activeSuggestionId]);
@@ -179,22 +171,22 @@ export const WorkbenchStage = memo(function WorkbenchStage({
             currentSession={currentSession}
             currentStats={currentStats}
             showMarkers={showMarkers}
-            suggestionsByChunk={suggestionsByChunk}
-            runningIndexSet={runningIndexSet}
-            optimisticManualRunningIndex={optimisticManualRunningIndex}
-            activeChunkIndex={activeChunkIndex}
-            selectedChunkIndices={selectedChunkIndices}
+            suggestionsByRewriteUnit={suggestionsByRewriteUnit}
+            runningRewriteUnitIdSet={runningRewriteUnitIdSet}
+            optimisticManualRunningRewriteUnitId={optimisticManualRunningRewriteUnitId}
+            activeRewriteUnitId={activeRewriteUnitId}
+            selectedRewriteUnitIds={selectedRewriteUnitIds}
             busyAction={busyAction}
             editorMode={editorMode}
             editorText={editorText}
-            editorChunkOverrides={editorChunkOverrides}
+            editorSlotOverrides={editorSlotOverrides}
             editorDirty={editorDirty}
             editorHasSelection={editorHasSelection}
             editorRef={editorRef}
             documentScrollRef={documentScrollRef}
             onOpenDocument={onOpenDocument}
             onOpenSettings={onOpenSettings}
-            onSelectChunk={onSelectChunk}
+            onSelectRewriteUnit={onSelectRewriteUnit}
             onSelectSuggestion={onSelectSuggestion}
             onStartRewrite={onStartRewrite}
             onPause={onPause}
@@ -204,7 +196,7 @@ export const WorkbenchStage = memo(function WorkbenchStage({
             onResetSession={onResetSession}
             onEnterEditor={onEnterEditor}
             onChangeEditorText={onChangeEditorText}
-            onChangeEditorChunkText={onChangeEditorChunkText}
+            onChangeEditorSlotText={onChangeEditorSlotText}
             onChangeEditorHasSelection={onChangeEditorHasSelection}
             onSaveEditor={onSaveEditor}
             onSaveEditorAndExit={onSaveEditorAndExit}
@@ -220,8 +212,8 @@ export const WorkbenchStage = memo(function WorkbenchStage({
             settingsReady={settingsReady}
             currentSession={currentSession}
             currentStats={currentStats}
-            activeChunk={activeChunk}
-            activeChunkSuggestions={activeChunkSuggestions}
+            activeRewriteUnit={activeRewriteUnit}
+            activeRewriteUnitSuggestions={activeRewriteUnitSuggestions}
             activeSuggestionId={activeSuggestionId}
             activeSuggestion={activeSuggestion}
             showMarkers={showMarkers}
@@ -233,7 +225,7 @@ export const WorkbenchStage = memo(function WorkbenchStage({
             orderedSuggestions={orderedSuggestions}
             onOpenDocument={onOpenDocument}
             onOpenSettings={onOpenSettings}
-            onSelectChunk={onSelectChunk}
+            onSelectRewriteUnit={onSelectRewriteUnit}
             onSelectSuggestion={onSelectSuggestion}
             onSetReviewView={onSetReviewView}
             onApplySuggestion={onApplySuggestion}

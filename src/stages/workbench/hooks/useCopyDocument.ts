@@ -1,35 +1,38 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import type { ChunkTask, EditSuggestion } from "../../../lib/types";
-import type { DiffSpan } from "../../../lib/types";
-import { summarizeChunkSuggestions } from "../../../lib/helpers";
+import type { DiffSpan, DocumentSession, RewriteSuggestion } from "../../../lib/types";
+import {
+  groupSuggestionsByRewriteUnit,
+  rewriteUnitSourceText,
+  summarizeRewriteUnitSuggestions
+} from "../../../lib/helpers";
 
 export type DocumentView = "markup" | "source" | "final";
 
 type CopyState = "idle" | "copying" | "done" | "error";
 
 function buildCopyText(options: {
-  chunks: ChunkTask[];
+  currentSession: DocumentSession;
   editorMode: boolean;
   editorText: string;
   documentView: DocumentView;
-  suggestionsByChunk: Map<number, EditSuggestion[]>;
+  suggestionsByRewriteUnit: Map<string, RewriteSuggestion[]>;
 }) {
-  const { chunks, editorMode, editorText, documentView, suggestionsByChunk } = options;
+  const { currentSession, editorMode, editorText, documentView, suggestionsByRewriteUnit } = options;
 
   if (editorMode) return editorText;
   if (documentView !== "source" && documentView !== "final") return null;
 
-  return chunks
-    .map((chunk) => {
+  return currentSession.rewriteUnits
+    .map((rewriteUnit) => {
+      const source = rewriteUnitSourceText(currentSession, rewriteUnit);
       if (documentView === "source") {
-        return `${chunk.sourceText}${chunk.separatorAfter}`;
+        return source;
       }
 
-      const chunkSuggestions = suggestionsByChunk.get(chunk.index) ?? [];
-      const summary = summarizeChunkSuggestions(chunkSuggestions);
+      const unitSuggestions = suggestionsByRewriteUnit.get(rewriteUnit.id) ?? [];
+      const summary = summarizeRewriteUnitSuggestions(unitSuggestions);
       const displaySuggestion = summary.applied ?? summary.proposed ?? null;
-      const body = displaySuggestion ? displaySuggestion.afterText : chunk.sourceText;
-      return `${body}${chunk.separatorAfter}`;
+      return displaySuggestion?.afterText ?? source;
     })
     .join("");
 }
@@ -63,10 +66,9 @@ export function useCopyDocument(options: {
   editorMode: boolean;
   editorText: string;
   documentView: DocumentView;
-  chunks: ChunkTask[] | null;
-  suggestionsByChunk: Map<number, EditSuggestion[]>;
+  currentSession: DocumentSession | null;
 }) {
-  const { editorMode, editorText, documentView, chunks, suggestionsByChunk } = options;
+  const { editorMode, editorText, documentView, currentSession } = options;
 
   const [copyState, setCopyState] = useState<CopyState>("idle");
   const copyResetTimerRef = useRef<number | null>(null);
@@ -80,16 +82,21 @@ export function useCopyDocument(options: {
     };
   }, []);
 
+  const suggestionsByRewriteUnit = useMemo(
+    () => groupSuggestionsByRewriteUnit(currentSession?.suggestions ?? []),
+    [currentSession?.suggestions]
+  );
+
   const copyText = useMemo(() => {
-    if (!chunks) return null;
+    if (!currentSession) return null;
     return buildCopyText({
-      chunks,
+      currentSession,
       editorMode,
       editorText,
       documentView,
-      suggestionsByChunk
+      suggestionsByRewriteUnit
     });
-  }, [chunks, documentView, editorMode, editorText, suggestionsByChunk]);
+  }, [currentSession, documentView, editorMode, editorText, suggestionsByRewriteUnit]);
 
   const canCopy = copyText != null;
 
@@ -130,4 +137,3 @@ export function useCopyDocument(options: {
 }
 
 export type { CopyState, DiffSpan };
-

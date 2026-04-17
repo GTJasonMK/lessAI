@@ -5,8 +5,9 @@ use tauri::AppHandle;
 use crate::{
     document_snapshot::{capture_document_snapshot, SNAPSHOT_MISMATCH_ERROR},
     documents::{load_document_source, LoadedDocumentSource},
-    models::{ChunkPreset, DocumentSession, DocumentSnapshot},
-    session_builder::{build_chunks, build_clean_session, ChunkBuildInput, CleanSessionBuildInput},
+    models::{SegmentationPreset, DocumentSession, DocumentSnapshot},
+    session_builder::{build_clean_session, CleanSessionBuildInput},
+    rewrite_unit::build_rewrite_units,
     storage,
 };
 
@@ -17,7 +18,8 @@ mod rules;
 use capabilities::SessionCapabilities;
 use draft::SessionRefreshDraft;
 use rules::{
-    decide_chunk_refresh, session_can_rebuild_cleanly, source_snapshot_changed, ChunkRefreshAction,
+    decide_segmentation_refresh, session_can_rebuild_cleanly, source_snapshot_changed,
+    SegmentationRefreshAction,
 };
 
 pub(crate) struct RefreshedSession {
@@ -41,7 +43,7 @@ pub(crate) fn refresh_session_from_disk(
         existing,
         &canonical,
         loaded,
-        settings.chunk_preset,
+        settings.segmentation_preset,
         settings.rewrite_headings,
         snapshot,
     ))
@@ -51,7 +53,7 @@ fn refresh_session_from_loaded(
     existing: &DocumentSession,
     canonical: &Path,
     loaded: LoadedDocumentSource,
-    chunk_preset: ChunkPreset,
+    segmentation_preset: SegmentationPreset,
     rewrite_headings: bool,
     current_snapshot: Option<DocumentSnapshot>,
 ) -> RefreshedSession {
@@ -64,7 +66,7 @@ fn refresh_session_from_loaded(
             existing,
             canonical,
             loaded,
-            chunk_preset,
+            segmentation_preset,
             rewrite_headings,
             current_snapshot,
         );
@@ -73,25 +75,25 @@ fn refresh_session_from_loaded(
     let mut draft = SessionRefreshDraft::new(existing.clone());
     draft.sync_document_path(canonical);
 
-    let expected_chunks = build_chunks(ChunkBuildInput {
-        path: canonical,
-        regions: loaded.regions,
-        region_segmentation_strategy: loaded.region_segmentation_strategy,
-        chunk_preset,
-    });
+    let expected_rewrite_units = build_rewrite_units(&loaded.writeback_slots, segmentation_preset);
 
-    match decide_chunk_refresh(
+    match decide_segmentation_refresh(
         &draft.session,
-        &expected_chunks,
-        loaded.region_segmentation_strategy,
-        chunk_preset,
+        &loaded.writeback_slots,
+        &expected_rewrite_units,
+        segmentation_preset,
         rewrite_headings,
     ) {
-        ChunkRefreshAction::Keep => {}
-        ChunkRefreshAction::Rebuild => {
-            draft.rebuild_chunks(expected_chunks, chunk_preset, rewrite_headings);
+        SegmentationRefreshAction::Keep => {}
+        SegmentationRefreshAction::Rebuild => {
+            draft.rebuild_structure(
+                loaded.writeback_slots,
+                expected_rewrite_units,
+                segmentation_preset,
+                rewrite_headings,
+            );
         }
-        ChunkRefreshAction::Block => {
+        SegmentationRefreshAction::Block => {
             return block_session_for_structure_change(existing, canonical);
         }
     }
@@ -104,7 +106,7 @@ fn refresh_session_for_external_change(
     existing: &DocumentSession,
     canonical: &Path,
     loaded: LoadedDocumentSource,
-    chunk_preset: ChunkPreset,
+    segmentation_preset: SegmentationPreset,
     rewrite_headings: bool,
     current_snapshot: Option<DocumentSnapshot>,
 ) -> RefreshedSession {
@@ -116,7 +118,7 @@ fn refresh_session_for_external_change(
                 document_path: canonical.to_string_lossy().to_string(),
                 loaded,
                 source_snapshot: current_snapshot,
-                chunk_preset,
+                segmentation_preset,
                 rewrite_headings,
                 created_at: existing.created_at,
             }),

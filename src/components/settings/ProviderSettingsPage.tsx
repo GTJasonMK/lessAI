@@ -17,7 +17,7 @@ interface ProviderSettingsPageProps {
     value: string
   ) => void;
   onUpdateNumberSetting: (
-    key: "timeoutMs" | "temperature" | "maxConcurrency" | "chunksPerRequest",
+    key: "timeoutMs" | "temperature" | "maxConcurrency" | "unitsPerBatch",
     value: string
   ) => void;
 }

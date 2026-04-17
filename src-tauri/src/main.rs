@@ -18,6 +18,7 @@ mod rewrite_jobs;
 mod rewrite_permissions;
 mod rewrite_projection;
 mod rewrite_targets;
+mod rewrite_unit;
 mod rewrite_writeback;
 mod session_access;
 mod session_builder;
@@ -34,9 +35,8 @@ mod test_support;
 use commands::{
     apply_suggestion, cancel_rewrite, delete_suggestion, dismiss_suggestion, export_document,
     finalize_document, load_session, load_settings, open_document, pause_rewrite, reset_session,
-    resume_rewrite, retry_chunk, rewrite_snippet, save_document_chunk_edits, save_document_edits,
-    save_settings, start_rewrite, test_provider, validate_document_chunk_edits,
-    validate_document_edits,
+    resume_rewrite, retry_rewrite_unit, rewrite_selection, run_document_writeback,
+    save_settings, start_rewrite, test_provider,
 };
 use state::AppState;
 use tauri_plugin_log::{Target, TargetKind, TimezoneStrategy};
@@ -78,19 +78,16 @@ fn main() {
             open_document,
             load_session,
             reset_session,
-            save_document_edits,
-            save_document_chunk_edits,
-            validate_document_edits,
-            validate_document_chunk_edits,
+            run_document_writeback,
             start_rewrite,
             pause_rewrite,
             resume_rewrite,
             cancel_rewrite,
-            rewrite_snippet,
+            rewrite_selection,
             apply_suggestion,
             dismiss_suggestion,
             delete_suggestion,
-            retry_chunk,
+            retry_rewrite_unit,
             export_document,
             finalize_document
         ])

@@ -1,6 +1,6 @@
 import { memo, useMemo } from "react";
 import { AlertCircle } from "lucide-react";
-import type { ChunkTask, DocumentSession, EditSuggestion } from "../../../lib/types";
+import type { DocumentSession, RewriteSuggestion, RewriteUnit } from "../../../lib/types";
 import type { SessionStats } from "../../../lib/helpers";
 import type { ReviewView } from "../../../lib/constants";
 import { REVIEW_VIEW_OPTIONS } from "../../../lib/constants";
@@ -17,28 +17,28 @@ import { StatusBadge } from "../../../components/StatusBadge";
 interface SuggestionReviewPaneProps {
   currentSession: DocumentSession;
   currentStats: SessionStats;
-  activeChunk: ChunkTask | null;
+  activeRewriteUnit: RewriteUnit | null;
   activeSuggestionId: string | null;
-  activeSuggestion: EditSuggestion | null;
+  activeSuggestion: RewriteSuggestion | null;
   showMarkers: boolean;
   reviewView: ReviewView;
-  orderedSuggestions: EditSuggestion[];
+  orderedSuggestions: RewriteSuggestion[];
   onSetReviewView: (view: ReviewView) => void;
-  onSelectChunk: (index: number, options?: { multiSelect?: boolean }) => void;
+  onSelectRewriteUnit: (rewriteUnitId: string, options?: { multiSelect?: boolean }) => void;
   onSelectSuggestion: (suggestionId: string) => void;
 }
 
 export const SuggestionReviewPane = memo(function SuggestionReviewPane({
   currentSession,
   currentStats,
-  activeChunk,
+  activeRewriteUnit,
   activeSuggestionId,
   activeSuggestion,
   showMarkers,
   reviewView,
   orderedSuggestions,
   onSetReviewView,
-  onSelectChunk,
+  onSelectRewriteUnit,
   onSelectSuggestion
 }: SuggestionReviewPaneProps) {
   const documentFormat = useMemo(
@@ -61,7 +61,7 @@ export const SuggestionReviewPane = memo(function SuggestionReviewPane({
         <span className="context-chip">修改对：{currentStats.suggestionsTotal}</span>
         <span className="context-chip">待审阅：{currentStats.suggestionsProposed}</span>
         <span className="context-chip">
-          已应用：{currentStats.chunksApplied}/{currentStats.total}
+          已应用：{currentStats.unitsApplied}/{currentStats.total}
         </span>
         <span className="context-chip">候选稿：{activeCandidateCharacters} 字</span>
         <span className="context-chip">
@@ -88,12 +88,12 @@ export const SuggestionReviewPane = memo(function SuggestionReviewPane({
         </div>
       ) : null}
 
-      {activeChunk?.status === "failed" ? (
+      {activeRewriteUnit?.status === "failed" ? (
         <div className="error-card">
           <AlertCircle />
           <div>
             <strong>该片段生成失败</strong>
-            <span>{activeChunk.errorMessage ?? "请点击重试重新生成。"}</span>
+            <span>{activeRewriteUnit.errorMessage ?? "请点击重试重新生成。"}</span>
           </div>
         </div>
       ) : null}
@@ -167,7 +167,7 @@ export const SuggestionReviewPane = memo(function SuggestionReviewPane({
                 type="button"
                 className={`suggestion-row ${suggestion.id === activeSuggestionId ? "is-active" : ""}`}
                 onClick={() => {
-                  onSelectChunk(suggestion.chunkIndex);
+                  onSelectRewriteUnit(suggestion.rewriteUnitId);
                   onSelectSuggestion(suggestion.id);
                 }}
                 title={meta}

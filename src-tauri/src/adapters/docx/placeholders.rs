@@ -4,7 +4,7 @@ use super::model::{
     LockedDisplayMode, LockedRegionRender, LockedRegionTemplate, WritebackBlockTemplate,
     WritebackRegionTemplate,
 };
-use crate::models::ChunkPresentation;
+use crate::models::TextPresentation;
 
 pub(super) const DOCX_IMAGE_PLACEHOLDER: &str = "[图片]";
 pub(super) const DOCX_TEXTBOX_PLACEHOLDER: &str = "[文本框]";
@@ -16,8 +16,8 @@ pub(super) const DOCX_TABLE_PLACEHOLDER: &str = "[表格]";
 pub(super) const DOCX_SECTION_BREAK_PLACEHOLDER: &str = "[分节符]";
 pub(super) const DOCX_FIELD_PLACEHOLDER: &str = "[字段]";
 
-pub(super) fn placeholder_presentation(kind: &str) -> Option<ChunkPresentation> {
-    Some(ChunkPresentation {
+pub(super) fn placeholder_presentation(kind: &str) -> Option<TextPresentation> {
+    Some(TextPresentation {
         bold: false,
         italic: false,
         underline: false,

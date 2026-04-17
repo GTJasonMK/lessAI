@@ -1,13 +1,14 @@
 import type {
   AppSettings,
-  EditSuggestion,
-  ChunkTask,
+  RewriteUnitStatus,
   DocumentSession,
-  RunningState
+  RewriteSuggestion,
+  RewriteUnit,
+  RunningState,
+  SlotUpdate,
+  WritebackSlot,
 } from "./types";
 import type { NoticeTone } from "./constants";
-
-// ── 错误处理 ─────────────────────────────────────────────
 
 export function readableError(error: unknown): string {
   if (error instanceof Error) {
@@ -45,8 +46,6 @@ export function readableError(error: unknown): string {
   return "发生了未识别的异常。";
 }
 
-// ── 验证 ─────────────────────────────────────────────────
-
 export function isSettingsReady(settings: AppSettings) {
   return (
     settings.baseUrl.trim().length > 0 &&
@@ -54,8 +53,6 @@ export function isSettingsReady(settings: AppSettings) {
     settings.model.trim().length > 0
   );
 }
-
-// ── 格式化 ───────────────────────────────────────────────
 
 export function formatSessionStatus(status: RunningState) {
   switch (status) {
@@ -108,8 +105,6 @@ export function formatBytes(bytes: number) {
   return `${value.toFixed(fractionDigits)} ${units[index]}`;
 }
 
-// ── 文本统计 ─────────────────────────────────────────────
-
 export function countCharacters(text: string) {
   return text.replace(/\s+/g, "").length;
 }
@@ -117,8 +112,6 @@ export function countCharacters(text: string) {
 export function normalizeNewlines(text: string) {
   return text.replace(/\r\n/g, "\n").replace(/\r/g, "\n");
 }
-
-// ── 日期格式化（缓存 Intl.DateTimeFormat 实例） ──────────
 
 const zhDateFormatter = new Intl.DateTimeFormat("zh-CN", {
   month: "2-digit",
@@ -131,9 +124,74 @@ export function formatDate(value: string) {
   return zhDateFormatter.format(new Date(value));
 }
 
-// ── Suggestion 聚合 ──────────────────────────────────────
+export function buildWritebackSlotMap(slots: ReadonlyArray<WritebackSlot>) {
+  return new Map(slots.map((slot) => [slot.id, slot] as const));
+}
 
-export function formatSuggestionDecision(decision: EditSuggestion["decision"]) {
+export function resolveRewriteUnitSlots(
+  session: DocumentSession,
+  rewriteUnit: RewriteUnit
+) {
+  const slotMap = buildWritebackSlotMap(session.writebackSlots);
+  return rewriteUnit.slotIds
+    .map((slotId) => slotMap.get(slotId))
+    .filter((slot): slot is WritebackSlot => slot != null);
+}
+
+export function mergedTextFromSlots(slots: ReadonlyArray<WritebackSlot>) {
+  return slots.map((slot) => `${slot.text}${slot.separatorAfter}`).join("");
+}
+
+export function applySlotUpdatesToSlots(
+  slots: ReadonlyArray<WritebackSlot>,
+  updates: ReadonlyArray<SlotUpdate>
+) {
+  if (updates.length === 0) {
+    return [...slots];
+  }
+
+  const nextTexts = new Map(updates.map((update) => [update.slotId, update.text] as const));
+  return slots.map((slot) => ({
+    ...slot,
+    text: nextTexts.get(slot.id) ?? slot.text
+  }));
+}
+
+export function rewriteUnitSourceText(
+  session: DocumentSession,
+  rewriteUnit: RewriteUnit
+) {
+  return mergedTextFromSlots(resolveRewriteUnitSlots(session, rewriteUnit));
+}
+
+export function rewriteUnitSlotsWithSuggestion(
+  session: DocumentSession,
+  rewriteUnit: RewriteUnit,
+  suggestion: RewriteSuggestion | null
+) {
+  const slots = resolveRewriteUnitSlots(session, rewriteUnit);
+  if (!suggestion) {
+    return slots;
+  }
+  return applySlotUpdatesToSlots(slots, suggestion.slotUpdates);
+}
+
+export function rewriteUnitHasEditableSlot(
+  session: DocumentSession,
+  rewriteUnit: RewriteUnit
+) {
+  return resolveRewriteUnitSlots(session, rewriteUnit).some((slot) => slot.editable);
+}
+
+export function findRewriteUnit(
+  session: DocumentSession,
+  rewriteUnitId: string | null | undefined
+) {
+  if (!rewriteUnitId) return null;
+  return session.rewriteUnits.find((item) => item.id === rewriteUnitId) ?? null;
+}
+
+export function formatSuggestionDecision(decision: RewriteSuggestion["decision"]) {
   switch (decision) {
     case "proposed":
       return "待审阅";
@@ -146,7 +204,7 @@ export function formatSuggestionDecision(decision: EditSuggestion["decision"]) {
   }
 }
 
-export function suggestionTone(decision: EditSuggestion["decision"]): NoticeTone {
+export function suggestionTone(decision: RewriteSuggestion["decision"]): NoticeTone {
   switch (decision) {
     case "applied":
       return "success";
@@ -159,38 +217,38 @@ export function suggestionTone(decision: EditSuggestion["decision"]): NoticeTone
   }
 }
 
-export function groupSuggestionsByChunk(
-  suggestions: ReadonlyArray<EditSuggestion>
+export function groupSuggestionsByRewriteUnit(
+  suggestions: ReadonlyArray<RewriteSuggestion>
 ) {
-  const map = new Map<number, EditSuggestion[]>();
+  const map = new Map<string, RewriteSuggestion[]>();
   for (const suggestion of suggestions) {
-    const list = map.get(suggestion.chunkIndex);
+    const list = map.get(suggestion.rewriteUnitId);
     if (list) {
       list.push(suggestion);
     } else {
-      map.set(suggestion.chunkIndex, [suggestion]);
+      map.set(suggestion.rewriteUnitId, [suggestion]);
     }
   }
 
-  for (const [chunkIndex, list] of map.entries()) {
-    list.sort((a, b) => a.sequence - b.sequence);
-    map.set(chunkIndex, list);
+  for (const [rewriteUnitId, list] of map.entries()) {
+    list.sort((left, right) => left.sequence - right.sequence);
+    map.set(rewriteUnitId, list);
   }
 
   return map;
 }
 
-export interface ChunkSuggestionSummary {
+export interface RewriteUnitSuggestionSummary {
   total: number;
-  latest: EditSuggestion | null;
-  applied: EditSuggestion | null;
-  proposed: EditSuggestion | null;
+  latest: RewriteSuggestion | null;
+  applied: RewriteSuggestion | null;
+  proposed: RewriteSuggestion | null;
   dismissedCount: number;
 }
 
-export function summarizeChunkSuggestions(
-  suggestions: ReadonlyArray<EditSuggestion>
-): ChunkSuggestionSummary {
+export function summarizeRewriteUnitSuggestions(
+  suggestions: ReadonlyArray<RewriteSuggestion>
+): RewriteUnitSuggestionSummary {
   if (suggestions.length === 0) {
     return {
       total: 0,
@@ -201,8 +259,8 @@ export function summarizeChunkSuggestions(
     };
   }
 
-  let applied: EditSuggestion | null = null;
-  let proposed: EditSuggestion | null = null;
+  let applied: RewriteSuggestion | null = null;
+  let proposed: RewriteSuggestion | null = null;
   let dismissedCount = 0;
 
   for (let index = suggestions.length - 1; index >= 0; index -= 1) {
@@ -240,23 +298,24 @@ export function getLatestSuggestion(session: DocumentSession) {
   );
 }
 
-export function formatChunkStatus(
-  chunk: ChunkTask,
-  chunkSuggestions: ReadonlyArray<EditSuggestion>
+export function formatRewriteUnitStatus(
+  session: DocumentSession,
+  rewriteUnit: RewriteUnit,
+  unitSuggestions: ReadonlyArray<RewriteSuggestion>
 ) {
-  if (chunk.status === "running") {
+  if (rewriteUnit.status === "running") {
     return "生成中";
   }
 
-  if (chunk.status === "failed") {
+  if (rewriteUnit.status === "failed") {
     return "失败";
   }
 
-  if (chunk.skipRewrite) {
+  if (!rewriteUnitHasEditableSlot(session, rewriteUnit)) {
     return "跳过";
   }
 
-  const summary = summarizeChunkSuggestions(chunkSuggestions);
+  const summary = summarizeRewriteUnitSuggestions(unitSuggestions);
   if (summary.applied) {
     return "已应用";
   }
@@ -265,14 +324,12 @@ export function formatChunkStatus(
     return "待审阅";
   }
 
-  if (chunk.status === "done" && summary.total > 0) {
+  if (rewriteUnit.status === "done" && summary.total > 0) {
     return "保留原文";
   }
 
   return "待生成";
 }
-
-// ── Session 统计 ─────────────────────────────────────────
 
 export interface SessionStats {
   total: number;
@@ -285,9 +342,9 @@ export interface SessionStats {
   suggestionsProposed: number;
   suggestionsApplied: number;
   suggestionsDismissed: number;
-  chunksTouched: number;
-  chunksApplied: number;
-  chunksProposed: number;
+  unitsTouched: number;
+  unitsApplied: number;
+  unitsProposed: number;
 }
 
 export function getSessionStats(session: DocumentSession): SessionStats {
@@ -296,11 +353,11 @@ export function getSessionStats(session: DocumentSession): SessionStats {
   let done = 0;
   let failed = 0;
 
-  for (const chunk of session.chunks) {
-    if (chunk.status === "idle") idle += 1;
-    if (chunk.status === "running") running += 1;
-    if (chunk.status === "done") done += 1;
-    if (chunk.status === "failed") failed += 1;
+  for (const rewriteUnit of session.rewriteUnits) {
+    if (rewriteUnit.status === "idle") idle += 1;
+    if (rewriteUnit.status === "running") running += 1;
+    if (rewriteUnit.status === "done") done += 1;
+    if (rewriteUnit.status === "failed") failed += 1;
   }
 
   const suggestionsTotal = session.suggestions.length;
@@ -313,83 +370,70 @@ export function getSessionStats(session: DocumentSession): SessionStats {
     if (suggestion.decision === "dismissed") suggestionsDismissed += 1;
   }
 
-  const suggestionsByChunk = groupSuggestionsByChunk(session.suggestions);
-  let chunksTouched = 0;
-  let chunksApplied = 0;
-  let chunksProposed = 0;
-  for (const list of suggestionsByChunk.values()) {
+  const suggestionsByRewriteUnit = groupSuggestionsByRewriteUnit(session.suggestions);
+  let unitsTouched = 0;
+  let unitsApplied = 0;
+  let unitsProposed = 0;
+  for (const list of suggestionsByRewriteUnit.values()) {
     if (list.length === 0) continue;
-    chunksTouched += 1;
-    const summary = summarizeChunkSuggestions(list);
-    if (summary.applied) chunksApplied += 1;
-    if (summary.proposed) chunksProposed += 1;
+    unitsTouched += 1;
+    const summary = summarizeRewriteUnitSuggestions(list);
+    if (summary.applied) unitsApplied += 1;
+    if (summary.proposed) unitsProposed += 1;
   }
 
-  const total = session.chunks.length;
-  const pendingGeneration = idle + failed;
-
   return {
-    total,
+    total: session.rewriteUnits.length,
     idle,
     running,
     done,
     failed,
-    pendingGeneration,
+    pendingGeneration: idle + failed,
     suggestionsTotal,
     suggestionsProposed,
     suggestionsApplied,
     suggestionsDismissed,
-    chunksTouched,
-    chunksApplied,
-    chunksProposed
+    unitsTouched,
+    unitsApplied,
+    unitsProposed
   };
 }
 
-// ── Chunk 查询 ───────────────────────────────────────────
-
-function firstChunkIndexBy(
+function firstRewriteUnitIdBy(
   session: DocumentSession,
-  predicate: (chunk: ChunkTask) => boolean
+  predicate: (rewriteUnit: RewriteUnit) => boolean
 ) {
-  const index = session.chunks.findIndex(predicate);
-  return index >= 0 ? index : null;
+  return session.rewriteUnits.find((rewriteUnit) => predicate(rewriteUnit))?.id ?? null;
 }
 
-export function selectDefaultChunkIndex(session: DocumentSession) {
+export function selectDefaultRewriteUnitId(session: DocumentSession) {
   const latest = getLatestSuggestion(session);
   if (latest) {
-    return latest.chunkIndex;
+    return latest.rewriteUnitId;
   }
 
-  const failedIdx = firstChunkIndexBy(session, (chunk) => chunk.status === "failed");
-  if (failedIdx != null) {
-    return failedIdx;
+  const failedId = firstRewriteUnitIdBy(session, (rewriteUnit) => rewriteUnit.status === "failed");
+  if (failedId) {
+    return failedId;
   }
 
-  const runningIdx = firstChunkIndexBy(session, (chunk) => chunk.status === "running");
-  if (runningIdx != null) {
-    return runningIdx;
+  const runningId = firstRewriteUnitIdBy(session, (rewriteUnit) => rewriteUnit.status === "running");
+  if (runningId) {
+    return runningId;
   }
 
-  const idleIdx = firstChunkIndexBy(session, (chunk) => chunk.status === "idle");
-  if (idleIdx != null) {
-    return idleIdx;
+  const idleId = firstRewriteUnitIdBy(session, (rewriteUnit) => rewriteUnit.status === "idle");
+  if (idleId) {
+    return idleId;
   }
 
-  return 0;
+  return session.rewriteUnits[0]?.id ?? null;
 }
-
-// ── 路径显示（Windows `\\?\` 前缀清理） ─────────────────
 
 export function formatDisplayPath(path: string) {
   const value = path.trim();
   if (!value) return path;
 
-  // Windows 扩展路径前缀：
-  // - `\\?\C:\...`
-  // - `\\?\UNC\server\share\...`
-  // 这些前缀对文件 IO 有用，但对 UI 展示非常“怪”。
-  // 这里仅用于显示，不改变后端真实读写路径。
   if (value.startsWith("\\\\?\\UNC\\")) {
     return `\\\\${value.slice("\\\\?\\UNC\\".length)}`;
   }
@@ -398,7 +442,6 @@ export function formatDisplayPath(path: string) {
     return value.slice("\\\\?\\".length);
   }
 
-  // 少数情况下可能是正斜杠版本（例如 `//?/C:/...`）
   if (value.startsWith("//?/UNC/")) {
     return `//${value.slice("//?/UNC/".length)}`;
   }
@@ -409,8 +452,6 @@ export function formatDisplayPath(path: string) {
 
   return value;
 }
-
-// ── 扩展名判断（用于能力开关） ──────────────────────────
 
 export function fileExtensionLower(path: string) {
   const value = path.trim();
@@ -445,25 +486,48 @@ export function canRewriteSession(session: DocumentSession | null) {
   return rewriteBlockedReason(session) == null;
 }
 
-// ── 文件名清理 ───────────────────────────────────────────
-
 export function sanitizeFileName(name: string) {
   const cleaned = name.trim().replace(/[<>:"/\\|?*\u0000-\u001f]/g, "_");
   return cleaned.length > 0 ? cleaned : "lessai-result";
 }
 
-// ── Chunk 状态对应 StatusBadge 色调 ──────────────────────
-
-export function chunkStatusTone(
-  chunk: ChunkTask,
-  chunkSuggestions: ReadonlyArray<EditSuggestion>
+export function rewriteUnitStatusTone(
+  session: DocumentSession,
+  rewriteUnit: RewriteUnit,
+  unitSuggestions: ReadonlyArray<RewriteSuggestion>
 ): NoticeTone {
-  if (chunk.status === "failed") return "error";
-  if (chunk.status === "running") return "info";
-  if (chunk.skipRewrite) return "info";
+  if (rewriteUnit.status === "failed") return "error";
+  if (rewriteUnit.status === "running") return "info";
+  if (!rewriteUnitHasEditableSlot(session, rewriteUnit)) return "info";
 
-  const summary = summarizeChunkSuggestions(chunkSuggestions);
+  const summary = summarizeRewriteUnitSuggestions(unitSuggestions);
   if (summary.applied) return "success";
   if (summary.proposed) return "warning";
   return "info";
+}
+
+export function isRewriteUnitDone(rewriteUnit: RewriteUnit) {
+  return rewriteUnit.status === "done";
+}
+
+export function isRewriteUnitPending(rewriteUnit: RewriteUnit) {
+  return rewriteUnit.status === "idle" || rewriteUnit.status === "failed";
+}
+
+export function hasEditableRewriteUnits(session: DocumentSession) {
+  return session.rewriteUnits.some((rewriteUnit) => rewriteUnit.status !== "done");
+}
+
+export function buildRunningRewriteUnitIdSet(
+  session: DocumentSession | null,
+  liveProgress: { sessionId: string; runningUnitIds: string[] } | null
+) {
+  if (!session || !liveProgress || liveProgress.sessionId !== session.id) {
+    return new Set<string>();
+  }
+  return new Set(liveProgress.runningUnitIds);
+}
+
+export function sortRewriteUnitsByOrder(units: ReadonlyArray<RewriteUnit>) {
+  return [...units].sort((left, right) => left.order - right.order);
 }

@@ -3,16 +3,16 @@ use std::{fs, path::Path};
 use super::{
     ensure_document_can_write_back, ensure_document_source_matches_session,
     execute_document_writeback, load_document_source, normalize_text_against_source_layout,
-    DocumentWriteback, RegionSegmentationStrategy, WritebackMode,
+    DocumentWriteback, WritebackMode,
 };
 use crate::document_snapshot::{capture_document_snapshot, SNAPSHOT_MISSING_ERROR};
 use crate::test_support::{build_docx_entries, build_minimal_docx, cleanup_dir, write_temp_file};
 
-fn rebuild_regions_text(loaded: &super::LoadedDocumentSource) -> String {
+fn rebuild_source_text(loaded: &super::LoadedDocumentSource) -> String {
     loaded
-        .regions
+        .writeback_slots
         .iter()
-        .map(|region| region.body.as_str())
+        .map(|slot| format!("{}{}", slot.text, slot.separator_after))
         .collect::<String>()
 }
 
@@ -163,7 +163,7 @@ fn write_document_content_rejects_docx_without_snapshot_even_when_source_matches
 }
 
 #[test]
-fn load_markdown_source_returns_regions_with_format_aware_strategy() {
+fn load_markdown_source_returns_writeback_slots() {
     let markdown =
         "# 标题\n正文里的 `code` 和 [链接](https://example.com)。\n\n```ts\nconst x = 1;\n```\n";
     let (root, target) = write_temp_file("markdown-source", "md", markdown.as_bytes());
@@ -171,71 +171,59 @@ fn load_markdown_source_returns_regions_with_format_aware_strategy() {
     let loaded = load_document_source(&target, false).expect("load markdown");
 
     assert_eq!(loaded.source_text, markdown);
-    assert_eq!(
-        loaded.region_segmentation_strategy,
-        RegionSegmentationStrategy::FormatAware
-    );
-    assert_eq!(rebuild_regions_text(&loaded), markdown);
-    assert!(loaded.regions.iter().any(|region| region.skip_rewrite));
+    assert_eq!(rebuild_source_text(&loaded), markdown);
+    assert!(loaded.writeback_slots.iter().any(|slot| !slot.editable));
     assert!(loaded
-        .regions
+        .writeback_slots
         .iter()
-        .any(|region| region.body.contains("`code`")));
+        .any(|slot| slot.text.contains("`code`")));
     assert!(loaded
-        .regions
+        .writeback_slots
         .iter()
-        .any(|region| region.body.contains("```ts")));
+        .any(|slot| slot.text.contains("```ts")));
 
     cleanup_dir(&root);
 }
 
 #[test]
-fn load_tex_source_returns_regions_with_format_aware_strategy() {
+fn load_tex_source_returns_writeback_slots() {
     let tex = "\\section{标题}\n正文和公式 $x+y$。\n% 注释\n";
     let (root, target) = write_temp_file("tex-source", "tex", tex.as_bytes());
 
     let loaded = load_document_source(&target, false).expect("load tex");
 
     assert_eq!(loaded.source_text, tex);
-    assert_eq!(
-        loaded.region_segmentation_strategy,
-        RegionSegmentationStrategy::FormatAware
-    );
-    assert_eq!(rebuild_regions_text(&loaded), tex);
-    assert!(loaded.regions.iter().any(|region| region.skip_rewrite));
+    assert_eq!(rebuild_source_text(&loaded), tex);
+    assert!(loaded.writeback_slots.iter().any(|slot| !slot.editable));
     assert!(loaded
-        .regions
+        .writeback_slots
         .iter()
-        .any(|region| region.body.contains("\\section")));
+        .any(|slot| slot.text.contains("\\section")));
     assert!(loaded
-        .regions
+        .writeback_slots
         .iter()
-        .any(|region| region.body.contains("$x+y$")));
+        .any(|slot| slot.text.contains("$x+y$")));
 
     cleanup_dir(&root);
 }
 
 #[test]
-fn load_plain_text_source_returns_single_editable_region() {
+fn load_plain_text_source_returns_single_editable_slot() {
     let text = "第一句。\n第二句。";
     let (root, target) = write_temp_file("plain-source", "txt", text.as_bytes());
 
     let loaded = load_document_source(&target, false).expect("load text");
 
     assert_eq!(loaded.source_text, text);
-    assert_eq!(
-        loaded.region_segmentation_strategy,
-        RegionSegmentationStrategy::FormatAware
-    );
-    assert_eq!(loaded.regions.len(), 1);
-    assert_eq!(loaded.regions[0].body, text);
-    assert!(!loaded.regions[0].skip_rewrite);
+    assert_eq!(loaded.writeback_slots.len(), 1);
+    assert_eq!(loaded.writeback_slots[0].text, text);
+    assert!(loaded.writeback_slots[0].editable);
 
     cleanup_dir(&root);
 }
 
 #[test]
-fn load_docx_source_preserves_region_boundaries() {
+fn load_docx_source_preserves_writeback_slot_boundaries() {
     let document_xml = r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">
   <w:body>
@@ -260,20 +248,16 @@ fn load_docx_source_preserves_region_boundaries() {
 
     let loaded = load_document_source(&target, false).expect("load docx");
 
-    assert_eq!(
-        loaded.region_segmentation_strategy,
-        RegionSegmentationStrategy::PreserveBoundaries
-    );
-    assert_eq!(rebuild_regions_text(&loaded), loaded.source_text);
-    assert!(loaded.regions.iter().any(|region| region.skip_rewrite));
+    assert_eq!(rebuild_source_text(&loaded), loaded.source_text);
+    assert!(loaded.writeback_slots.iter().any(|slot| !slot.editable));
     assert!(loaded
-        .regions
+        .writeback_slots
         .iter()
-        .any(|region| region.body.contains("标题")));
+        .any(|slot| slot.text.contains("标题")));
     assert!(loaded
-        .regions
+        .writeback_slots
         .iter()
-        .any(|region| region.body.contains("正文")));
+        .any(|slot| slot.text.contains("正文")));
 
     cleanup_dir(&root);
 }

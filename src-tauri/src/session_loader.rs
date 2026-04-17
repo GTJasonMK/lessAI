@@ -17,7 +17,7 @@ pub(crate) struct LoadedCleanSessionBuildInput<'a> {
     pub document_path: String,
     pub loaded: crate::documents::LoadedDocumentSource,
     pub source_snapshot: Option<crate::models::DocumentSnapshot>,
-    pub chunk_preset: crate::models::ChunkPreset,
+    pub segmentation_preset: crate::models::SegmentationPreset,
     pub rewrite_headings: bool,
     pub created_at: DateTime<Utc>,
     pub reject_empty: bool,
@@ -70,7 +70,7 @@ pub(crate) fn build_loaded_clean_session(
         document_path: input.document_path,
         loaded: input.loaded,
         source_snapshot: input.source_snapshot,
-        chunk_preset: input.chunk_preset,
+        segmentation_preset: input.segmentation_preset,
         rewrite_headings: input.rewrite_headings,
         created_at: input.created_at,
     }))
@@ -90,7 +90,7 @@ pub(crate) fn load_clean_session_from_disk(
         document_path: input.document_path,
         loaded,
         source_snapshot,
-        chunk_preset: settings.chunk_preset,
+        segmentation_preset: settings.segmentation_preset,
         rewrite_headings: settings.rewrite_headings,
         created_at: input.created_at,
         reject_empty: input.reject_empty,
@@ -102,20 +102,15 @@ mod tests {
     use chrono::Utc;
 
     use crate::{
-        adapters::TextRegion,
-        documents::{LoadedDocumentSource, RegionSegmentationStrategy},
-        models::{ChunkPreset, DocumentSession, DocumentSnapshot, RunningState},
+        documents::LoadedDocumentSource,
+        models::{SegmentationPreset, DocumentSession, DocumentSnapshot, RunningState},
+        rewrite_unit::WritebackSlot,
     };
 
     fn sample_loaded(source_text: &str) -> LoadedDocumentSource {
         LoadedDocumentSource {
             source_text: source_text.to_string(),
-            regions: vec![TextRegion {
-                body: source_text.to_string(),
-                skip_rewrite: false,
-                presentation: None,
-            }],
-            region_segmentation_strategy: RegionSegmentationStrategy::PreserveBoundaries,
+            writeback_slots: vec![WritebackSlot::editable("slot-0", 0, source_text)],
             write_back_supported: true,
             write_back_block_reason: None,
             plain_text_editor_safe: true,
@@ -133,7 +128,7 @@ mod tests {
             source_snapshot: Some(DocumentSnapshot {
                 sha256: "snap".to_string(),
             }),
-            chunk_preset: ChunkPreset::Paragraph,
+            segmentation_preset: SegmentationPreset::Paragraph,
             rewrite_headings: false,
             created_at: Utc::now(),
             reject_empty: true,
@@ -153,7 +148,7 @@ mod tests {
             source_snapshot: Some(DocumentSnapshot {
                 sha256: "snap".to_string(),
             }),
-            chunk_preset: ChunkPreset::Paragraph,
+            segmentation_preset: SegmentationPreset::Paragraph,
             rewrite_headings: false,
             created_at: Utc::now(),
             reject_empty: false,
@@ -178,9 +173,10 @@ mod tests {
             write_back_block_reason: None,
             plain_text_editor_safe: true,
             plain_text_editor_block_reason: None,
-            chunk_preset: Some(ChunkPreset::Paragraph),
+            segmentation_preset: Some(SegmentationPreset::Paragraph),
             rewrite_headings: Some(false),
-            chunks: Vec::new(),
+            writeback_slots: Vec::new(),
+            rewrite_units: Vec::new(),
             suggestions: Vec::new(),
             next_suggestion_sequence: 1,
             status: RunningState::Idle,

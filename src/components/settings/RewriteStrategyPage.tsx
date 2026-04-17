@@ -6,13 +6,13 @@ import { StatusBadge } from "../StatusBadge";
 interface RewriteStrategyPageProps {
   settings: AppSettings;
   settingsReady: boolean;
-  chunkStrategyLocked: boolean;
-  chunkStrategyLockedReason: string;
-  onUpdateChunkPreset: (value: AppSettings["chunkPreset"]) => void;
+  segmentationPresetLocked: boolean;
+  segmentationPresetLockedReason: string;
+  onUpdateSegmentationPreset: (value: AppSettings["segmentationPreset"]) => void;
   onUpdateRewriteHeadings: (value: boolean) => void;
   onUpdateRewriteMode: (value: AppSettings["rewriteMode"]) => void;
   onUpdateNumberSetting: (
-    key: "timeoutMs" | "temperature" | "maxConcurrency" | "chunksPerRequest",
+    key: "timeoutMs" | "temperature" | "maxConcurrency" | "unitsPerBatch",
     value: string
   ) => void;
 }
@@ -20,9 +20,9 @@ interface RewriteStrategyPageProps {
 export const RewriteStrategyPage = memo(function RewriteStrategyPage({
   settings,
   settingsReady,
-  chunkStrategyLocked,
-  chunkStrategyLockedReason,
-  onUpdateChunkPreset,
+  segmentationPresetLocked,
+  segmentationPresetLockedReason,
+  onUpdateSegmentationPreset,
   onUpdateRewriteHeadings,
   onUpdateRewriteMode,
   onUpdateNumberSetting
@@ -40,7 +40,7 @@ export const RewriteStrategyPage = memo(function RewriteStrategyPage({
         <div className="field-line">
           <span>默认切段策略</span>
           <strong>
-            {PRESET_OPTIONS.find((item) => item.value === settings.chunkPreset)?.label}
+            {PRESET_OPTIONS.find((item) => item.value === settings.segmentationPreset)?.label}
           </strong>
         </div>
         <div className="segmented-grid">
@@ -48,18 +48,18 @@ export const RewriteStrategyPage = memo(function RewriteStrategyPage({
             <button
               key={option.value}
               type="button"
-              className={`segment-card ${settings.chunkPreset === option.value ? "is-active" : ""}`}
-              onClick={() => onUpdateChunkPreset(option.value)}
-              disabled={chunkStrategyLocked}
-              title={chunkStrategyLocked ? chunkStrategyLockedReason : option.hint}
+              className={`segment-card ${settings.segmentationPreset === option.value ? "is-active" : ""}`}
+              onClick={() => onUpdateSegmentationPreset(option.value)}
+              disabled={segmentationPresetLocked}
+              title={segmentationPresetLocked ? segmentationPresetLockedReason : option.hint}
             >
               <strong>{option.label}</strong>
               <span>{option.hint}</span>
             </button>
           ))}
         </div>
-        {chunkStrategyLocked ? (
-          <span className="workspace-hint">{chunkStrategyLockedReason}</span>
+        {segmentationPresetLocked ? (
+          <span className="workspace-hint">{segmentationPresetLockedReason}</span>
         ) : (
           <span className="workspace-hint">
             提示：切段策略属于“项目级配置”。项目产生修改对/进度后会锁定；如需调整，请先重置记录或打开新文档。
@@ -77,8 +77,8 @@ export const RewriteStrategyPage = memo(function RewriteStrategyPage({
             type="button"
             className={`segment-card ${!settings.rewriteHeadings ? "is-active" : ""}`}
             onClick={() => onUpdateRewriteHeadings(false)}
-            disabled={chunkStrategyLocked}
-            title={chunkStrategyLocked ? chunkStrategyLockedReason : ""}
+            disabled={segmentationPresetLocked}
+            title={segmentationPresetLocked ? segmentationPresetLockedReason : ""}
           >
             <strong>默认屏蔽</strong>
             <span>导入时标记标题为不可改写</span>
@@ -87,15 +87,15 @@ export const RewriteStrategyPage = memo(function RewriteStrategyPage({
             type="button"
             className={`segment-card ${settings.rewriteHeadings ? "is-active" : ""}`}
             onClick={() => onUpdateRewriteHeadings(true)}
-            disabled={chunkStrategyLocked}
-            title={chunkStrategyLocked ? chunkStrategyLockedReason : ""}
+            disabled={segmentationPresetLocked}
+            title={segmentationPresetLocked ? segmentationPresetLockedReason : ""}
           >
             <strong>允许改写</strong>
             <span>标题也参与降重（更激进）</span>
           </button>
         </div>
-        {chunkStrategyLocked ? (
-          <span className="workspace-hint">{chunkStrategyLockedReason}</span>
+        {segmentationPresetLocked ? (
+          <span className="workspace-hint">{segmentationPresetLockedReason}</span>
         ) : (
           <span className="workspace-hint">
             提示：该开关只影响“新导入/重置后”的切块；已生成会话需重置记录才生效。
@@ -145,18 +145,18 @@ export const RewriteStrategyPage = memo(function RewriteStrategyPage({
 
       <div className="field-block">
         <div className="field-line">
-          <span>单次请求处理块数</span>
-          <strong>{settings.chunksPerRequest}</strong>
+          <span>单批处理单元数</span>
+          <strong>{settings.unitsPerBatch}</strong>
         </div>
         <input
           type="number"
           min={1}
           step={1}
-          value={settings.chunksPerRequest}
-          onChange={(event) => onUpdateNumberSetting("chunksPerRequest", event.target.value)}
+          value={settings.unitsPerBatch}
+          onChange={(event) => onUpdateNumberSetting("unitsPerBatch", event.target.value)}
         />
         <span className="workspace-hint">
-          该值表示一次模型请求里最多打包多少个块；它不同于并发数，并发数控制“同时发起多少个请求”。
+          该值表示一次模型调用中最多包含多少个改写单元；它不同于并发数，并发数控制同时运行多少次批量调用。
         </span>
       </div>
     </div>

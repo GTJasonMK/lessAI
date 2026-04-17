@@ -3,6 +3,7 @@ use std::{
     path::{Path, PathBuf},
 };
 
+use serde_json::{Map, Value};
 use tauri::{AppHandle, Manager};
 
 use crate::{
@@ -33,7 +34,16 @@ fn session_path(app: &AppHandle, session_id: &str) -> Result<PathBuf, String> {
     Ok(sessions_root(app)?.join(format!("{session_id}.json")))
 }
 
+fn settings_path(app: &AppHandle) -> Result<PathBuf, String> {
+    Ok(app_root(app)?.join(SETTINGS_FILE))
+}
+
 fn read_json<T: serde::de::DeserializeOwned>(path: &Path) -> Result<T, String> {
+    let content = fs::read_to_string(path).map_err(|error| error.to_string())?;
+    serde_json::from_str(&content).map_err(|error| error.to_string())
+}
+
+fn read_json_value(path: &Path) -> Result<Value, String> {
     let content = fs::read_to_string(path).map_err(|error| error.to_string())?;
     serde_json::from_str(&content).map_err(|error| error.to_string())
 }
@@ -63,18 +73,77 @@ fn restrict_json_file_permissions(path: &Path) {
 }
 
 pub fn load_settings(app: &AppHandle) -> Result<AppSettings, String> {
-    let path = app_root(app)?.join(SETTINGS_FILE);
+    let path = settings_path(app)?;
+    match load_settings_from_path(&path) {
+        Ok(settings) => Ok(settings),
+        Err(error) => {
+            log::error!("load settings failed: path={} error={error}", path.display());
+            Err(error)
+        }
+    }
+}
+
+fn load_settings_from_path(path: &Path) -> Result<AppSettings, String> {
     if !path.exists() {
         return Ok(AppSettings::default());
     }
 
-    let settings = read_json(&path)?;
-    validate_numeric_settings(&settings)?;
+    let raw = read_json_value(path).map_err(|error| {
+        format!("读取配置文件失败（{}）：{error}", path.display())
+    })?;
+    let (migrated, changed_fields) = migrate_settings_value(raw)?;
+    let settings = serde_json::from_value::<AppSettings>(migrated).map_err(|error| {
+        format!("读取配置文件失败（{}）：{error}", path.display())
+    })?;
+    validate_numeric_settings(&settings).map_err(|error| {
+        format!("配置文件无效（{}）：{error}", path.display())
+    })?;
+    if !changed_fields.is_empty() {
+        write_json(path, &settings).map_err(|error| {
+            format!("写回迁移后的配置文件失败（{}）：{error}", path.display())
+        })?;
+        log::warn!(
+            "migrated legacy settings file: path={} added_fields={}",
+            path.display(),
+            changed_fields.join(",")
+        );
+    }
     Ok(settings)
 }
 
+fn migrate_settings_value(value: Value) -> Result<(Value, Vec<String>), String> {
+    let mut current = match value {
+        Value::Object(object) => object,
+        _ => return Err("配置文件根节点必须是 JSON 对象。".to_string()),
+    };
+    let defaults = match serde_json::to_value(AppSettings::default())
+        .map_err(|error| error.to_string())?
+    {
+        Value::Object(object) => object,
+        _ => return Err("默认配置必须是 JSON 对象。".to_string()),
+    };
+
+    let changed_fields = merge_missing_object_fields(&mut current, &defaults);
+    Ok((Value::Object(current), changed_fields))
+}
+
+fn merge_missing_object_fields(
+    target: &mut Map<String, Value>,
+    defaults: &Map<String, Value>,
+) -> Vec<String> {
+    let mut changed_fields = Vec::new();
+    for (key, value) in defaults {
+        if target.contains_key(key) {
+            continue;
+        }
+        target.insert(key.clone(), value.clone());
+        changed_fields.push(key.clone());
+    }
+    changed_fields
+}
+
 pub fn save_settings(app: &AppHandle, settings: &AppSettings) -> Result<AppSettings, String> {
-    let path = app_root(app)?.join(SETTINGS_FILE);
+    let path = settings_path(app)?;
     validate_numeric_settings(settings)?;
     write_json(&path, settings)?;
     load_settings(app)
@@ -155,12 +224,82 @@ mod tests {
     }
 
     #[test]
-    fn validate_numeric_settings_rejects_zero_chunks_per_request() {
+    fn validate_numeric_settings_rejects_zero_units_per_batch() {
         let mut settings = AppSettings::default();
-        settings.chunks_per_request = 0;
+        settings.units_per_batch = 0;
 
         let error = validate_numeric_settings(&settings).expect_err("expected invalid batch size");
 
-        assert_eq!(error, "单次请求处理块数必须大于等于 1。");
+        assert_eq!(error, "单批处理单元数必须大于等于 1。");
+    }
+
+    #[test]
+    fn load_settings_from_path_reports_path_context_for_missing_required_field() {
+        let root = unique_test_dir("load-settings-missing-field");
+        fs::create_dir_all(&root).expect("create root");
+        let path = root.join("settings.json");
+        fs::write(
+            &path,
+            r#"{
+  "baseUrl": "https://api.openai.com/v1",
+  "apiKey": "",
+  "model": "gpt-4.1-mini",
+  "updateProxy": "",
+  "timeoutMs": 45000,
+  "temperature": 0.8,
+  "segmentationPreset": "small",
+  "rewriteHeadings": false,
+  "rewriteMode": "manual",
+  "maxConcurrency": 2,
+  "unitsPerBatch": 1,
+  "promptPresetId": "humanizer_zh",
+  "customPrompts": []
+}"#,
+        )
+        .expect("write invalid settings");
+
+        let error = super::load_settings_from_path(&path)
+            .expect_err("expected invalid segmentation preset to fail");
+
+        assert!(error.contains("settings.json"));
+        assert!(error.contains("small"));
+        cleanup_dir(&root);
+    }
+
+    #[test]
+    fn load_settings_from_path_migrates_missing_required_fields() {
+        let root = unique_test_dir("load-settings-migrate-missing-fields");
+        fs::create_dir_all(&root).expect("create root");
+        let path = root.join("settings.json");
+        fs::write(
+            &path,
+            r#"{
+  "baseUrl": "https://api.openai.com/v1",
+  "apiKey": "key",
+  "model": "gpt-4.1-mini",
+  "timeoutMs": 45000,
+  "temperature": 0.8,
+  "rewriteMode": "manual"
+}"#,
+        )
+        .expect("write legacy settings");
+
+        let settings = super::load_settings_from_path(&path)
+            .expect("expected legacy settings to migrate");
+
+        assert_eq!(settings.api_key, "key");
+        assert_eq!(
+            settings.segmentation_preset,
+            crate::models::SegmentationPreset::Paragraph
+        );
+        assert!(!settings.rewrite_headings);
+        assert_eq!(settings.max_concurrency, 2);
+        assert_eq!(settings.units_per_batch, 1);
+
+        let stored = fs::read_to_string(&path).expect("read migrated settings");
+        assert!(stored.contains("\"segmentationPreset\""));
+        assert!(stored.contains("\"rewriteHeadings\""));
+        assert!(stored.contains("\"maxConcurrency\""));
+        cleanup_dir(&root);
     }
 }

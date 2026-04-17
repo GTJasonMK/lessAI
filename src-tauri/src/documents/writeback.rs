@@ -1,35 +1,39 @@
 use std::path::Path;
 
+use serde::Deserialize;
+
 use crate::{
     adapters, atomic_write::write_bytes_atomically,
     document_snapshot::ensure_document_snapshot_matches, models, rewrite,
+    rewrite_unit::WritebackSlot,
 };
 
 use super::source::{is_docx_path, is_pdf_path, PDF_WRITE_BACK_UNSUPPORTED};
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Deserialize)]
+#[serde(rename_all = "lowercase")]
 pub(crate) enum WritebackMode {
     Validate,
     Write,
 }
 
+#[derive(Debug)]
 pub(crate) enum DocumentWriteback<'a> {
     Text(&'a str),
-    Regions(&'a [adapters::TextRegion]),
+    Slots(&'a [WritebackSlot]),
 }
 
+#[derive(Debug)]
 pub(crate) enum OwnedDocumentWriteback {
     Text(String),
-    Regions(Vec<adapters::TextRegion>),
+    Slots(Vec<WritebackSlot>),
 }
 
 impl OwnedDocumentWriteback {
     pub(crate) fn as_document_writeback(&self) -> DocumentWriteback<'_> {
         match self {
             OwnedDocumentWriteback::Text(updated_text) => DocumentWriteback::Text(updated_text),
-            OwnedDocumentWriteback::Regions(updated_regions) => {
-                DocumentWriteback::Regions(updated_regions)
-            }
+            OwnedDocumentWriteback::Slots(updated_slots) => DocumentWriteback::Slots(updated_slots),
         }
     }
 }
@@ -98,8 +102,8 @@ fn build_document_writeback_bytes(
         DocumentWriteback::Text(updated_text) => {
             build_text_writeback_bytes(source, expected_source_text, updated_text)
         }
-        DocumentWriteback::Regions(updated_regions) => {
-            build_region_writeback_bytes(source, expected_source_text, updated_regions)
+        DocumentWriteback::Slots(updated_slots) => {
+            build_slot_writeback_bytes(source, expected_source_text, updated_slots)
         }
     }
 }
@@ -154,18 +158,18 @@ pub(crate) fn normalize_text_against_source_layout(
     rewrite::convert_line_endings(&normalized, line_ending)
 }
 
-fn build_region_writeback_bytes(
+fn build_slot_writeback_bytes(
     source: &VerifiedWritebackSource,
     expected_source_text: &str,
-    updated_regions: &[adapters::TextRegion],
+    updated_slots: &[WritebackSlot],
 ) -> Result<Vec<u8>, String> {
     match source {
-        VerifiedWritebackSource::PlainText => Err("当前仅 docx 支持按片段写回。".to_string()),
+        VerifiedWritebackSource::PlainText => Err("当前仅 docx 支持按槽位写回。".to_string()),
         VerifiedWritebackSource::Docx(current_bytes) => {
-            adapters::docx::DocxAdapter::write_updated_regions(
+            adapters::docx::DocxAdapter::write_updated_slots(
                 current_bytes,
                 expected_source_text,
-                updated_regions,
+                updated_slots,
             )
         }
     }

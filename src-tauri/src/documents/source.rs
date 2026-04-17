@@ -2,10 +2,14 @@ use std::{fs, path::Path};
 
 use uuid::Uuid;
 
-use crate::{adapters, models};
+use crate::{
+    adapters, models,
+    rewrite_unit::{WritebackSlot, WritebackSlotRole},
+};
 
 pub(super) const PDF_WRITE_BACK_UNSUPPORTED: &str =
     "当前文件为 .pdf：暂不支持写回覆盖（PDF 不是纯文本格式）。请使用“导出”为 .txt 后再进行后续排版。";
+const PRESERVED_BLOCK_SEPARATOR: &str = "\n\n";
 
 pub(crate) fn document_session_id(document_path: &str) -> String {
     let namespace = Uuid::from_bytes([
@@ -52,18 +56,11 @@ pub(crate) fn is_pdf_path(path: &Path) -> bool {
 
 pub(crate) struct LoadedDocumentSource {
     pub(crate) source_text: String,
-    pub(crate) regions: Vec<adapters::TextRegion>,
-    pub(crate) region_segmentation_strategy: RegionSegmentationStrategy,
+    pub(crate) writeback_slots: Vec<WritebackSlot>,
     pub(crate) write_back_supported: bool,
     pub(crate) write_back_block_reason: Option<String>,
     pub(crate) plain_text_editor_safe: bool,
     pub(crate) plain_text_editor_block_reason: Option<String>,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum RegionSegmentationStrategy {
-    FormatAware,
-    PreserveBoundaries,
 }
 
 fn plain_text_regions(text: &str) -> Vec<adapters::TextRegion> {
@@ -72,6 +69,63 @@ fn plain_text_regions(text: &str) -> Vec<adapters::TextRegion> {
         skip_rewrite: false,
         presentation: None,
     }]
+}
+
+pub(crate) fn writeback_slots_from_regions(regions: &[adapters::TextRegion]) -> Vec<WritebackSlot> {
+    regions
+        .iter()
+        .enumerate()
+        .map(|(index, region)| build_writeback_slot(index, region))
+        .collect()
+}
+
+fn build_writeback_slot(index: usize, region: &adapters::TextRegion) -> WritebackSlot {
+    let (text, separator_after) = split_region_body_and_separator(&region.body);
+    let text_empty = text.is_empty();
+    let whitespace_only = !text.is_empty() && text.chars().all(|ch| ch.is_whitespace());
+    let editable = !region.skip_rewrite && !whitespace_only && !text_empty;
+
+    WritebackSlot {
+        id: format!("slot-{index}"),
+        order: index,
+        text,
+        editable,
+        role: slot_role(text_empty, region.skip_rewrite, whitespace_only, &separator_after),
+        presentation: region.presentation.clone(),
+        anchor: None,
+        separator_after,
+    }
+}
+
+fn slot_role(
+    text_empty: bool,
+    skip_rewrite: bool,
+    whitespace_only: bool,
+    separator_after: &str,
+) -> WritebackSlotRole {
+    if text_empty && separator_after.contains(PRESERVED_BLOCK_SEPARATOR) {
+        return WritebackSlotRole::ParagraphBreak;
+    }
+    if skip_rewrite || whitespace_only {
+        return WritebackSlotRole::LockedText;
+    }
+    WritebackSlotRole::EditableText
+}
+
+fn split_region_body_and_separator(body: &str) -> (String, String) {
+    if let Some(text) = body.strip_suffix(PRESERVED_BLOCK_SEPARATOR) {
+        return (text.to_string(), PRESERVED_BLOCK_SEPARATOR.to_string());
+    }
+    split_trailing_whitespace(body)
+}
+
+fn split_trailing_whitespace(text: &str) -> (String, String) {
+    let split_at = text
+        .char_indices()
+        .rev()
+        .find_map(|(index, ch)| (!ch.is_whitespace()).then_some(index + ch.len_utf8()))
+        .unwrap_or(0);
+    (text[..split_at].to_string(), text[split_at..].to_string())
 }
 
 fn decode_utf16_payload(payload: &[u8], little_endian: bool) -> Result<String, String> {
@@ -132,10 +186,11 @@ pub(crate) fn load_document_source(
 
 fn load_docx_source(path: &Path, rewrite_headings: bool) -> Result<LoadedDocumentSource, String> {
     let bytes = fs::read(path).map_err(|error| error.to_string())?;
-    let regions = adapters::docx::DocxAdapter::extract_regions(&bytes, rewrite_headings)?;
-    let source_text = regions
+    let writeback_slots =
+        adapters::docx::DocxAdapter::extract_writeback_slots(&bytes, rewrite_headings)?;
+    let source_text = writeback_slots
         .iter()
-        .map(|region| region.body.as_str())
+        .map(|slot| format!("{}{}", slot.text, slot.separator_after))
         .collect::<String>();
     if source_text.trim().is_empty() {
         return Err(
@@ -147,8 +202,7 @@ fn load_docx_source(path: &Path, rewrite_headings: bool) -> Result<LoadedDocumen
     let plain_text_editor_block_reason = write_back_block_reason.clone();
     Ok(LoadedDocumentSource {
         source_text,
-        regions,
-        region_segmentation_strategy: RegionSegmentationStrategy::PreserveBoundaries,
+        writeback_slots,
         write_back_supported: write_back_block_reason.is_none(),
         write_back_block_reason,
         plain_text_editor_safe: plain_text_editor_block_reason.is_none(),
@@ -159,10 +213,10 @@ fn load_docx_source(path: &Path, rewrite_headings: bool) -> Result<LoadedDocumen
 fn load_pdf_source(path: &Path) -> Result<LoadedDocumentSource, String> {
     let bytes = fs::read(path).map_err(|error| error.to_string())?;
     let source_text = adapters::pdf::PdfAdapter::extract_text(&bytes)?;
+    let writeback_slots = writeback_slots_from_regions(&plain_text_regions(&source_text));
     Ok(LoadedDocumentSource {
-        regions: plain_text_regions(&source_text),
         source_text,
-        region_segmentation_strategy: RegionSegmentationStrategy::FormatAware,
+        writeback_slots,
         write_back_supported: false,
         write_back_block_reason: Some(PDF_WRITE_BACK_UNSUPPORTED.to_string()),
         plain_text_editor_safe: false,
@@ -191,10 +245,10 @@ fn load_textual_source(
         "tex" | "latex" => adapters::tex::TexAdapter::split_regions(&source_text, rewrite_headings),
         _ => plain_text_regions(&source_text),
     };
+    let writeback_slots = writeback_slots_from_regions(&regions);
     Ok(LoadedDocumentSource {
         source_text,
-        regions,
-        region_segmentation_strategy: RegionSegmentationStrategy::FormatAware,
+        writeback_slots,
         write_back_supported: true,
         write_back_block_reason: None,
         plain_text_editor_safe: true,
@@ -205,10 +259,10 @@ fn load_textual_source(
 fn load_plain_text_source(path: &Path) -> Result<LoadedDocumentSource, String> {
     let bytes = fs::read(path).map_err(|error| error.to_string())?;
     let source_text = decode_text_file(&bytes)?;
+    let writeback_slots = writeback_slots_from_regions(&plain_text_regions(&source_text));
     Ok(LoadedDocumentSource {
-        source_text: source_text.clone(),
-        regions: plain_text_regions(&source_text),
-        region_segmentation_strategy: RegionSegmentationStrategy::FormatAware,
+        source_text,
+        writeback_slots,
         write_back_supported: true,
         write_back_block_reason: None,
         plain_text_editor_safe: true,

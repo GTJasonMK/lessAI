@@ -2,23 +2,19 @@ import { useEffect, useRef } from "react";
 import { listen } from "@tauri-apps/api/event";
 import { TAURI_EVENTS } from "../lib/constants";
 import type {
-  ChunkCompletedPayload,
   RewriteFailedPayload,
+  RewriteUnitCompletedPayload,
   SessionEventPayload
 } from "../lib/constants";
 import type { RewriteProgress } from "../lib/types";
 
 interface TauriEventHandlers {
   onProgress: (payload: RewriteProgress) => void;
-  onChunkCompleted: (payload: ChunkCompletedPayload) => void;
+  onRewriteUnitCompleted: (payload: RewriteUnitCompletedPayload) => void;
   onFinished: (payload: SessionEventPayload) => void;
   onFailed: (payload: RewriteFailedPayload) => void;
 }
 
-/**
- * 注册 4 个 Tauri 事件监听器，使用 Promise.all 确保原子性注册。
- * 通过 ref 持有最新回调，避免闭包捕获旧值。
- */
 export function useTauriEvents(handlers: TauriEventHandlers) {
   const handlersRef = useRef(handlers);
   handlersRef.current = handlers;
@@ -32,8 +28,8 @@ export function useTauriEvents(handlers: TauriEventHandlers) {
         listen<RewriteProgress>(TAURI_EVENTS.REWRITE_PROGRESS, ({ payload }) => {
           handlersRef.current.onProgress(payload);
         }),
-        listen<ChunkCompletedPayload>(TAURI_EVENTS.CHUNK_COMPLETED, ({ payload }) => {
-          handlersRef.current.onChunkCompleted(payload);
+        listen<RewriteUnitCompletedPayload>(TAURI_EVENTS.REWRITE_UNIT_COMPLETED, ({ payload }) => {
+          handlersRef.current.onRewriteUnitCompleted(payload);
         }),
         listen<SessionEventPayload>(TAURI_EVENTS.REWRITE_FINISHED, ({ payload }) => {
           handlersRef.current.onFinished(payload);

@@ -1,10 +1,10 @@
 import { memo } from "react";
 import { Check, LoaderCircle, RotateCcw, Trash2, X } from "lucide-react";
-import type { ChunkTask, EditSuggestion } from "../../../lib/types";
+import type { DocumentSession, RewriteSuggestion, RewriteUnit } from "../../../lib/types";
 import {
-  chunkStatusTone,
-  formatChunkStatus,
+  formatRewriteUnitStatus,
   formatSuggestionDecision,
+  rewriteUnitStatusTone,
   suggestionTone
 } from "../../../lib/helpers";
 import { StatusBadge } from "../../../components/StatusBadge";
@@ -16,9 +16,10 @@ interface ReviewActionBarProps {
   rewritePaused: boolean;
   anyBusy: boolean;
   busyAction: string | null;
-  activeChunk: ChunkTask | null;
-  activeChunkSuggestions: EditSuggestion[];
-  activeSuggestion: EditSuggestion | null;
+  currentSession: DocumentSession | null;
+  activeRewriteUnit: RewriteUnit | null;
+  activeRewriteUnitSuggestions: RewriteSuggestion[];
+  activeSuggestion: RewriteSuggestion | null;
   onRetry: () => void;
   onApplySuggestion: (suggestionId: string) => void;
   onDismissSuggestion: (suggestionId: string) => void;
@@ -32,8 +33,9 @@ export const ReviewActionBar = memo(function ReviewActionBar({
   rewritePaused,
   anyBusy,
   busyAction,
-  activeChunk,
-  activeChunkSuggestions,
+  currentSession,
+  activeRewriteUnit,
+  activeRewriteUnitSuggestions,
   activeSuggestion,
   onRetry,
   onApplySuggestion,
@@ -52,9 +54,19 @@ export const ReviewActionBar = memo(function ReviewActionBar({
               <StatusBadge tone={suggestionTone(activeSuggestion.decision)}>
                 #{activeSuggestion.sequence} {formatSuggestionDecision(activeSuggestion.decision)}
               </StatusBadge>
-            ) : activeChunk ? (
-              <StatusBadge tone={chunkStatusTone(activeChunk, activeChunkSuggestions)}>
-                {formatChunkStatus(activeChunk, activeChunkSuggestions)}
+            ) : currentSession && activeRewriteUnit ? (
+              <StatusBadge
+                tone={rewriteUnitStatusTone(
+                  currentSession,
+                  activeRewriteUnit,
+                  activeRewriteUnitSuggestions
+                )}
+              >
+                {formatRewriteUnitStatus(
+                  currentSession,
+                  activeRewriteUnit,
+                  activeRewriteUnitSuggestions
+                )}
               </StatusBadge>
             ) : (
               <StatusBadge tone={settingsReady ? "info" : "warning"}>
@@ -64,7 +76,7 @@ export const ReviewActionBar = memo(function ReviewActionBar({
           </div>
 
           <div className="workbench-review-actionbar-buttons">
-            {activeChunk?.status === "failed" ? (
+            {activeRewriteUnit?.status === "failed" ? (
               <button
                 type="button"
                 className="icon-button icon-button-sm"
@@ -76,11 +88,11 @@ export const ReviewActionBar = memo(function ReviewActionBar({
                   !settingsReady ||
                   rewriteRunning ||
                   rewritePaused ||
-                  busyAction === "retry-chunk" ||
-                  (anyBusy && busyAction !== "retry-chunk")
+                  busyAction === "retry-rewrite-unit" ||
+                  (anyBusy && busyAction !== "retry-rewrite-unit")
                 }
               >
-                {busyAction === "retry-chunk" ? (
+                {busyAction === "retry-rewrite-unit" ? (
                   <LoaderCircle className="spin" />
                 ) : (
                   <RotateCcw />
@@ -176,4 +188,3 @@ export const ReviewActionBar = memo(function ReviewActionBar({
     </div>
   );
 });
-

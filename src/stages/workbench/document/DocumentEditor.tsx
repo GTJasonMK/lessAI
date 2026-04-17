@@ -1,7 +1,7 @@
 import { forwardRef, memo } from "react";
 
 import { isDocxPath } from "../../../lib/helpers";
-import { DocxChunkEditor } from "./DocxChunkEditor";
+import { DocxSlotEditor } from "./DocxSlotEditor";
 import { PlainTextDocumentEditor } from "./PlainTextDocumentEditor";
 import type { DocumentEditorHandle, DocumentEditorProps } from "./documentEditorTypes";
 
@@ -15,7 +15,7 @@ export type {
 export const DocumentEditor = memo(
   forwardRef<DocumentEditorHandle, DocumentEditorProps>(function DocumentEditor(props, ref) {
     if (isDocxPath(props.session.documentPath)) {
-      return <DocxChunkEditor ref={ref} {...props} />;
+      return <DocxSlotEditor ref={ref} {...props} />;
     }
 
     return <PlainTextDocumentEditor ref={ref} {...props} />;

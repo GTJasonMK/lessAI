@@ -1,7 +1,6 @@
 use std::fs;
 
-use crate::adapters::TextRegion;
-use crate::test_support::{cleanup_dir, write_temp_file};
+use crate::test_support::{cleanup_dir, editable_slot, write_temp_file};
 
 #[test]
 fn finish_document_writeback_skips_disk_write_in_validate_mode() {
@@ -40,17 +39,24 @@ fn build_text_writeback_bytes_returns_plain_text_bytes_for_plain_text_source() {
 }
 
 #[test]
-fn build_region_writeback_bytes_rejects_plain_text_source() {
-    let error = super::build_region_writeback_bytes(
+fn build_slot_writeback_bytes_rejects_plain_text_source() {
+    let error = super::build_slot_writeback_bytes(
         &super::VerifiedWritebackSource::PlainText,
         "原始内容",
-        &[TextRegion {
-            body: "新的内容".to_string(),
-            skip_rewrite: false,
-            presentation: None,
-        }],
+        &[editable_slot("slot-0", 0, "新的内容")],
     )
-    .expect_err("expected plain text region writeback to be rejected");
+    .expect_err("expected plain text slot writeback to be rejected");
 
-    assert_eq!(error, "当前仅 docx 支持按片段写回。");
+    assert_eq!(error, "当前仅 docx 支持按槽位写回。");
+}
+
+#[test]
+fn writeback_mode_deserializes_from_command_payload() {
+    let validate: super::WritebackMode =
+        serde_json::from_str("\"validate\"").expect("deserialize validate mode");
+    let write: super::WritebackMode =
+        serde_json::from_str("\"write\"").expect("deserialize write mode");
+
+    assert_eq!(validate, super::WritebackMode::Validate);
+    assert_eq!(write, super::WritebackMode::Write);
 }

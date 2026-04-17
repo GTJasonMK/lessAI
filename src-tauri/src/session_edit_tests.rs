@@ -3,7 +3,7 @@ use std::cell::{Cell, RefCell};
 use chrono::Utc;
 
 use crate::{
-    models::{ChunkPreset, DocumentSession, RunningState},
+    models::{SegmentationPreset, DocumentSession, RunningState},
     persist,
     session_access::{load_session_for_source, SessionLoadSource},
     session_flow::{allow_session, run_session_steps, SessionStepConfig},
@@ -22,9 +22,10 @@ fn sample_session() -> DocumentSession {
         write_back_block_reason: None,
         plain_text_editor_safe: true,
         plain_text_editor_block_reason: None,
-        chunk_preset: Some(ChunkPreset::Paragraph),
+        segmentation_preset: Some(SegmentationPreset::Paragraph),
         rewrite_headings: Some(false),
-        chunks: Vec::new(),
+        writeback_slots: Vec::new(),
+        rewrite_units: Vec::new(),
         suggestions: Vec::new(),
         next_suggestion_sequence: 1,
         status: RunningState::Idle,
@@ -58,32 +59,14 @@ where
 }
 
 #[test]
-fn save_session_value_marks_session_for_persist() {
+fn session_mutation_save_marks_session_for_persist() {
     let mut session = sample_session();
     let now = Utc::now();
 
-    let mutation = super::save_session_value(&mut session, now, "ok".to_string());
+    let mutation = super::SessionMutation::save(&mut session, now, "ok".to_string());
 
     match mutation {
         super::SessionMutation::Save(value) => assert_eq!(value, "ok"),
-        super::SessionMutation::SkipSave(_) => panic!("expected save mutation"),
-    }
-    assert_eq!(session.updated_at, now);
-}
-
-#[test]
-fn save_cloned_session_returns_updated_snapshot() {
-    let mut session = sample_session();
-    let now = Utc::now();
-    session.title = "已修改".to_string();
-
-    let mutation = super::save_cloned_session(&mut session, now);
-
-    match mutation {
-        super::SessionMutation::Save(saved) => {
-            assert_eq!(saved.title, "已修改");
-            assert_eq!(saved.updated_at, now);
-        }
         super::SessionMutation::SkipSave(_) => panic!("expected save mutation"),
     }
     assert_eq!(session.updated_at, now);

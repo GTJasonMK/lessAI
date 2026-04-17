@@ -1,30 +1,21 @@
 import type {
   AppSettings,
-  ChunkPreset,
-  RewriteMode
+  SegmentationPreset,
+  RewriteMode,
 } from "./types";
-
-// ── UI 类型 ──────────────────────────────────────────────
 
 export type NoticeTone = "info" | "success" | "warning" | "error";
 export type ReviewView = "diff" | "source" | "candidate";
 
-// ── 接口 ─────────────────────────────────────────────────
-
 export interface NoticeState {
   tone: NoticeTone;
   message: string;
-  /**
-   * 自动关闭时间（毫秒）。
-   * - 省略：使用默认值
-   * - null/<=0：常驻，直到手动关闭或被下一条提示覆盖
-   */
   autoDismissMs?: number | null;
 }
 
-export interface ChunkCompletedPayload {
+export interface RewriteUnitCompletedPayload {
   sessionId: string;
-  index: number;
+  rewriteUnitId: string;
   suggestionId: string;
   suggestionSequence: number;
 }
@@ -48,16 +39,12 @@ export interface PanelProps {
   children: React.ReactNode;
 }
 
-// ── Tauri 事件名常量 ────────────────────────────────────
-
 export const TAURI_EVENTS = {
   REWRITE_PROGRESS: "rewrite_progress",
-  CHUNK_COMPLETED: "chunk_completed",
+  REWRITE_UNIT_COMPLETED: "rewrite_unit_completed",
   REWRITE_FINISHED: "rewrite_finished",
   REWRITE_FAILED: "rewrite_failed"
 } as const;
-
-// ── 默认值 ──────────────────────────────────────────────
 
 export const DEFAULT_SETTINGS: AppSettings = {
   baseUrl: "https://api.openai.com/v1",
@@ -66,19 +53,17 @@ export const DEFAULT_SETTINGS: AppSettings = {
   updateProxy: "",
   timeoutMs: 45_000,
   temperature: 0.8,
-  chunkPreset: "paragraph",
+  segmentationPreset: "paragraph",
   rewriteHeadings: false,
   rewriteMode: "manual",
   maxConcurrency: 2,
-  chunksPerRequest: 1,
+  unitsPerBatch: 1,
   promptPresetId: "humanizer_zh",
   customPrompts: []
 };
 
-// ── 选项配置 ─────────────────────────────────────────────
-
 export const PRESET_OPTIONS: ReadonlyArray<{
-  value: ChunkPreset;
+  value: SegmentationPreset;
   label: string;
   hint: string;
 }> = [

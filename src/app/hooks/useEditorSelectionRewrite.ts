@@ -1,10 +1,6 @@
 import { useCallback } from "react";
 import type { MutableRefObject } from "react";
-import {
-  rewriteSnippet,
-  validateDocumentChunkEdits,
-  validateDocumentEdits
-} from "../../lib/api";
+import { rewriteSelection, runDocumentWriteback } from "../../lib/api";
 import type { DocumentSession, DocumentSnapshot } from "../../lib/types";
 import { countCharacters, readableError } from "../../lib/helpers";
 import type { ConfirmModalOptions } from "../../components/ConfirmModal";
@@ -55,7 +51,7 @@ export function useEditorSelectionRewrite(options: {
           `总字符：${size.rawChars.toLocaleString()}`,
           `换行数：${size.lineBreaks.toLocaleString()}`,
           "",
-          "系统不会替你自动拆分选区。选择继续将按当前选区直接调用模型。",
+          "系统不会替你自动拆分选区。选择继续将按当前选区直接调用模型。"
         ].join("\n"),
         okLabel: "继续处理",
         cancelLabel: "取消",
@@ -98,7 +94,7 @@ export function useEditorSelectionRewrite(options: {
 
     try {
       const rewritten = await withBusy("rewrite-selection", () =>
-        rewriteSnippet(session.id, snapshot.text, editorBaseSnapshotRef.current)
+        rewriteSelection(session.id, snapshot.text, editorBaseSnapshotRef.current)
       );
       const preview = editor.previewSelectionReplacement(snapshot, rewritten);
       if (!preview.ok) {
@@ -107,14 +103,15 @@ export function useEditorSelectionRewrite(options: {
       }
 
       await withBusy("validate-document-edits", () => {
-        if (preview.chunkEdits) {
-          return validateDocumentChunkEdits(
-            session.id,
-            preview.chunkEdits,
-            editorBaseSnapshotRef.current
-          );
-        }
-        return validateDocumentEdits(session.id, preview.value, editorBaseSnapshotRef.current);
+        const input = preview.slotEdits
+          ? { kind: "slotEdits" as const, edits: preview.slotEdits }
+          : { kind: "text" as const, content: preview.value };
+        return runDocumentWriteback(
+          session.id,
+          "validate",
+          input,
+          editorBaseSnapshotRef.current
+        );
       });
 
       const applied = editor.applySelectionReplacement(snapshot, rewritten);

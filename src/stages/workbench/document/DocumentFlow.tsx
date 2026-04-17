@@ -1,12 +1,12 @@
-import { memo, useMemo } from "react";
-import type { ChunkPreset } from "../../../lib/types";
-import { countSelectedChunkUnits } from "../../../lib/chunkSelection";
+import { memo } from "react";
+import type { SegmentationPreset } from "../../../lib/types";
+import { countSelectedRewriteUnits } from "../../../lib/rewriteUnitSelection";
 import { ParagraphDocumentFlow } from "./ParagraphDocumentFlow";
 import type { DocumentFlowBodyProps } from "./documentFlowShared";
 
 interface DocumentFlowProps extends DocumentFlowBodyProps {
   sessionId: string;
-  chunkPreset: ChunkPreset;
+  segmentationPreset: SegmentationPreset;
 }
 
 function buildWrapClassName(showMarkers: boolean, selectedDisplayCount: number) {
@@ -21,7 +21,7 @@ function legendEditableLabel(rewriteEnabled: boolean) {
 
 function legendEditableTitle(rewriteEnabled: boolean, rewriteBlockedReason: string | null) {
   return rewriteEnabled
-    ? "可改写 chunk（审阅最小单元）"
+    ? "可改写 rewrite unit（审阅最小单元）"
     : rewriteBlockedReason ?? "当前文档整体不可改写";
 }
 
@@ -33,42 +33,23 @@ function legendSelectedTitle(rewriteEnabled: boolean) {
 
 export const DocumentFlow = memo(function DocumentFlow({
   sessionId,
-  chunkPreset,
-  chunks,
+  segmentationPreset,
+  session,
+  rewriteUnits,
   documentView,
   documentFormat,
   rewriteEnabled,
   rewriteBlockedReason,
   showMarkers,
-  suggestionsByChunk,
-  runningIndexSet,
-  optimisticManualRunningIndex,
-  activeChunkIndex,
-  selectedChunkIndices,
-  onSelectChunk,
+  suggestionsByRewriteUnit,
+  runningRewriteUnitIdSet,
+  optimisticManualRunningRewriteUnitId,
+  activeRewriteUnitId,
+  selectedRewriteUnitIds,
+  onSelectRewriteUnit,
   onSelectSuggestion
 }: DocumentFlowProps) {
-  const selectedDisplayCount = useMemo(
-    () => countSelectedChunkUnits(chunks, selectedChunkIndices, chunkPreset),
-    [chunkPreset, chunks, selectedChunkIndices]
-  );
-
-  const bodyProps = {
-    sessionId,
-    chunks,
-    documentView,
-    documentFormat,
-    rewriteEnabled,
-    rewriteBlockedReason,
-    showMarkers,
-    suggestionsByChunk,
-    runningIndexSet,
-    optimisticManualRunningIndex,
-    activeChunkIndex,
-    selectedChunkIndices,
-    onSelectChunk,
-    onSelectSuggestion
-  };
+  const selectedDisplayCount = countSelectedRewriteUnits(selectedRewriteUnitIds);
 
   return (
     <div className={buildWrapClassName(showMarkers, selectedDisplayCount)}>
@@ -81,7 +62,7 @@ export const DocumentFlow = memo(function DocumentFlow({
       ) : null}
 
       {showMarkers ? (
-        <div className="chunk-legend" aria-label="高亮说明">
+        <div className="unit-legend" aria-label="高亮说明">
           <span
             className="legend-chip is-editable"
             title={legendEditableTitle(rewriteEnabled, rewriteBlockedReason)}
@@ -111,7 +92,24 @@ export const DocumentFlow = memo(function DocumentFlow({
       ) : null}
 
       <p className="document-flow">
-        <ParagraphDocumentFlow {...bodyProps} chunkPreset={chunkPreset} />
+        <ParagraphDocumentFlow
+          sessionId={sessionId}
+          segmentationPreset={segmentationPreset}
+          session={session}
+          rewriteUnits={rewriteUnits}
+          documentView={documentView}
+          documentFormat={documentFormat}
+          rewriteEnabled={rewriteEnabled}
+          rewriteBlockedReason={rewriteBlockedReason}
+          showMarkers={showMarkers}
+          suggestionsByRewriteUnit={suggestionsByRewriteUnit}
+          runningRewriteUnitIdSet={runningRewriteUnitIdSet}
+          optimisticManualRunningRewriteUnitId={optimisticManualRunningRewriteUnitId}
+          activeRewriteUnitId={activeRewriteUnitId}
+          selectedRewriteUnitIds={selectedRewriteUnitIds}
+          onSelectRewriteUnit={onSelectRewriteUnit}
+          onSelectSuggestion={onSelectSuggestion}
+        />
       </p>
     </div>
   );

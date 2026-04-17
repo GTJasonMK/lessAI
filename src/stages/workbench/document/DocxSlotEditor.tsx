@@ -1,20 +1,29 @@
-import { Fragment, forwardRef, memo, useCallback, useEffect, useImperativeHandle, useRef } from "react";
+import {
+  Fragment,
+  forwardRef,
+  memo,
+  useCallback,
+  useEffect,
+  useImperativeHandle,
+  useLayoutEffect,
+  useRef
+} from "react";
 import type { ClipboardEvent } from "react";
 
 import {
-  applyEditorChunkOverride,
-  buildEditorChunkEdits,
-  buildEditorTextFromChunks,
-  resolveEditorChunkText,
-} from "../../../lib/editorChunks";
+  applyEditorSlotOverride,
+  buildEditorSlotEdits,
+  buildEditorTextFromSession,
+  resolveEditorSlotText,
+} from "../../../lib/editorSlots";
 import { normalizeNewlines } from "../../../lib/helpers";
-import type { ChunkTask } from "../../../lib/types";
+import type { WritebackSlot } from "../../../lib/types";
 import type {
-  ChunkSelectionSnapshot,
   DocumentEditorHandle,
   DocumentEditorProps,
   DocumentEditorSelectionSnapshot,
   DocumentEditorPreviewResult,
+  SlotSelectionSnapshot,
 } from "./documentEditorTypes";
 
 function selectionPointOffset(node: HTMLElement, container: Node, offset: number) {
@@ -24,11 +33,11 @@ function selectionPointOffset(node: HTMLElement, container: Node, offset: number
   return normalizeNewlines(range.toString()).length;
 }
 
-function buildChunkSelectionSnapshot(
+function buildSlotSelectionSnapshot(
   node: HTMLElement,
-  chunkIndex: number,
+  slotId: string,
   range: Range
-): ChunkSelectionSnapshot | null {
+): SlotSelectionSnapshot | null {
   if (range.collapsed) return null;
   if (!node.contains(range.startContainer) || !node.contains(range.endContainer)) {
     return null;
@@ -38,17 +47,17 @@ function buildChunkSelectionSnapshot(
   if (text.trim().length === 0) return null;
 
   return {
-    kind: "chunk",
-    chunkIndex,
+    kind: "slot",
+    slotId,
     text,
     startOffset: selectionPointOffset(node, range.startContainer, range.startOffset),
     endOffset: selectionPointOffset(node, range.endContainer, range.endOffset)
   };
 }
 
-function replaceChunkSelectionText(
+function replaceSelectionText(
   currentText: string,
-  snapshot: ChunkSelectionSnapshot,
+  snapshot: SlotSelectionSnapshot,
   replacementText: string
 ) {
   const replacement = normalizeNewlines(replacementText);
@@ -69,11 +78,11 @@ function replaceChunkSelectionText(
   } as const;
 }
 
-function chunkPresentationClass(chunk: ChunkTask) {
-  const presentation = chunk.presentation;
+function slotPresentationClass(slot: WritebackSlot) {
+  const presentation = slot.presentation;
   return [
-    "docx-editor-chunk",
-    chunk.skipRewrite ? "is-locked" : "is-editable",
+    "docx-editor-slot",
+    slot.editable ? "is-editable" : "is-locked",
     presentation?.bold ? "is-bold" : "",
     presentation?.italic ? "is-italic" : "",
     presentation?.underline ? "is-underline" : "",
@@ -83,27 +92,27 @@ function chunkPresentationClass(chunk: ChunkTask) {
     .join(" ");
 }
 
-const EditableChunkSpan = memo(function EditableChunkSpan({
-  chunk,
+const EditableSlotSpan = memo(function EditableSlotSpan({
+  slot,
   text,
   busy,
   registerNode,
   onChange,
 }: {
-  chunk: ChunkTask;
+  slot: WritebackSlot;
   text: string;
   busy: boolean;
-  registerNode: (index: number, node: HTMLSpanElement | null) => void;
-  onChange: (index: number, value: string) => void;
+  registerNode: (slotId: string, node: HTMLSpanElement | null) => void;
+  onChange: (slotId: string, value: string) => void;
 }) {
   const nodeRef = useRef<HTMLSpanElement | null>(null);
 
   useEffect(() => {
-    registerNode(chunk.index, nodeRef.current);
-    return () => registerNode(chunk.index, null);
-  }, [chunk.index, registerNode]);
+    registerNode(slot.id, nodeRef.current);
+    return () => registerNode(slot.id, null);
+  }, [registerNode, slot.id]);
 
-  useEffect(() => {
+  useLayoutEffect(() => {
     const node = nodeRef.current;
     if (!node) return;
     const domText = normalizeNewlines(node.innerText);
@@ -115,8 +124,8 @@ const EditableChunkSpan = memo(function EditableChunkSpan({
   const handleInput = useCallback(() => {
     const node = nodeRef.current;
     if (!node) return;
-    onChange(chunk.index, normalizeNewlines(node.innerText));
-  }, [chunk.index, onChange]);
+    onChange(slot.id, normalizeNewlines(node.innerText));
+  }, [onChange, slot.id]);
 
   const handlePaste = useCallback((event: ClipboardEvent<HTMLSpanElement>) => {
     event.preventDefault();
@@ -134,59 +143,57 @@ const EditableChunkSpan = memo(function EditableChunkSpan({
   return (
     <span
       ref={nodeRef}
-      className={chunkPresentationClass(chunk)}
+      className={slotPresentationClass(slot)}
       contentEditable={!busy}
       suppressContentEditableWarning
       spellCheck={false}
       role="textbox"
-      aria-label={`编辑片段 ${chunk.index + 1}`}
-      data-chunk-index={chunk.index + 1}
+      aria-label={`编辑槽位 ${slot.order + 1}`}
+      data-slot-id={slot.id}
       onInput={handleInput}
       onPaste={handlePaste}
-    >
-      {text}
-    </span>
+    />
   );
 });
 
-export const DocxChunkEditor = memo(
-  forwardRef<DocumentEditorHandle, DocumentEditorProps>(function DocxChunkEditor(
+export const DocxSlotEditor = memo(
+  forwardRef<DocumentEditorHandle, DocumentEditorProps>(function DocxSlotEditor(
     {
       session,
-      chunkOverrides,
+      slotOverrides,
       dirty,
       busy,
       onChange,
-      onChangeChunkText,
+      onChangeSlotText,
       onSave,
       onSelectionChange
     },
     ref
   ) {
-    const chunkNodesRef = useRef<Record<number, HTMLSpanElement | null>>({});
+    const slotNodesRef = useRef<Record<string, HTMLSpanElement | null>>({});
     const hasSelectionRef = useRef(false);
 
-    const registerNode = useCallback((index: number, node: HTMLSpanElement | null) => {
-      chunkNodesRef.current[index] = node;
+    const registerNode = useCallback((slotId: string, node: HTMLSpanElement | null) => {
+      slotNodesRef.current[slotId] = node;
     }, []);
 
-    const captureChunkSelection = useCallback(() => {
+    const captureSlotSelection = useCallback(() => {
       const selection = window.getSelection();
       const range = selection?.rangeCount ? selection.getRangeAt(0) : null;
       if (!range) return null;
 
-      for (const chunk of session.chunks) {
-        if (chunk.skipRewrite) continue;
-        const node = chunkNodesRef.current[chunk.index];
+      for (const slot of session.writebackSlots) {
+        if (!slot.editable) continue;
+        const node = slotNodesRef.current[slot.id];
         if (!node) continue;
         if (!node.contains(range.startContainer) || !node.contains(range.endContainer)) {
           continue;
         }
-        return buildChunkSelectionSnapshot(node, chunk.index, range);
+        return buildSlotSelectionSnapshot(node, slot.id, range);
       }
 
       return null;
-    }, [session.chunks]);
+    }, [session.writebackSlots]);
 
     useEffect(() => {
       const handleKeyDown = (event: KeyboardEvent) => {
@@ -201,16 +208,16 @@ export const DocxChunkEditor = memo(
     }, [busy, dirty, onSave]);
 
     useEffect(() => {
-      const firstEditable = session.chunks.find((chunk) => !chunk.skipRewrite);
+      const firstEditable = session.writebackSlots.find((slot) => slot.editable);
       if (!firstEditable) return;
-      chunkNodesRef.current[firstEditable.index]?.focus();
-    }, [session.id]);
+      slotNodesRef.current[firstEditable.id]?.focus();
+    }, [session.id, session.writebackSlots]);
 
     useEffect(() => {
       if (!onSelectionChange) return;
 
       const handleSelectionChange = () => {
-        const next = captureChunkSelection() != null;
+        const next = captureSlotSelection() != null;
         if (next === hasSelectionRef.current) return;
         hasSelectionRef.current = next;
         onSelectionChange(next);
@@ -218,89 +225,89 @@ export const DocxChunkEditor = memo(
 
       document.addEventListener("selectionchange", handleSelectionChange);
       return () => document.removeEventListener("selectionchange", handleSelectionChange);
-    }, [captureChunkSelection, onSelectionChange]);
+    }, [captureSlotSelection, onSelectionChange]);
 
     const previewSelectionReplacement = useCallback(
       (
         snapshot: DocumentEditorSelectionSnapshot,
         replacementText: string
       ): DocumentEditorPreviewResult => {
-        if (snapshot.kind !== "chunk") {
+        if (snapshot.kind !== "slot") {
           return { ok: false, error: "请在单个可编辑片段内重新选中后再试。" };
         }
 
-        const chunk = session.chunks.find((item) => item.index === snapshot.chunkIndex);
-        if (!chunk || chunk.skipRewrite) {
+        const slot = session.writebackSlots.find((item) => item.id === snapshot.slotId);
+        if (!slot || !slot.editable) {
           return { ok: false, error: "当前选区不在可编辑片段内，请重新选中后再试。" };
         }
 
-        const currentText = resolveEditorChunkText(chunk, chunkOverrides);
-        const replaced = replaceChunkSelectionText(currentText, snapshot, replacementText);
+        const currentText = resolveEditorSlotText(slot, slotOverrides);
+        const replaced = replaceSelectionText(currentText, snapshot, replacementText);
         if (!replaced.ok) return replaced;
 
-        const nextOverrides = applyEditorChunkOverride(chunkOverrides, chunk, replaced.text);
+        const nextOverrides = applyEditorSlotOverride(slotOverrides, slot, replaced.text);
         return {
           ok: true,
-          value: buildEditorTextFromChunks(session.chunks, nextOverrides),
-          chunkEdits: buildEditorChunkEdits(session.chunks, nextOverrides)
+          value: buildEditorTextFromSession(session, nextOverrides),
+          slotEdits: buildEditorSlotEdits(session, nextOverrides)
         };
       },
-      [chunkOverrides, session.chunks]
+      [session, slotOverrides]
     );
 
     useImperativeHandle(
       ref,
       (): DocumentEditorHandle => ({
-        captureSelection: captureChunkSelection,
+        captureSelection: captureSlotSelection,
         previewSelectionReplacement,
         applySelectionReplacement: (snapshot, replacementText) => {
           const preview = previewSelectionReplacement(snapshot, replacementText);
           if (!preview.ok) return preview;
-          if (snapshot.kind !== "chunk") {
+          if (snapshot.kind !== "slot") {
             return { ok: false, error: "请在单个可编辑片段内重新选中后再试。" };
           }
 
-          const chunk = session.chunks.find((item) => item.index === snapshot.chunkIndex);
-          if (!chunk || chunk.skipRewrite) {
+          const slot = session.writebackSlots.find((item) => item.id === snapshot.slotId);
+          if (!slot || !slot.editable) {
             return { ok: false, error: "当前选区不在可编辑片段内，请重新选中后再试。" };
           }
 
-          const currentText = resolveEditorChunkText(chunk, chunkOverrides);
-          const replaced = replaceChunkSelectionText(currentText, snapshot, replacementText);
+          const currentText = resolveEditorSlotText(slot, slotOverrides);
+          const replaced = replaceSelectionText(currentText, snapshot, replacementText);
           if (!replaced.ok) return replaced;
 
-          const node = chunkNodesRef.current[chunk.index];
+          const node = slotNodesRef.current[slot.id];
           if (node) {
             node.innerText = replaced.text;
             node.focus();
           }
-          onChangeChunkText(chunk.index, replaced.text);
+          onChangeSlotText(slot.id, replaced.text);
           onChange(preview.value);
           return { ok: true };
         },
-        collectChunkEdits: () => buildEditorChunkEdits(session.chunks, chunkOverrides)
+        collectSlotEdits: () => buildEditorSlotEdits(session, slotOverrides)
       }),
-      [captureChunkSelection, chunkOverrides, onChange, onChangeChunkText, previewSelectionReplacement, session.chunks]
+      [captureSlotSelection, onChange, onChangeSlotText, previewSelectionReplacement, session, slotOverrides]
     );
 
     return (
       <div className="workbench-editor-editable docx-editor-flow" aria-label="编辑终稿">
-        {session.chunks.map((chunk) => {
-          const text = resolveEditorChunkText(chunk, chunkOverrides);
+        {session.writebackSlots.map((slot) => {
+          const text = resolveEditorSlotText(slot, slotOverrides);
           return (
-            <Fragment key={chunk.index}>
-              {chunk.skipRewrite ? (
-                <span className={chunkPresentationClass(chunk)}>{text}</span>
-              ) : (
-                <EditableChunkSpan
-                  chunk={chunk}
+            <Fragment key={slot.id}>
+              {slot.editable ? (
+                <EditableSlotSpan
+                  slot={slot}
                   text={text}
                   busy={busy}
                   registerNode={registerNode}
-                  onChange={onChangeChunkText}
+                  onChange={onChangeSlotText}
                 />
+              ) : (
+                <span className={slotPresentationClass(slot)}>{text}</span>
               )}
-              {chunk.separatorAfter}
+              {slot.separatorAfter}
             </Fragment>
           );
         })}

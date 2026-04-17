@@ -7,33 +7,28 @@ import {
   useState
 } from "react";
 import { loadSession, loadSettings } from "./lib/api";
-import type {
-  AppSettings,
-  DocumentSession,
-  DocumentSnapshot,
-  PromptTemplate,
-  ProviderCheckResult,
-  RewriteProgress,
-} from "./lib/types";
 import { DEFAULT_SETTINGS } from "./lib/constants";
 import type { ReviewView } from "./lib/constants";
+import { applyEditorSlotOverride, buildEditorTextFromSession, type EditorSlotOverrides } from "./lib/editorSlots";
 import {
   canRewriteSession,
+  findRewriteUnit,
   formatDisplayPath,
   getLatestSuggestion,
   getSessionStats,
   isDocxPath,
   isSettingsReady,
   normalizeNewlines,
-  readableError,
-  selectDefaultChunkIndex,
+  readableError
 } from "./lib/helpers";
-import { normalizeSelectedChunkIndices } from "./lib/chunkSelection";
-import {
-  applyEditorChunkOverride,
-  buildEditorTextFromChunks,
-  type EditorChunkOverrides,
-} from "./lib/editorChunks";
+import { normalizeSelectedRewriteUnitIds } from "./lib/rewriteUnitSelection";
+import type {
+  AppSettings,
+  DocumentSession,
+  DocumentSnapshot,
+  ProviderCheckResult,
+  RewriteProgress
+} from "./lib/types";
 import { useNotice } from "./hooks/useNotice";
 import { useBusyAction } from "./hooks/useBusyAction";
 import { useTauriEvents } from "./hooks/useTauriEvents";
@@ -45,7 +40,7 @@ import { WindowResizeLayer } from "./app/components/WindowResizeLayer";
 import { WorkspaceBar } from "./app/components/WorkspaceBar";
 import { useConfirmDialog } from "./app/hooks/useConfirmDialog";
 import { useUpdateChecker } from "./app/hooks/useUpdateChecker";
-import { useChunkStrategyLock } from "./app/hooks/useChunkStrategyLock";
+import { useSegmentationPresetLock } from "./app/hooks/useSegmentationPresetLock";
 import { useDocumentActions } from "./app/hooks/useDocumentActions";
 import { useDocumentFinalizeActions } from "./app/hooks/useDocumentFinalizeActions";
 import { useDocumentScrollRestore } from "./app/hooks/useDocumentScrollRestore";
@@ -55,28 +50,27 @@ import { useSettingsHandlers } from "./app/hooks/useSettingsHandlers";
 import { useRewriteActions } from "./app/hooks/useRewriteActions";
 import { useSuggestionActions } from "./app/hooks/useSuggestionActions";
 import { useWindowControls } from "./app/hooks/useWindowControls";
+import { resolveNextRewriteUnitId } from "./app/hooks/sessionActionShared";
 import { WorkbenchStage } from "./stages/WorkbenchStage";
 import type { DocumentEditorHandle } from "./stages/workbench/document/DocumentEditor";
 import logoUrl from "../src-tauri/icons/lessai-logo.svg";
 
 export default function App() {
-  // ── 核心状态 ─────────────────────────────────────────
-
   const [stage, setStage] = useState<"workbench" | "editor">("workbench");
   const [booting, setBooting] = useState(true);
   const [settings, setSettings] = useState<AppSettings>(DEFAULT_SETTINGS);
   const [currentSession, setCurrentSession] = useState<DocumentSession | null>(null);
   const [settingsOpen, setSettingsOpen] = useState(false);
-  const [activeChunkIndex, setActiveChunkIndex] = useState(0);
+  const [activeRewriteUnitId, setActiveRewriteUnitId] = useState<string | null>(null);
   const [activeSuggestionId, setActiveSuggestionId] = useState<string | null>(null);
-  const [selectedChunkIndices, setSelectedChunkIndices] = useState<number[]>([]);
+  const [selectedRewriteUnitIds, setSelectedRewriteUnitIds] = useState<string[]>([]);
   const [reviewView, setReviewView] = useState<ReviewView>("diff");
   const [providerStatus, setProviderStatus] =
     useState<ProviderCheckResult | null>(null);
   const [liveProgress, setLiveProgress] = useState<RewriteProgress | null>(null);
   const [editorBaselineText, setEditorBaselineText] = useState("");
   const [editorText, setEditorText] = useState("");
-  const [editorChunkOverrides, setEditorChunkOverrides] = useState<EditorChunkOverrides>({});
+  const [editorSlotOverrides, setEditorSlotOverrides] = useState<EditorSlotOverrides>({});
   const [editorHasSelection, setEditorHasSelection] = useState(false);
 
   const { notice, showNotice, dismissNotice } = useNotice();
@@ -99,24 +93,23 @@ export default function App() {
     withBusy
   });
 
-  // 使用 ref 持有最新值，供事件回调读取，避免闭包捕获旧状态
   const stageRef = useRef(stage);
   stageRef.current = stage;
   const currentSessionRef = useRef(currentSession);
   currentSessionRef.current = currentSession;
-  const activeChunkIndexRef = useRef(activeChunkIndex);
-  activeChunkIndexRef.current = activeChunkIndex;
+  const activeRewriteUnitIdRef = useRef(activeRewriteUnitId);
+  activeRewriteUnitIdRef.current = activeRewriteUnitId;
   const activeSuggestionIdRef = useRef(activeSuggestionId);
   activeSuggestionIdRef.current = activeSuggestionId;
-  const selectedChunkIndicesRef = useRef(selectedChunkIndices);
-  selectedChunkIndicesRef.current = selectedChunkIndices;
+  const selectedRewriteUnitIdsRef = useRef(selectedRewriteUnitIds);
+  selectedRewriteUnitIdsRef.current = selectedRewriteUnitIds;
   const editorTextRef = useRef(editorText);
   editorTextRef.current = editorText;
   const editorBaselineTextRef = useRef(editorBaselineText);
   editorBaselineTextRef.current = editorBaselineText;
   const editorBaseSnapshotRef = useRef<DocumentSnapshot | null>(null);
-  const editorChunkOverridesRef = useRef(editorChunkOverrides);
-  editorChunkOverridesRef.current = editorChunkOverrides;
+  const editorSlotOverridesRef = useRef(editorSlotOverrides);
+  editorSlotOverridesRef.current = editorSlotOverrides;
   const editorRef = useRef<DocumentEditorHandle | null>(null);
 
   const editorDirty = editorText !== editorBaselineText;
@@ -127,51 +120,46 @@ export default function App() {
     setEditorText(normalizeNewlines(value));
   }, []);
 
-  const handleChangeEditorChunkText = useCallback((index: number, value: string) => {
+  const handleChangeEditorSlotText = useCallback((slotId: string, value: string) => {
     const session = currentSessionRef.current;
     if (!session || !isDocxPath(session.documentPath)) return;
-    const chunk = session.chunks.find((item) => item.index === index);
-    if (!chunk || chunk.skipRewrite) return;
+    const slot = session.writebackSlots.find((item) => item.id === slotId);
+    if (!slot || !slot.editable) return;
 
     const normalized = normalizeNewlines(value);
-    const nextOverrides = applyEditorChunkOverride(
-      editorChunkOverridesRef.current,
-      chunk,
+    const nextOverrides = applyEditorSlotOverride(
+      editorSlotOverridesRef.current,
+      slot,
       normalized
     );
 
     startTransition(() => {
-      setEditorChunkOverrides(nextOverrides);
-      setEditorText(buildEditorTextFromChunks(session.chunks, nextOverrides));
+      setEditorSlotOverrides(nextOverrides);
+      setEditorText(buildEditorTextFromSession(session, nextOverrides));
     });
-  }, [currentSessionRef, editorChunkOverridesRef]);
-
-  // ── 派生值（useMemo）────────────────────────────────
+  }, []);
 
   const currentStats = useMemo(
     () => (currentSession ? getSessionStats(currentSession) : null),
     [currentSession]
   );
 
-  const activeChunk = useMemo(
-    () =>
-      currentSession && currentSession.chunks[activeChunkIndex]
-        ? currentSession.chunks[activeChunkIndex]
-        : null,
-    [currentSession, activeChunkIndex]
+  const activeRewriteUnit = useMemo(
+    () => (currentSession ? findRewriteUnit(currentSession, activeRewriteUnitId) : null),
+    [activeRewriteUnitId, currentSession]
   );
 
   const topbarProgress = useMemo(
     () =>
       currentSession && currentStats
-        ? `${currentStats.chunksApplied}/${currentStats.total}`
+        ? `${currentStats.unitsApplied}/${currentStats.total}`
         : "0/0",
     [currentSession, currentStats]
   );
 
   const settingsReady = isSettingsReady(settings);
 
-  const { chunkStrategyLock, readChunkStrategyLockedReason } = useChunkStrategyLock({
+  const { segmentationPresetLock, readSegmentationPresetLockedReason } = useSegmentationPresetLock({
     stage,
     editorDirty,
     currentSession,
@@ -183,7 +171,7 @@ export default function App() {
   const pickActiveSuggestionId = useCallback(
     (
       session: DocumentSession,
-      chunkIndex: number,
+      rewriteUnitId: string | null,
       preferredSuggestionId?: string | null
     ) => {
       if (preferredSuggestionId) {
@@ -191,20 +179,20 @@ export default function App() {
         if (exists) return preferredSuggestionId;
       }
 
-      let latestForChunk: { id: string; sequence: number } | null = null;
-      for (const suggestion of session.suggestions) {
-        if (suggestion.chunkIndex !== chunkIndex) continue;
-        if (!latestForChunk || suggestion.sequence > latestForChunk.sequence) {
-          latestForChunk = { id: suggestion.id, sequence: suggestion.sequence };
+      if (rewriteUnitId) {
+        let latestForRewriteUnit: { id: string; sequence: number } | null = null;
+        for (const suggestion of session.suggestions) {
+          if (suggestion.rewriteUnitId !== rewriteUnitId) continue;
+          if (!latestForRewriteUnit || suggestion.sequence > latestForRewriteUnit.sequence) {
+            latestForRewriteUnit = { id: suggestion.id, sequence: suggestion.sequence };
+          }
+        }
+        if (latestForRewriteUnit) {
+          return latestForRewriteUnit.id;
         }
       }
 
-      if (latestForChunk) {
-        return latestForChunk.id;
-      }
-
-      const latestOverall = getLatestSuggestion(session);
-      return latestOverall?.id ?? null;
+      return getLatestSuggestion(session)?.id ?? null;
     },
     []
   );
@@ -212,27 +200,29 @@ export default function App() {
   const applySessionState = useCallback(
     (
       session: DocumentSession,
-      nextChunkIndex: number,
+      nextRewriteUnitId: string | null,
       options?: {
         preferredSuggestionId?: string | null;
         preservedScrollTop?: number | null;
       }
     ) => {
+      const resolvedRewriteUnitId =
+        resolveNextRewriteUnitId(session, nextRewriteUnitId);
       const suggestionId = pickActiveSuggestionId(
         session,
-        nextChunkIndex,
+        resolvedRewriteUnitId,
         options?.preferredSuggestionId ?? null
       );
 
       startTransition(() => {
         setCurrentSession(session);
-        setActiveChunkIndex(nextChunkIndex);
+        setActiveRewriteUnitId(resolvedRewriteUnitId);
         setActiveSuggestionId(suggestionId);
       });
       if (options && "preservedScrollTop" in options) {
         logScrollRestore("apply-session-state", {
           sessionId: session.id,
-          nextChunkIndex,
+          nextRewriteUnitId: resolvedRewriteUnitId,
           preservedScrollTop: options.preservedScrollTop ?? null
         });
         restoreDocumentScrollPosition(options.preservedScrollTop ?? null);
@@ -245,8 +235,8 @@ export default function App() {
     async (
       sessionId: string,
       options?: {
-        preserveChunk?: boolean;
-        preferredChunkIndex?: number;
+        preserveRewriteUnit?: boolean;
+        preferredRewriteUnitId?: string | null;
         preserveSuggestion?: boolean;
         preferredSuggestionId?: string | null;
         preserveScroll?: boolean;
@@ -258,16 +248,18 @@ export default function App() {
         sessionId,
         options: options ?? null,
         preservedScrollTop,
-        activeChunkIndex: activeChunkIndexRef.current,
+        activeRewriteUnitId: activeRewriteUnitIdRef.current,
         activeSuggestionId: activeSuggestionIdRef.current
       });
       const session = await loadSession(sessionId);
-      const chunkIdx = activeChunkIndexRef.current;
-      const nextChunkIndex =
-        options?.preferredChunkIndex ??
-        (options?.preserveChunk && chunkIdx < session.chunks.length
-          ? chunkIdx
-          : selectDefaultChunkIndex(session));
+      const currentRewriteUnitId = activeRewriteUnitIdRef.current;
+      const nextRewriteUnitId =
+        options?.preferredRewriteUnitId ??
+        (options?.preserveRewriteUnit &&
+        currentRewriteUnitId &&
+        session.rewriteUnits.some((item) => item.id === currentRewriteUnitId)
+          ? currentRewriteUnitId
+          : resolveNextRewriteUnitId(session));
 
       const preferredSuggestionId =
         options?.preferredSuggestionId ??
@@ -276,11 +268,11 @@ export default function App() {
       logScrollRestore("refresh-session-state-loaded", {
         sessionId,
         loadedSessionId: session.id,
-        nextChunkIndex,
+        nextRewriteUnitId,
         preferredSuggestionId,
         preservedScrollTop
       });
-      applySessionState(session, nextChunkIndex, {
+      applySessionState(session, nextRewriteUnitId, {
         preferredSuggestionId,
         preservedScrollTop
       });
@@ -289,8 +281,6 @@ export default function App() {
     [applySessionState, captureDocumentScrollPosition]
   );
 
-  // ── Settings Modal ───────────────────────────────────
-
   const openSettings = useCallback(() => {
     setSettingsOpen(true);
   }, []);
@@ -298,8 +288,6 @@ export default function App() {
   const closeSettings = useCallback(() => {
     setSettingsOpen(false);
   }, []);
-
-  // ── liveProgress 清理（简化） ────────────────────────
 
   useEffect(() => {
     if (
@@ -312,40 +300,37 @@ export default function App() {
     }
   }, [currentSession, liveProgress]);
 
-  // ── Tauri 事件 ────────────────────────────────────────
-
   useTauriEvents({
     onProgress: async (payload: RewriteProgress) => {
       setLiveProgress((current) => {
         if (!current || current.sessionId !== payload.sessionId) return payload;
 
-        const sameIndices =
-          current.runningIndices.length === payload.runningIndices.length &&
-          current.runningIndices.every((value, index) => value === payload.runningIndices[index]);
+        const sameUnitIds =
+          current.runningUnitIds.length === payload.runningUnitIds.length &&
+          current.runningUnitIds.every((value, index) => value === payload.runningUnitIds[index]);
 
         const unchanged =
-          current.completedChunks === payload.completedChunks &&
+          current.completedUnits === payload.completedUnits &&
           current.inFlight === payload.inFlight &&
-          current.totalChunks === payload.totalChunks &&
+          current.totalUnits === payload.totalUnits &&
           current.mode === payload.mode &&
           current.runningState === payload.runningState &&
           current.maxConcurrency === payload.maxConcurrency &&
-          sameIndices;
+          sameUnitIds;
 
         return unchanged ? current : payload;
       });
-      // 只关心当前打开的文档；其他 session 的事件无需刷新列表（项目不再展示会话库）。
     },
-    onChunkCompleted: async (payload) => {
+    onRewriteUnitCompleted: async (payload) => {
       const session = currentSessionRef.current;
       if (session && payload.sessionId === session.id) {
-        logScrollRestore("tauri-chunk-completed", {
+        logScrollRestore("tauri-rewrite-unit-completed", {
           sessionId: payload.sessionId,
-          chunkIndex: payload.index,
+          rewriteUnitId: payload.rewriteUnitId,
           suggestionId: payload.suggestionId
         });
         await refreshSessionState(payload.sessionId, {
-          preferredChunkIndex: payload.index,
+          preferredRewriteUnitId: payload.rewriteUnitId,
           preferredSuggestionId: payload.suggestionId
         });
         setReviewView("diff");
@@ -357,11 +342,9 @@ export default function App() {
       );
       const session = currentSessionRef.current;
       if (session && payload.sessionId === session.id) {
-        logScrollRestore("tauri-finished", {
-          sessionId: payload.sessionId
-        });
+        logScrollRestore("tauri-finished", { sessionId: payload.sessionId });
         const refreshed = await refreshSessionState(payload.sessionId, {
-          preserveChunk: true,
+          preserveRewriteUnit: true,
           preserveSuggestion: true
         });
         if (refreshed.status === "completed") {
@@ -381,7 +364,7 @@ export default function App() {
           error: payload.error
         });
         const refreshed = await refreshSessionState(payload.sessionId, {
-          preserveChunk: true,
+          preserveRewriteUnit: true,
           preserveSuggestion: true
         });
         if (refreshed.status === "failed") {
@@ -391,8 +374,6 @@ export default function App() {
     }
   });
 
-  // ── 初始化 ────────────────────────────────────────────
-
   useEffect(() => {
     void (async () => {
       try {
@@ -401,22 +382,21 @@ export default function App() {
           setSettings(storedSettings);
           setStage("workbench");
           setCurrentSession(null);
-          setActiveChunkIndex(0);
+          setActiveRewriteUnitId(null);
           setActiveSuggestionId(null);
-          // 默认先展示工作台，设置以弹窗形式按需打开。
           setSettingsOpen(false);
           setEditorBaselineText("");
           setEditorText("");
-          setEditorChunkOverrides({});
+          setEditorSlotOverrides({});
         });
       } catch (error) {
+        console.error("[lessai::boot] load settings failed", error);
         showNotice("error", `初始化失败：${readableError(error)}`);
       } finally {
         setBooting(false);
       }
     })();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [showNotice]);
 
   useEffect(() => {
     if (stage === "editor" && !currentSession) {
@@ -425,21 +405,17 @@ export default function App() {
   }, [currentSession, stage]);
 
   useEffect(() => {
-    setSelectedChunkIndices([]);
+    setSelectedRewriteUnitIds([]);
   }, [currentSession?.id]);
 
   useEffect(() => {
     if (!currentSession) return;
     if (!canRewriteSession(currentSession)) {
-      setSelectedChunkIndices([]);
+      setSelectedRewriteUnitIds([]);
       return;
     }
-    setSelectedChunkIndices((current) => {
-      const normalized = normalizeSelectedChunkIndices(
-        currentSession.chunks,
-        current,
-        currentSession.chunkPreset
-      );
+    setSelectedRewriteUnitIds((current) => {
+      const normalized = normalizeSelectedRewriteUnitIds(currentSession, current);
       const unchanged =
         current.length === normalized.length &&
         current.every((value, index) => value === normalized[index]);
@@ -447,11 +423,10 @@ export default function App() {
     });
   }, [currentSession]);
 
-  // ── Settings handlers ────────────────────────────────
   const {
     handleUpdateStringSetting,
     handleUpdateNumberSetting,
-    handleUpdateChunkPreset,
+    handleUpdateSegmentationPreset,
     handleUpdateRewriteHeadings,
     handleUpdateRewriteMode,
     handleUpdatePromptPresetId,
@@ -467,11 +442,9 @@ export default function App() {
     showNotice,
     withBusy,
     closeSettings,
-    readChunkStrategyLockedReason,
+    readSegmentationPresetLockedReason,
     refreshSessionState
   });
-
-  // ── Document / Rewrite / Suggestion handlers ─────────
 
   const {
     handleOpenDocument,
@@ -483,21 +456,20 @@ export default function App() {
     busyAction,
     stageRef,
     currentSessionRef,
-    activeChunkIndexRef,
+    activeRewriteUnitIdRef,
     captureDocumentScrollPosition,
-    restoreDocumentScrollPosition,
     editorDirtyRef,
     editorTextRef,
     editorBaselineTextRef,
     editorBaseSnapshotRef,
-    editorChunkOverridesRef,
+    editorSlotOverridesRef,
     applySessionState,
     refreshSessionState,
     setStage,
     setReviewView,
     setEditorBaselineText,
     setEditorText,
-    setEditorChunkOverrides,
+    setEditorSlotOverrides,
     setLiveProgress,
     setSettingsOpen,
     closeSettings,
@@ -519,16 +491,15 @@ export default function App() {
     useDocumentFinalizeActions({
       stageRef,
       currentSessionRef,
-      activeChunkIndexRef,
+      activeRewriteUnitIdRef,
       editorDirtyRef,
       captureDocumentScrollPosition,
-      restoreDocumentScrollPosition,
-    requestConfirm,
-    applySessionState,
-    refreshSessionState,
-    setCurrentSession,
-    setActiveChunkIndex,
-    setActiveSuggestionId,
+      requestConfirm,
+      applySessionState,
+      refreshSessionState,
+      setCurrentSession,
+      setActiveRewriteUnitId,
+      setActiveSuggestionId,
       setReviewView,
       setLiveProgress,
       closeSettings,
@@ -545,9 +516,9 @@ export default function App() {
   } = useRewriteActions({
     stageRef,
     currentSessionRef,
-    activeChunkIndexRef,
+    activeRewriteUnitIdRef,
     activeSuggestionIdRef,
-    selectedChunkIndicesRef,
+    selectedRewriteUnitIdsRef,
     captureDocumentScrollPosition,
     editorDirtyRef,
     requestConfirm,
@@ -560,26 +531,24 @@ export default function App() {
   });
 
   const {
-    handleSelectChunk,
+    handleSelectRewriteUnit,
     handleSelectSuggestion,
     handleApplySuggestion,
     handleDismissSuggestion,
     handleDeleteSuggestion
   } = useSuggestionActions({
     currentSessionRef,
-    activeChunkIndexRef,
+    activeRewriteUnitIdRef,
     captureDocumentScrollPosition,
-    setActiveChunkIndex,
+    setActiveRewriteUnitId,
     setActiveSuggestionId,
-    setSelectedChunkIndices,
+    setSelectedRewriteUnitIds,
     setReviewView,
     applySessionState,
     refreshSessionState,
     showNotice,
     withBusy
   });
-
-  // ── 渲染 ─────────────────────────────────────────────
 
   if (booting) {
     return <BootScreen />;
@@ -614,21 +583,21 @@ export default function App() {
               currentSession={currentSession}
               liveProgress={liveProgress}
               currentStats={currentStats}
-              activeChunk={activeChunk}
-              activeChunkIndex={activeChunkIndex}
+              activeRewriteUnit={activeRewriteUnit}
+              activeRewriteUnitId={activeRewriteUnitId}
               activeSuggestionId={activeSuggestionId}
-              selectedChunkIndices={selectedChunkIndices}
+              selectedRewriteUnitIds={selectedRewriteUnitIds}
               reviewView={reviewView}
               busyAction={busyAction}
               editorMode={stage === "editor"}
               editorText={editorText}
-              editorChunkOverrides={editorChunkOverrides}
+              editorSlotOverrides={editorSlotOverrides}
               editorDirty={editorDirty}
               editorHasSelection={editorHasSelection}
               editorRef={editorRef}
               documentScrollRef={documentScrollRef}
               onOpenDocument={handleOpenDocument}
-              onSelectChunk={handleSelectChunk}
+              onSelectRewriteUnit={handleSelectRewriteUnit}
               onSelectSuggestion={handleSelectSuggestion}
               onSetReviewView={setReviewView}
               onStartRewrite={(mode) => void handleStartRewrite(mode)}
@@ -644,7 +613,7 @@ export default function App() {
               onOpenSettings={openSettings}
               onEnterEditor={handleEnterEditor}
               onChangeEditorText={handleChangeEditorText}
-              onChangeEditorChunkText={handleChangeEditorChunkText}
+              onChangeEditorSlotText={handleChangeEditorSlotText}
               onChangeEditorHasSelection={setEditorHasSelection}
               onSaveEditor={() => void handleSaveEditor()}
               onSaveEditorAndExit={() =>
@@ -663,12 +632,12 @@ export default function App() {
             settings={settings}
             providerStatus={providerStatus}
             busyAction={busyAction}
-            chunkStrategyLocked={chunkStrategyLock.locked}
-            chunkStrategyLockedReason={chunkStrategyLock.reason}
+            segmentationPresetLocked={segmentationPresetLock.locked}
+            segmentationPresetLockedReason={segmentationPresetLock.reason}
             onClose={closeSettings}
             onUpdateStringSetting={handleUpdateStringSetting}
             onUpdateNumberSetting={handleUpdateNumberSetting}
-            onUpdateChunkPreset={handleUpdateChunkPreset}
+            onUpdateSegmentationPreset={handleUpdateSegmentationPreset}
             onUpdateRewriteHeadings={handleUpdateRewriteHeadings}
             onUpdateRewriteMode={handleUpdateRewriteMode}
             onUpdatePromptPresetId={handleUpdatePromptPresetId}

@@ -6,23 +6,28 @@ use tauri::{AppHandle, Emitter, Manager, State};
 
 use crate::{
     models::{DocumentSession, RewriteFailedEvent, RunningState},
+    rewrite_targets,
     session_access::access_current_session,
     state::{reserve_job, AppState, JobControl},
     storage,
 };
 
-use super::{auto_pending_queue, emit_rewrite_finished, rewrite_session_request};
+use super::{
+    emit_rewrite_finished, ensure_targets_available, resolve_available_rewrite_targets,
+    rewrite_session_request,
+};
+use super::support::RewriteSessionAccess;
 use crate::rewrite_jobs::auto_loop::run_auto_loop;
 
 pub(crate) fn run_auto_rewrite(
     app: AppHandle,
     state: State<'_, AppState>,
     session_id: &str,
-    target_chunk_indices: Option<Vec<usize>>,
+    target_rewrite_unit_ids: Option<Vec<String>>,
 ) -> Result<DocumentSession, String> {
-    let (session, target_indices, job) =
-        start_auto_rewrite_session(&app, state.inner(), session_id, target_chunk_indices)?;
-    spawn_auto_loop(&app, &session.id, target_indices, job);
+    let (session, target_unit_ids, job) =
+        start_auto_rewrite_session(&app, state.inner(), session_id, target_rewrite_unit_ids)?;
+    spawn_auto_loop(&app, &session.id, target_unit_ids, job);
     Ok(session)
 }
 
@@ -30,15 +35,20 @@ fn start_auto_rewrite_session(
     app: &AppHandle,
     state: &AppState,
     session_id: &str,
-    target_chunk_indices: Option<Vec<usize>>,
-) -> Result<(DocumentSession, Option<HashSet<usize>>, Arc<JobControl>), String> {
+    target_rewrite_unit_ids: Option<Vec<String>>,
+) -> Result<(DocumentSession, Option<HashSet<String>>, Arc<JobControl>), String> {
     access_current_session(
-        rewrite_session_request(app, state, session_id),
+        rewrite_session_request(app, state, session_id, RewriteSessionAccess::ExternalEntry),
         |mut session| {
-            let target_indices = auto_pending_queue(&session, target_chunk_indices)?;
+            let targets = resolve_available_rewrite_targets(&session, target_rewrite_unit_ids)?;
+            let pending = rewrite_targets::build_auto_pending_queue(
+                &session.rewrite_units,
+                targets.target_unit_ids.as_ref(),
+            );
+            ensure_targets_available(pending, targets.has_target_subset, std::collections::VecDeque::is_empty)?;
             start_auto_rewrite_session_steps(
                 &mut session,
-                target_indices,
+                targets.target_unit_ids,
                 |current_session_id| reserve_job(state, current_session_id),
                 |current_session| storage::save_session(app, current_session),
                 |current_session_id| crate::state::remove_job(state, current_session_id),
@@ -51,14 +61,14 @@ fn start_auto_rewrite_session(
 fn spawn_auto_loop(
     app: &AppHandle,
     session_id: &str,
-    target_indices: Option<HashSet<usize>>,
+    target_unit_ids: Option<HashSet<String>>,
     job: Arc<JobControl>,
 ) {
     let session_id = session_id.to_string();
     let app_handle = app.clone();
     tauri::async_runtime::spawn(async move {
-        let result =
-            run_auto_loop(app_handle.clone(), session_id.clone(), job, target_indices).await;
+        let result = run_auto_loop(app_handle.clone(), session_id.clone(), job, target_unit_ids)
+            .await;
         match &result {
             Ok(()) => info!(
                 "auto loop finished: session_id={} outcome=success remove_job_before_signal=true",
@@ -115,12 +125,12 @@ where
 
 fn start_auto_rewrite_session_steps<Reserve, Save, Rollback>(
     session: &mut DocumentSession,
-    target_indices: Option<HashSet<usize>>,
+    target_unit_ids: Option<HashSet<String>>,
     reserve: Reserve,
     save: Save,
     rollback: Rollback,
     updated_at: DateTime<Utc>,
-) -> Result<(DocumentSession, Option<HashSet<usize>>, Arc<JobControl>), String>
+) -> Result<(DocumentSession, Option<HashSet<String>>, Arc<JobControl>), String>
 where
     Reserve: FnOnce(&str) -> Result<Arc<JobControl>, String>,
     Save: FnOnce(&DocumentSession) -> Result<(), String>,
@@ -134,7 +144,7 @@ where
         let _ = rollback(&session.id);
         return Err(error);
     }
-    Ok((saved_session, target_indices, job))
+    Ok((saved_session, target_unit_ids, job))
 }
 
 #[cfg(test)]

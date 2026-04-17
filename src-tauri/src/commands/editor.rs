@@ -1,133 +1,84 @@
+use serde::Deserialize;
 use tauri::{AppHandle, State};
 
 use crate::{
     documents::WritebackMode,
-    editor_session::{persist_rebuilt_editor_session, run_idle_editor_writeback},
-    editor_writeback::{
-        build_chunk_editor_writeback, build_plain_text_editor_writeback, EditorWritebackPayload,
+    editor_session::{
+        ensure_editor_base_snapshot_matches_path, ACTIVE_EDITOR_SESSION_ERROR,
     },
-    models::{DocumentSession, DocumentSnapshot, EditorChunkEdit},
+    editor_writeback::{
+        build_plain_text_editor_writeback, build_slot_editor_writeback, execute_editor_writeback,
+        EditorWritebackPayload,
+    },
+    persist,
+    models::{DocumentSession, DocumentSnapshot, EditorSlotEdit},
+    session_access::{access_current_session, CurrentSessionRequest},
+    session_loader::load_clean_session_from_existing,
     state::AppState,
+    storage,
 };
 
-enum EditorCommandInput {
-    Text(String),
-    ChunkEdits(Vec<EditorChunkEdit>),
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase", tag = "kind")]
+pub enum EditorWritebackInput {
+    Text { content: String },
+    SlotEdits { edits: Vec<EditorSlotEdit> },
 }
 
-impl EditorCommandInput {
+impl EditorWritebackInput {
     fn build(self, session: &DocumentSession) -> Result<EditorWritebackPayload, String> {
         match self {
-            Self::Text(content) => build_plain_text_editor_writeback(session, &content),
-            Self::ChunkEdits(edits) => build_chunk_editor_writeback(session, &edits),
+            Self::Text { content } => build_plain_text_editor_writeback(session, &content),
+            Self::SlotEdits { edits } => build_slot_editor_writeback(session, &edits),
         }
     }
 }
 
-trait EditorCommandOutput: Sized {
-    const MODE: WritebackMode;
-
-    fn finish(app: &AppHandle, session: DocumentSession) -> Result<Self, String>;
+#[tauri::command]
+pub fn run_document_writeback(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    session_id: String,
+    mode: WritebackMode,
+    input: EditorWritebackInput,
+    editor_base_snapshot: Option<DocumentSnapshot>,
+) -> Result<DocumentSession, String> {
+    access_current_session(
+        CurrentSessionRequest::guarded_refresh(
+            &app,
+            state.inner(),
+            &session_id,
+            |session: &DocumentSession| {
+                ensure_editor_base_snapshot_matches_path(
+                    std::path::Path::new(&session.document_path),
+                    editor_base_snapshot.as_ref(),
+                )
+            },
+        )
+        .with_active_job_error(ACTIVE_EDITOR_SESSION_ERROR),
+        |session| {
+            let payload = input.build(&session)?;
+            execute_editor_writeback(&session, &payload, mode)?;
+            finish_editor_writeback(&app, session, mode)
+        },
+    )
 }
 
-impl EditorCommandOutput for () {
-    const MODE: WritebackMode = WritebackMode::Validate;
-
-    fn finish(_: &AppHandle, _: DocumentSession) -> Result<Self, String> {
-        Ok(())
+fn finish_editor_writeback(
+    app: &AppHandle,
+    session: DocumentSession,
+    mode: WritebackMode,
+) -> Result<DocumentSession, String> {
+    match mode {
+        WritebackMode::Validate => Ok(session),
+        WritebackMode::Write => rebuild_saved_editor_session(app, session),
     }
 }
 
-impl EditorCommandOutput for DocumentSession {
-    const MODE: WritebackMode = WritebackMode::Write;
-
-    fn finish(app: &AppHandle, session: DocumentSession) -> Result<Self, String> {
-        persist_rebuilt_editor_session(app, session)
-    }
-}
-
-fn run_editor_command<T: EditorCommandOutput>(
-    app: AppHandle,
-    state: State<'_, AppState>,
-    session_id: String,
-    editor_base_snapshot: Option<DocumentSnapshot>,
-    input: EditorCommandInput,
-) -> Result<T, String> {
-    run_idle_editor_writeback(
-        &app,
-        &state,
-        &session_id,
-        &editor_base_snapshot,
-        T::MODE,
-        move |session| input.build(session),
-        |session| T::finish(&app, session),
-    )
-}
-
-#[tauri::command]
-pub fn validate_document_edits(
-    app: AppHandle,
-    state: State<'_, AppState>,
-    session_id: String,
-    content: String,
-    editor_base_snapshot: Option<DocumentSnapshot>,
-) -> Result<(), String> {
-    run_editor_command(
-        app,
-        state,
-        session_id,
-        editor_base_snapshot,
-        EditorCommandInput::Text(content),
-    )
-}
-
-#[tauri::command]
-pub fn validate_document_chunk_edits(
-    app: AppHandle,
-    state: State<'_, AppState>,
-    session_id: String,
-    edits: Vec<EditorChunkEdit>,
-    editor_base_snapshot: Option<DocumentSnapshot>,
-) -> Result<(), String> {
-    run_editor_command(
-        app,
-        state,
-        session_id,
-        editor_base_snapshot,
-        EditorCommandInput::ChunkEdits(edits),
-    )
-}
-
-#[tauri::command]
-pub fn save_document_edits(
-    app: AppHandle,
-    state: State<'_, AppState>,
-    session_id: String,
-    content: String,
-    editor_base_snapshot: Option<DocumentSnapshot>,
+fn rebuild_saved_editor_session(
+    app: &AppHandle,
+    session: DocumentSession,
 ) -> Result<DocumentSession, String> {
-    run_editor_command(
-        app,
-        state,
-        session_id,
-        editor_base_snapshot,
-        EditorCommandInput::Text(content),
-    )
-}
-
-#[tauri::command]
-pub fn save_document_chunk_edits(
-    app: AppHandle,
-    state: State<'_, AppState>,
-    session_id: String,
-    edits: Vec<EditorChunkEdit>,
-    editor_base_snapshot: Option<DocumentSnapshot>,
-) -> Result<DocumentSession, String> {
-    run_editor_command(
-        app,
-        state,
-        session_id,
-        editor_base_snapshot,
-        EditorCommandInput::ChunkEdits(edits),
-    )
+    let rebuilt = load_clean_session_from_existing(app, &session, session.created_at, false)?;
+    persist::save_and_return(rebuilt, |rebuilt| storage::save_session(app, rebuilt))
 }

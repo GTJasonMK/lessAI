@@ -1,5 +1,5 @@
 import { memo } from "react";
-import type { ChunkTask, DocumentSession, EditSuggestion } from "../../lib/types";
+import type { DocumentSession, RewriteSuggestion, RewriteUnit } from "../../lib/types";
 import type { SessionStats } from "../../lib/helpers";
 import type { ReviewView } from "../../lib/constants";
 import { Panel } from "../../components/Panel";
@@ -12,20 +12,20 @@ interface ReviewPanelProps {
   settingsReady: boolean;
   currentSession: DocumentSession | null;
   currentStats: SessionStats | null;
-  activeChunk: ChunkTask | null;
-  activeChunkSuggestions: EditSuggestion[];
+  activeRewriteUnit: RewriteUnit | null;
+  activeRewriteUnitSuggestions: RewriteSuggestion[];
   activeSuggestionId: string | null;
-  activeSuggestion: EditSuggestion | null;
+  activeSuggestion: RewriteSuggestion | null;
   showMarkers: boolean;
   busyAction: string | null;
   editorMode: boolean;
   editorText: string;
   editorDirty: boolean;
   reviewView: ReviewView;
-  orderedSuggestions: EditSuggestion[];
+  orderedSuggestions: RewriteSuggestion[];
   onOpenDocument: () => void;
   onOpenSettings: () => void;
-  onSelectChunk: (index: number, options?: { multiSelect?: boolean }) => void;
+  onSelectRewriteUnit: (rewriteUnitId: string, options?: { multiSelect?: boolean }) => void;
   onSelectSuggestion: (suggestionId: string) => void;
   onSetReviewView: (view: ReviewView) => void;
   onApplySuggestion: (suggestionId: string) => void;
@@ -38,8 +38,8 @@ export const ReviewPanel = memo(function ReviewPanel({
   settingsReady,
   currentSession,
   currentStats,
-  activeChunk,
-  activeChunkSuggestions,
+  activeRewriteUnit,
+  activeRewriteUnitSuggestions,
   activeSuggestionId,
   activeSuggestion,
   showMarkers,
@@ -51,7 +51,7 @@ export const ReviewPanel = memo(function ReviewPanel({
   orderedSuggestions,
   onOpenDocument,
   onOpenSettings,
-  onSelectChunk,
+  onSelectRewriteUnit,
   onSelectSuggestion,
   onSetReviewView,
   onApplySuggestion,
@@ -77,8 +77,9 @@ export const ReviewPanel = memo(function ReviewPanel({
           rewritePaused={rewritePaused ?? false}
           anyBusy={anyBusy}
           busyAction={busyAction}
-          activeChunk={activeChunk}
-          activeChunkSuggestions={activeChunkSuggestions}
+          currentSession={currentSession}
+          activeRewriteUnit={activeRewriteUnit}
+          activeRewriteUnitSuggestions={activeRewriteUnitSuggestions}
           activeSuggestion={activeSuggestion}
           onRetry={onRetry}
           onApplySuggestion={onApplySuggestion}
@@ -99,14 +100,14 @@ export const ReviewPanel = memo(function ReviewPanel({
           <SuggestionReviewPane
             currentSession={currentSession}
             currentStats={currentStats}
-            activeChunk={activeChunk}
+            activeRewriteUnit={activeRewriteUnit}
             activeSuggestionId={activeSuggestionId}
             activeSuggestion={activeSuggestion}
             showMarkers={showMarkers}
             reviewView={reviewView}
             orderedSuggestions={orderedSuggestions}
             onSetReviewView={onSetReviewView}
-            onSelectChunk={onSelectChunk}
+            onSelectRewriteUnit={onSelectRewriteUnit}
             onSelectSuggestion={onSelectSuggestion}
           />
         )

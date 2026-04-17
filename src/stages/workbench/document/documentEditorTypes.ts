@@ -1,5 +1,5 @@
-import type { EditorChunkOverrides } from "../../../lib/editorChunks";
-import type { DocumentSession, EditorChunkEdit } from "../../../lib/types";
+import type { EditorSlotOverrides } from "../../../lib/editorSlots";
+import type { DocumentSession, EditorSlotEdit } from "../../../lib/types";
 
 export interface DocumentEditorSelectionSnapshotBase {
   text: string;
@@ -11,21 +11,21 @@ export interface PlainTextSelectionSnapshot extends DocumentEditorSelectionSnaps
   kind: "text";
 }
 
-export interface ChunkSelectionSnapshot extends DocumentEditorSelectionSnapshotBase {
-  kind: "chunk";
-  chunkIndex: number;
+export interface SlotSelectionSnapshot extends DocumentEditorSelectionSnapshotBase {
+  kind: "slot";
+  slotId: string;
 }
 
 export type DocumentEditorSelectionSnapshot =
   | PlainTextSelectionSnapshot
-  | ChunkSelectionSnapshot;
+  | SlotSelectionSnapshot;
 
 export type DocumentEditorApplyResult =
   | { ok: true }
   | { ok: false; error: string };
 
 export type DocumentEditorPreviewResult =
-  | { ok: true; value: string; chunkEdits?: EditorChunkEdit[] }
+  | { ok: true; value: string; slotEdits?: EditorSlotEdit[] }
   | { ok: false; error: string };
 
 export interface DocumentEditorHandle {
@@ -38,17 +38,17 @@ export interface DocumentEditorHandle {
     snapshot: DocumentEditorSelectionSnapshot,
     replacementText: string
   ) => DocumentEditorApplyResult;
-  collectChunkEdits: () => EditorChunkEdit[] | null;
+  collectSlotEdits: () => EditorSlotEdit[] | null;
 }
 
 export interface DocumentEditorProps {
   session: DocumentSession;
   value: string;
-  chunkOverrides: EditorChunkOverrides;
+  slotOverrides: EditorSlotOverrides;
   dirty: boolean;
   busy: boolean;
   onChange: (value: string) => void;
-  onChangeChunkText: (index: number, value: string) => void;
+  onChangeSlotText: (slotId: string, value: string) => void;
   onSave: () => void;
   onSelectionChange?: (hasSelection: boolean) => void;
 }

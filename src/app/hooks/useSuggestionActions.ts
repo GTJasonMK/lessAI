@@ -3,15 +3,18 @@ import { applySuggestion, deleteSuggestion, dismissSuggestion } from "../../lib/
 import type { DocumentSession } from "../../lib/types";
 import {
   canRewriteSession,
+  findRewriteUnit,
   getLatestSuggestion,
   readableError
 } from "../../lib/helpers";
 import {
-  resolveSelectionTargetChunkIndices,
-  toggleSelectedChunkIndices
-} from "../../lib/chunkSelection";
+  resolveSelectionTargetRewriteUnitIds,
+  toggleSelectedRewriteUnitIds
+} from "../../lib/rewriteUnitSelection";
 import {
+  refreshSessionStateSilently,
   refreshRewriteableSessionOrNotify,
+  runSessionActionOrNotify,
   type ApplySessionState,
   type RefreshSessionState,
   type ShowNotice,
@@ -20,11 +23,11 @@ import {
 
 export function useSuggestionActions(options: {
   currentSessionRef: React.MutableRefObject<DocumentSession | null>;
-  activeChunkIndexRef: React.MutableRefObject<number>;
+  activeRewriteUnitIdRef: React.MutableRefObject<string | null>;
   captureDocumentScrollPosition: () => number | null;
-  setActiveChunkIndex: React.Dispatch<React.SetStateAction<number>>;
+  setActiveRewriteUnitId: React.Dispatch<React.SetStateAction<string | null>>;
   setActiveSuggestionId: React.Dispatch<React.SetStateAction<string | null>>;
-  setSelectedChunkIndices: React.Dispatch<React.SetStateAction<number[]>>;
+  setSelectedRewriteUnitIds: React.Dispatch<React.SetStateAction<string[]>>;
   setReviewView: React.Dispatch<React.SetStateAction<"diff" | "source" | "candidate">>;
   applySessionState: ApplySessionState;
   refreshSessionState: RefreshSessionState;
@@ -33,11 +36,11 @@ export function useSuggestionActions(options: {
 }) {
   const {
     currentSessionRef,
-    activeChunkIndexRef,
+    activeRewriteUnitIdRef,
     captureDocumentScrollPosition,
-    setActiveChunkIndex,
+    setActiveRewriteUnitId,
     setActiveSuggestionId,
-    setSelectedChunkIndices,
+    setSelectedRewriteUnitIds,
     setReviewView,
     applySessionState,
     refreshSessionState,
@@ -45,52 +48,39 @@ export function useSuggestionActions(options: {
     withBusy
   } = options;
 
-  const handleSelectChunk = useCallback(
-    (index: number, options?: { multiSelect?: boolean }) => {
+  const handleSelectRewriteUnit = useCallback(
+    (rewriteUnitId: string, options?: { multiSelect?: boolean }) => {
       const session = currentSessionRef.current;
-      setActiveChunkIndex(index);
+      setActiveRewriteUnitId(rewriteUnitId);
 
       if (!session) {
         setActiveSuggestionId(null);
         return;
       }
 
-      const chunk = session.chunks[index];
+      const rewriteUnit = findRewriteUnit(session, rewriteUnitId);
       if (options?.multiSelect) {
-        if (chunk && !chunk.skipRewrite && canRewriteSession(session)) {
-          const targetIndices = resolveSelectionTargetChunkIndices(
-            session.chunks,
-            index,
-            session.chunkPreset
-          );
-          setSelectedChunkIndices((current) =>
-            toggleSelectedChunkIndices(current, targetIndices)
+        if (rewriteUnit && canRewriteSession(session)) {
+          const targetIds = resolveSelectionTargetRewriteUnitIds(rewriteUnitId);
+          setSelectedRewriteUnitIds((current) =>
+            toggleSelectedRewriteUnitIds(session, current, targetIds)
           );
         }
       } else {
-        setSelectedChunkIndices([]);
+        setSelectedRewriteUnitIds([]);
       }
 
-      let latestForChunk: { id: string; sequence: number } | null = null;
-      for (const suggestion of session.suggestions) {
-        if (suggestion.chunkIndex !== index) continue;
-        if (!latestForChunk || suggestion.sequence > latestForChunk.sequence) {
-          latestForChunk = { id: suggestion.id, sequence: suggestion.sequence };
-        }
-      }
+      const latestForRewriteUnit = session.suggestions
+        .filter((suggestion) => suggestion.rewriteUnitId === rewriteUnitId)
+        .sort((left, right) => right.sequence - left.sequence)[0];
 
-      if (latestForChunk) {
-        setActiveSuggestionId(latestForChunk.id);
-        return;
-      }
-
-      setActiveSuggestionId(null);
+      setActiveSuggestionId(latestForRewriteUnit?.id ?? null);
     },
     [
       currentSessionRef,
-      setActiveChunkIndex,
+      setActiveRewriteUnitId,
       setActiveSuggestionId,
-      setSelectedChunkIndices
+      setSelectedRewriteUnitIds
     ]
   );
 
@@ -110,7 +100,7 @@ export function useSuggestionActions(options: {
         session,
         refreshSessionState,
         options: {
-          preserveChunk: true,
+          preserveRewriteUnit: true,
           preserveSuggestion: true
         },
         showNotice,
@@ -121,39 +111,51 @@ export function useSuggestionActions(options: {
         return;
       }
 
-      try {
-        const preservedScrollTop = captureDocumentScrollPosition();
-        const updated = await withBusy(`apply-suggestion:${suggestionId}`, () =>
-          applySuggestion(latestSession.id, suggestionId)
-        );
-        const suggestion =
-          updated.suggestions.find((item) => item.id === suggestionId) ??
-          getLatestSuggestion(updated);
-        const chunkIndex = suggestion?.chunkIndex ?? activeChunkIndexRef.current;
-
-        applySessionState(updated, chunkIndex, {
-          preferredSuggestionId: suggestionId,
-          preservedScrollTop
-        });
-
-        showNotice(
-          "success",
-          suggestion ? `已应用修改对 #${suggestion.sequence}。` : "已应用修改对。"
-        );
-      } catch (error) {
-        try {
-          await refreshSessionState(session.id, {
-            preserveChunk: true,
-            preserveSuggestion: true
+      const result = await runSessionActionOrNotify({
+        captureDocumentScrollPosition,
+        applySessionState,
+        showNotice,
+        errorPrefix: "应用失败",
+        formatError: readableError,
+        run: () =>
+          withBusy(`apply-suggestion:${suggestionId}`, () =>
+            applySuggestion(latestSession.id, suggestionId)
+          ),
+        resolveState: (updatedSession) => {
+          const suggestion =
+            updatedSession.suggestions.find((item) => item.id === suggestionId) ??
+            getLatestSuggestion(updatedSession);
+          return {
+            preferredRewriteUnitId:
+              suggestion?.rewriteUnitId ?? activeRewriteUnitIdRef.current,
+            preferredSuggestionId: suggestionId
+          };
+        },
+        recover: async () => {
+          await refreshSessionStateSilently({
+            sessionId: session.id,
+            refreshSessionState,
+            options: {
+              preserveRewriteUnit: true,
+              preserveSuggestion: true
+            }
           });
-        } catch {
-          // 保留原始错误提示，避免二次异常覆盖主错误。
         }
-        showNotice("error", `应用失败：${readableError(error)}`);
+      });
+      if (!result) {
+        return;
       }
+
+      const suggestion =
+        result.session.suggestions.find((item) => item.id === suggestionId) ??
+        getLatestSuggestion(result.session);
+      showNotice(
+        "success",
+        suggestion ? `已应用修改对 #${suggestion.sequence}。` : "已应用修改对。"
+      );
     },
     [
-      activeChunkIndexRef,
+      activeRewriteUnitIdRef,
       applySessionState,
       captureDocumentScrollPosition,
       currentSessionRef,
@@ -168,28 +170,35 @@ export function useSuggestionActions(options: {
       const session = currentSessionRef.current;
       if (!session) return;
 
-      try {
-        const preservedScrollTop = captureDocumentScrollPosition();
-        const updated = await withBusy(`dismiss-suggestion:${suggestionId}`, () =>
-          dismissSuggestion(session.id, suggestionId)
-        );
-        const suggestion =
-          updated.suggestions.find((item) => item.id === suggestionId) ??
-          getLatestSuggestion(updated);
-        const chunkIndex = suggestion?.chunkIndex ?? activeChunkIndexRef.current;
-
-        applySessionState(updated, chunkIndex, {
-          preferredSuggestionId: suggestion?.id ?? null,
-          preservedScrollTop
-        });
-
-        showNotice("warning", "已取消应用 / 忽略该修改对。");
-      } catch (error) {
-        showNotice("error", `操作失败：${readableError(error)}`);
+      const result = await runSessionActionOrNotify({
+        captureDocumentScrollPosition,
+        applySessionState,
+        showNotice,
+        errorPrefix: "操作失败",
+        formatError: readableError,
+        run: () =>
+          withBusy(`dismiss-suggestion:${suggestionId}`, () =>
+            dismissSuggestion(session.id, suggestionId)
+          ),
+        resolveState: (updatedSession) => {
+          const suggestion =
+            updatedSession.suggestions.find((item) => item.id === suggestionId) ??
+            getLatestSuggestion(updatedSession);
+          return {
+            preferredRewriteUnitId:
+              suggestion?.rewriteUnitId ?? activeRewriteUnitIdRef.current,
+            preferredSuggestionId: suggestion?.id ?? null
+          };
+        }
+      });
+      if (!result) {
+        return;
       }
+
+      showNotice("warning", "已取消应用 / 忽略该修改对。");
     },
     [
-      activeChunkIndexRef,
+      activeRewriteUnitIdRef,
       applySessionState,
       captureDocumentScrollPosition,
       currentSessionRef,
@@ -204,25 +213,30 @@ export function useSuggestionActions(options: {
       if (!session) return;
 
       const target = session.suggestions.find((item) => item.id === suggestionId);
-      const targetChunkIndex = target?.chunkIndex ?? activeChunkIndexRef.current;
+      const targetRewriteUnitId = target?.rewriteUnitId ?? activeRewriteUnitIdRef.current;
 
-      try {
-        const preservedScrollTop = captureDocumentScrollPosition();
-        const updated = await withBusy(`delete-suggestion:${suggestionId}`, () =>
-          deleteSuggestion(session.id, suggestionId)
-        );
-        const nextChunkIndex = Math.min(
-          targetChunkIndex,
-          Math.max(0, updated.chunks.length - 1)
-        );
-        applySessionState(updated, nextChunkIndex, { preservedScrollTop });
-        showNotice("warning", "已删除该修改对。");
-      } catch (error) {
-        showNotice("error", `删除失败：${readableError(error)}`);
+      const result = await runSessionActionOrNotify({
+        captureDocumentScrollPosition,
+        applySessionState,
+        showNotice,
+        errorPrefix: "删除失败",
+        formatError: readableError,
+        run: () =>
+          withBusy(`delete-suggestion:${suggestionId}`, () =>
+            deleteSuggestion(session.id, suggestionId)
+          ),
+        resolveState: () => ({
+          preferredRewriteUnitId: targetRewriteUnitId
+        })
+      });
+      if (!result) {
+        return;
       }
+
+      showNotice("warning", "已删除该修改对。");
     },
     [
-      activeChunkIndexRef,
+      activeRewriteUnitIdRef,
       applySessionState,
       captureDocumentScrollPosition,
       currentSessionRef,
@@ -232,7 +246,7 @@ export function useSuggestionActions(options: {
   );
 
   return {
-    handleSelectChunk,
+    handleSelectRewriteUnit,
     handleSelectSuggestion,
     handleApplySuggestion,
     handleDismissSuggestion,

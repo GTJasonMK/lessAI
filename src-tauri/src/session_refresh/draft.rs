@@ -3,8 +3,9 @@ use std::path::Path;
 use chrono::Utc;
 
 use crate::{
-    models::{ChunkPreset, ChunkTask, DocumentSession, RunningState},
+    models::{SegmentationPreset, DocumentSession, RunningState},
     rewrite,
+    rewrite_unit::{RewriteUnit, WritebackSlot},
 };
 
 use super::{
@@ -34,15 +35,17 @@ impl SessionRefreshDraft {
         self.changed = true;
     }
 
-    pub(super) fn rebuild_chunks(
+    pub(super) fn rebuild_structure(
         &mut self,
-        chunks: Vec<ChunkTask>,
-        chunk_preset: ChunkPreset,
+        writeback_slots: Vec<WritebackSlot>,
+        rewrite_units: Vec<RewriteUnit>,
+        segmentation_preset: SegmentationPreset,
         rewrite_headings: bool,
     ) {
         self.session.normalized_text = rewrite::normalize_text(&self.session.source_text);
-        self.session.chunks = chunks;
-        self.session.chunk_preset = Some(chunk_preset);
+        self.session.writeback_slots = writeback_slots;
+        self.session.rewrite_units = rewrite_units;
+        self.session.segmentation_preset = Some(segmentation_preset);
         self.session.rewrite_headings = Some(rewrite_headings);
         self.session.status = RunningState::Idle;
         self.changed = true;
@@ -73,7 +76,8 @@ mod tests {
 
     use super::SessionRefreshDraft;
     use crate::{
-        models::{ChunkPreset, ChunkStatus, ChunkTask, RunningState},
+        models::{SegmentationPreset, RewriteUnitStatus, RunningState},
+        rewrite_unit::{RewriteUnit, WritebackSlot},
         session_refresh::test_support::sample_session,
     };
 
@@ -96,33 +100,35 @@ mod tests {
     }
 
     #[test]
-    fn refresh_draft_rebuild_chunks_resets_session_metadata_in_one_place() {
+    fn refresh_draft_rebuild_structure_resets_session_metadata_in_one_place() {
         let mut session = sample_session();
         session.source_text = "第一句。第二句。".to_string();
         session.status = RunningState::Completed;
-        session.chunk_preset = Some(ChunkPreset::Paragraph);
+        session.segmentation_preset = Some(SegmentationPreset::Paragraph);
         session.rewrite_headings = Some(false);
 
         let mut draft = SessionRefreshDraft::new(session);
-        draft.rebuild_chunks(
-            vec![ChunkTask {
-                index: 0,
-                source_text: "第一句。第二句。".to_string(),
-                separator_after: String::new(),
-                skip_rewrite: false,
-                presentation: None,
-                status: ChunkStatus::Idle,
+        draft.rebuild_structure(
+            vec![WritebackSlot::editable("slot-0", 0, "第一句。第二句。")],
+            vec![RewriteUnit {
+                id: "unit-0".to_string(),
+                order: 0,
+                slot_ids: vec!["slot-0".to_string()],
+                display_text: "第一句。第二句。".to_string(),
+                segmentation_preset: SegmentationPreset::Sentence,
+                status: RewriteUnitStatus::Idle,
                 error_message: None,
             }],
-            ChunkPreset::Sentence,
+            SegmentationPreset::Sentence,
             true,
         );
         let refreshed = draft.finish();
 
         assert!(refreshed.changed);
         assert_eq!(refreshed.session.normalized_text, "第一句。第二句。");
-        assert_eq!(refreshed.session.chunks.len(), 1);
-        assert_eq!(refreshed.session.chunk_preset, Some(ChunkPreset::Sentence));
+        assert_eq!(refreshed.session.writeback_slots.len(), 1);
+        assert_eq!(refreshed.session.rewrite_units.len(), 1);
+        assert_eq!(refreshed.session.segmentation_preset, Some(SegmentationPreset::Sentence));
         assert_eq!(refreshed.session.rewrite_headings, Some(true));
         assert_eq!(refreshed.session.status, RunningState::Idle);
     }

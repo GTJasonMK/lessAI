@@ -3,7 +3,7 @@ use std::cell::{Cell, RefCell};
 use chrono::Utc;
 
 use crate::{
-    models::{ChunkPreset, DocumentSession, RunningState},
+    models::{SegmentationPreset, DocumentSession, RunningState},
     persist,
     session_flow::{allow_session, SessionLock, SessionStepConfig},
 };
@@ -21,9 +21,10 @@ fn sample_session(id: &str) -> DocumentSession {
         write_back_block_reason: None,
         plain_text_editor_safe: true,
         plain_text_editor_block_reason: None,
-        chunk_preset: Some(ChunkPreset::Paragraph),
+        segmentation_preset: Some(SegmentationPreset::Paragraph),
         rewrite_headings: Some(false),
-        chunks: Vec::new(),
+        writeback_slots: Vec::new(),
+        rewrite_units: Vec::new(),
         suggestions: Vec::new(),
         next_suggestion_sequence: 1,
         status: RunningState::Idle,

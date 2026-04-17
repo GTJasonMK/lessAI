@@ -1,7 +1,7 @@
 import { useDeferredValue, useEffect, useMemo, useState } from "react";
 import type { DiffHunk } from "../../../lib/diff";
 import { diffTextByLines } from "../../../lib/diff";
-import { countCharacters, normalizeNewlines } from "../../../lib/helpers";
+import { countCharacters, normalizeNewlines, rewriteUnitSourceText } from "../../../lib/helpers";
 import type { DocumentSession } from "../../../lib/types";
 
 function splitLeadingWhitespaceWithNewline(text: string) {
@@ -38,24 +38,21 @@ export function useEditorHunks(options: {
   const deferredEditorText = useDeferredValue(editorText);
   const [activeEditorHunkId, setActiveEditorHunkId] = useState<string | null>(null);
 
-  const editorBaselineChunks = useMemo(() => {
-    if (!enabled) return [];
-    if (!currentSession) return [];
-    return currentSession.chunks.map((chunk) => ({
-      index: chunk.index,
-      beforeText: normalizeNewlines(`${chunk.sourceText}${chunk.separatorAfter}`)
+  const editorBaselineUnits = useMemo(() => {
+    if (!enabled || !currentSession) return [];
+    return currentSession.rewriteUnits.map((rewriteUnit) => ({
+      id: rewriteUnit.id,
+      beforeText: normalizeNewlines(rewriteUnitSourceText(currentSession, rewriteUnit))
     }));
   }, [currentSession, enabled]);
 
   const editorBaselineText = useMemo(() => {
     if (!enabled) return "";
-    if (!currentSession) return "";
-    return editorBaselineChunks.map((item) => item.beforeText).join("");
-  }, [currentSession, editorBaselineChunks, enabled]);
+    return editorBaselineUnits.map((item) => item.beforeText).join("");
+  }, [editorBaselineUnits, enabled]);
 
   const editorDiffSpans = useMemo(() => {
-    if (!enabled) return [];
-    if (!currentSession) return [];
+    if (!enabled || !currentSession) return [];
     return diffTextByLines(editorBaselineText, deferredEditorText);
   }, [currentSession, deferredEditorText, editorBaselineText, enabled]);
 
@@ -70,23 +67,23 @@ export function useEditorHunks(options: {
   }, [editorDiffSpans]);
 
   const editorHunks = useMemo<DiffHunk[]>(() => {
-    if (!enabled) return [];
-    if (!currentSession) return [];
-    if (editorBaselineChunks.length === 0) return [];
+    if (!enabled || !currentSession || editorBaselineUnits.length === 0) {
+      return [];
+    }
 
-    const beforeChunks = editorBaselineChunks.map((item) => item.beforeText);
-    const afterChunks = Array.from({ length: beforeChunks.length }, () => "");
+    const beforeUnits = editorBaselineUnits.map((item) => item.beforeText);
+    const afterUnits = Array.from({ length: beforeUnits.length }, () => "");
 
-    let cursorChunkIndex = 0;
-    let cursorOffsetInChunk = 0;
+    let cursorUnitIndex = 0;
+    let cursorOffsetInUnit = 0;
 
-    const advanceChunkForConsumption = () => {
+    const advanceUnitForConsumption = () => {
       while (
-        cursorChunkIndex < beforeChunks.length &&
-        cursorOffsetInChunk === beforeChunks[cursorChunkIndex].length
+        cursorUnitIndex < beforeUnits.length &&
+        cursorOffsetInUnit === beforeUnits[cursorUnitIndex].length
       ) {
-        cursorChunkIndex += 1;
-        cursorOffsetInChunk = 0;
+        cursorUnitIndex += 1;
+        cursorOffsetInUnit = 0;
       }
     };
 
@@ -94,58 +91,55 @@ export function useEditorHunks(options: {
       let remaining = text;
 
       while (remaining.length > 0) {
-        advanceChunkForConsumption();
-        if (cursorChunkIndex >= beforeChunks.length) {
+        advanceUnitForConsumption();
+        if (cursorUnitIndex >= beforeUnits.length) {
           if (!appendToAfter) {
             return;
           }
-          // 理论上不会发生（before 总长度应与 chunks 相等），这里兜底避免丢失插入的尾部文本。
-          afterChunks[beforeChunks.length - 1] += remaining;
+          afterUnits[beforeUnits.length - 1] += remaining;
           return;
         }
 
-        const chunkText = beforeChunks[cursorChunkIndex];
-        const available = chunkText.length - cursorOffsetInChunk;
+        const unitText = beforeUnits[cursorUnitIndex];
+        const available = unitText.length - cursorOffsetInUnit;
         if (available <= 0) {
-          cursorChunkIndex += 1;
-          cursorOffsetInChunk = 0;
+          cursorUnitIndex += 1;
+          cursorOffsetInUnit = 0;
           continue;
         }
 
         const take = Math.min(remaining.length, available);
         const slice = remaining.slice(0, take);
         if (appendToAfter) {
-          afterChunks[cursorChunkIndex] += slice;
+          afterUnits[cursorUnitIndex] += slice;
         }
-        cursorOffsetInChunk += take;
+        cursorOffsetInUnit += take;
         remaining = remaining.slice(take);
       }
     };
 
     const appendInsert = (text: string) => {
-      if (beforeChunks.length === 0) return;
+      if (beforeUnits.length === 0) return;
 
-      advanceChunkForConsumption();
+      advanceUnitForConsumption();
 
-      if (cursorChunkIndex >= beforeChunks.length) {
-        afterChunks[beforeChunks.length - 1] += text;
+      if (cursorUnitIndex >= beforeUnits.length) {
+        afterUnits[beforeUnits.length - 1] += text;
         return;
       }
 
-      // 关键：当插入发生在 chunk 起始处时，优先把“行分隔/空白”归属到上一块，
-      // 这样在审阅侧的最小 diff 单元（chunk）更稳定，不会把空行和下一段绑定在一起。
-      if (cursorOffsetInChunk === 0 && cursorChunkIndex > 0) {
+      if (cursorOffsetInUnit === 0 && cursorUnitIndex > 0) {
         const { leading, rest } = splitLeadingWhitespaceWithNewline(text);
         if (leading) {
-          afterChunks[cursorChunkIndex - 1] += leading;
+          afterUnits[cursorUnitIndex - 1] += leading;
         }
         if (rest) {
-          afterChunks[cursorChunkIndex] += rest;
+          afterUnits[cursorUnitIndex] += rest;
         }
         return;
       }
 
-      afterChunks[cursorChunkIndex] += text;
+      afterUnits[cursorUnitIndex] += text;
     };
 
     for (const span of editorDiffSpans) {
@@ -162,9 +156,9 @@ export function useEditorHunks(options: {
 
     const changed: DiffHunk[] = [];
 
-    for (let index = 0; index < beforeChunks.length; index += 1) {
-      const beforeText = beforeChunks[index];
-      const afterText = afterChunks[index] ?? "";
+    for (let index = 0; index < beforeUnits.length; index += 1) {
+      const beforeText = beforeUnits[index];
+      const afterText = afterUnits[index] ?? "";
       if (beforeText === afterText) continue;
 
       const diffSpans = diffTextByLines(beforeText, afterText);
@@ -176,9 +170,9 @@ export function useEditorHunks(options: {
       }
 
       const sequence = changed.length + 1;
-      const chunkIndex = editorBaselineChunks[index]?.index ?? index;
+      const rewriteUnitId = editorBaselineUnits[index]?.id ?? `rewrite-unit-${index}`;
       changed.push({
-        id: `chunk-${chunkIndex}`,
+        id: `rewrite-unit-${rewriteUnitId}`,
         sequence,
         diffSpans,
         beforeText,
@@ -189,11 +183,10 @@ export function useEditorHunks(options: {
     }
 
     return changed;
-  }, [currentSession, editorBaselineChunks, editorDiffSpans, enabled]);
+  }, [currentSession, editorBaselineUnits, editorDiffSpans, enabled]);
 
   const activeEditorHunk = useMemo(() => {
-    if (!enabled) return null;
-    if (editorHunks.length === 0) return null;
+    if (!enabled || editorHunks.length === 0) return null;
     return editorHunks.find((item) => item.id === activeEditorHunkId) ?? editorHunks[0];
   }, [activeEditorHunkId, editorHunks, enabled]);
 
@@ -222,4 +215,3 @@ export function useEditorHunks(options: {
     setActiveEditorHunkId
   };
 }
-

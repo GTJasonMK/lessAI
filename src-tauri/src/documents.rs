@@ -2,8 +2,8 @@ mod source;
 mod writeback;
 
 pub(crate) use source::{
-    document_format, document_session_id, is_docx_path, load_document_source, LoadedDocumentSource,
-    RegionSegmentationStrategy,
+    document_format, document_session_id, is_docx_path, load_document_source,
+    writeback_slots_from_regions, LoadedDocumentSource,
 };
 #[cfg(test)]
 pub(crate) use writeback::DocumentWriteback;
@@ -17,6 +17,9 @@ pub(crate) use writeback::{
 #[cfg(test)]
 #[path = "documents_tests.rs"]
 mod tests;
+#[cfg(test)]
+#[path = "documents_source_tests.rs"]
+mod source_tests;
 #[cfg(test)]
 #[path = "documents_writeback_tests.rs"]
 mod writeback_tests;

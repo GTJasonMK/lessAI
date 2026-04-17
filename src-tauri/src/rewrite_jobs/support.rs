@@ -1,21 +1,21 @@
 use std::{
-    collections::{HashSet, VecDeque},
+    collections::{HashMap, HashSet, VecDeque},
     path::Path,
     sync::atomic::Ordering,
 };
 
 use tauri::{AppHandle, Emitter};
+use uuid::Uuid;
 
 use crate::{
     documents::document_format,
-    models::{
-        DocumentFormat, DocumentSession, RewriteMode, RewriteProgress, RunningState, SessionEvent,
-    },
+    models::{DocumentSession, RewriteMode, RewriteProgress, RunningState, SessionEvent},
     rewrite_permissions::{
-        ensure_session_can_rewrite, protected_chunk_rewrite_error, CHUNK_INDEX_OUT_OF_RANGE_ERROR,
+        ensure_session_can_rewrite, protected_rewrite_unit_error, REWRITE_UNIT_NOT_FOUND_ERROR,
     },
     rewrite_targets,
-    session_access::{access_current_session, CurrentSessionRequest},
+    rewrite_unit::{build_rewrite_unit_request, RewriteBatchRequest, RewriteUnitRequest},
+    session_access::CurrentSessionRequest,
     state::{AppState, JobControl},
 };
 
@@ -27,29 +27,28 @@ pub(super) enum RewriteSessionAccess {
     ActiveJob,
 }
 
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub(super) struct RewriteSourceChunk {
-    skip_rewrite: bool,
-    source_text: String,
+pub(super) struct AvailableRewriteTargets {
+    pub(super) target_unit_ids: Option<HashSet<String>>,
+    pub(super) has_target_subset: bool,
 }
 
 pub(super) struct PreparedAutoRewriteSession {
-    pub(super) format: DocumentFormat,
-    pub(super) total_chunks: usize,
-    pub(super) pending: VecDeque<usize>,
-    pub(super) source_snapshot: Vec<RewriteSourceChunk>,
-    pub(super) completed_chunks: usize,
+    pub(super) total_units: usize,
+    pub(super) pending: VecDeque<String>,
+    pub(super) request_snapshot: HashMap<String, RewriteUnitRequest>,
+    pub(super) completed_units: usize,
 }
 
 pub(super) struct PreparedLoadedRewriteBatch {
-    pub(super) format: DocumentFormat,
-    pub(super) source_texts: Vec<String>,
+    pub(super) rewrite_unit_ids: Vec<String>,
+    pub(super) batch_request: RewriteBatchRequest,
 }
 
 pub(super) fn rewrite_session_request<'a>(
     app: &'a AppHandle,
     state: &'a AppState,
     session_id: &'a str,
+    access: RewriteSessionAccess,
 ) -> CurrentSessionRequest<'a, fn(&DocumentSession) -> Result<(), String>> {
     let request = CurrentSessionRequest::guarded_refresh(
         app,
@@ -57,24 +56,7 @@ pub(super) fn rewrite_session_request<'a>(
         session_id,
         ensure_session_can_rewrite as fn(&DocumentSession) -> Result<(), String>,
     );
-    match rewrite_session_active_job_error(RewriteSessionAccess::ExternalEntry) {
-        Some(active_job_error) => request.with_active_job_error(active_job_error),
-        None => request,
-    }
-}
-
-fn active_job_rewrite_session_request<'a>(
-    app: &'a AppHandle,
-    state: &'a AppState,
-    session_id: &'a str,
-) -> CurrentSessionRequest<'a, fn(&DocumentSession) -> Result<(), String>> {
-    let request = CurrentSessionRequest::guarded_refresh(
-        app,
-        state,
-        session_id,
-        ensure_session_can_rewrite as fn(&DocumentSession) -> Result<(), String>,
-    );
-    match rewrite_session_active_job_error(RewriteSessionAccess::ActiveJob) {
+    match rewrite_session_active_job_error(access) {
         Some(active_job_error) => request.with_active_job_error(active_job_error),
         None => request,
     }
@@ -89,150 +71,126 @@ pub(super) fn rewrite_session_active_job_error(
     }
 }
 
-pub(super) fn load_rewriteable_session(
-    app: &AppHandle,
-    state: &AppState,
-    session_id: &str,
-) -> Result<DocumentSession, String> {
-    access_current_session(rewrite_session_request(app, state, session_id), Ok)
-}
-
-pub(super) fn load_rewriteable_session_for_active_job(
-    app: &AppHandle,
-    state: &AppState,
-    session_id: &str,
-) -> Result<DocumentSession, String> {
-    access_current_session(
-        active_job_rewrite_session_request(app, state, session_id),
-        Ok,
-    )
-}
-
-pub(super) fn build_rewrite_source_snapshot(session: &DocumentSession) -> Vec<RewriteSourceChunk> {
+pub(super) fn build_rewrite_source_snapshot(
+    session: &DocumentSession,
+) -> Result<HashMap<String, RewriteUnitRequest>, String> {
+    let format = document_format(Path::new(&session.document_path));
     session
-        .chunks
+        .rewrite_units
         .iter()
-        .map(|chunk| RewriteSourceChunk {
-            skip_rewrite: chunk.skip_rewrite,
-            source_text: chunk.source_text.clone(),
+        .map(|unit| {
+            build_rewrite_unit_request(session, &unit.id, format).map(|request| (unit.id.clone(), request))
         })
         .collect()
 }
 
 pub(super) fn collect_rewrite_batch_source_texts(
-    source_snapshot: &[RewriteSourceChunk],
-    indices: &[usize],
-) -> Result<Vec<String>, String> {
-    indices
+    source_snapshot: &HashMap<String, RewriteUnitRequest>,
+    rewrite_unit_ids: &[String],
+) -> Result<Vec<RewriteUnitRequest>, String> {
+    rewrite_unit_ids
         .iter()
-        .map(|index| {
-            let chunk = source_snapshot
-                .get(*index)
-                .ok_or_else(|| CHUNK_INDEX_OUT_OF_RANGE_ERROR.to_string())?;
-            if chunk.skip_rewrite {
-                return Err(protected_chunk_rewrite_error(*index));
+        .map(|rewrite_unit_id| {
+            let request = source_snapshot
+                .get(rewrite_unit_id)
+                .ok_or_else(|| REWRITE_UNIT_NOT_FOUND_ERROR.to_string())?;
+            let editable = request.slots.iter().any(|slot| slot.editable);
+            if !editable {
+                return Err(protected_rewrite_unit_error(rewrite_unit_id));
             }
-            Ok(chunk.source_text.clone())
+            Ok(request.clone())
         })
         .collect()
 }
 
 pub(super) fn prepare_auto_rewrite_session(
     session: &DocumentSession,
-    target_indices: Option<&HashSet<usize>>,
-) -> PreparedAutoRewriteSession {
-    PreparedAutoRewriteSession {
-        format: document_format(Path::new(&session.document_path)),
-        total_chunks: rewrite_targets::count_target_total_chunks(&session.chunks, target_indices),
-        pending: rewrite_targets::build_auto_pending_queue(&session.chunks, target_indices),
-        source_snapshot: build_rewrite_source_snapshot(session),
-        completed_chunks: rewrite_targets::count_target_completed_chunks(
-            &session.chunks,
-            target_indices,
+    target_unit_ids: Option<&HashSet<String>>,
+) -> Result<PreparedAutoRewriteSession, String> {
+    Ok(PreparedAutoRewriteSession {
+        total_units: rewrite_targets::count_target_total_units(&session.rewrite_units, target_unit_ids),
+        pending: rewrite_targets::build_auto_pending_queue(&session.rewrite_units, target_unit_ids),
+        request_snapshot: build_rewrite_source_snapshot(session)?,
+        completed_units: rewrite_targets::count_target_completed_units(
+            &session.rewrite_units,
+            target_unit_ids,
         ),
-    }
+    })
 }
 
 pub(super) fn prepare_loaded_rewrite_batch(
     session: &DocumentSession,
-    indices: &[usize],
+    rewrite_unit_ids: &[String],
 ) -> Result<PreparedLoadedRewriteBatch, String> {
-    let source_snapshot = build_rewrite_source_snapshot(session);
+    let source_snapshot = build_rewrite_source_snapshot(session)?;
+    let requests = collect_rewrite_batch_source_texts(&source_snapshot, rewrite_unit_ids)?;
     Ok(PreparedLoadedRewriteBatch {
-        format: document_format(Path::new(&session.document_path)),
-        source_texts: collect_rewrite_batch_source_texts(&source_snapshot, indices)?,
+        rewrite_unit_ids: rewrite_unit_ids.to_vec(),
+        batch_request: build_rewrite_batch_request(requests)?,
     })
 }
 
+pub(super) fn build_rewrite_batch_request(
+    requests: Vec<RewriteUnitRequest>,
+) -> Result<RewriteBatchRequest, String> {
+    let format = requests
+        .first()
+        .map(|request| request.format.clone())
+        .ok_or_else(|| "改写批次不包含任何单元。".to_string())?;
+    Ok(RewriteBatchRequest::new(
+        &Uuid::new_v4().to_string(),
+        &format,
+        requests,
+    ))
+}
+
 pub(super) fn snapshot_running_indices_from_batches(
-    in_flight_batches: &[Vec<usize>],
-) -> Vec<usize> {
-    let mut indices = in_flight_batches
+    in_flight_batches: &[Vec<String>],
+) -> Vec<String> {
+    let mut unit_ids = in_flight_batches
         .iter()
-        .flat_map(|batch| batch.iter().copied())
+        .flat_map(|batch| batch.iter().cloned())
         .collect::<Vec<_>>();
-    indices.sort_unstable();
-    indices.dedup();
-    indices
+    unit_ids.sort();
+    unit_ids.dedup();
+    unit_ids
+}
+
+pub(super) fn in_flight_batch_count(in_flight_batches: &[Vec<String>]) -> usize {
+    in_flight_batches.len()
 }
 
 fn no_available_targets_error(has_target_subset: bool) -> String {
     if has_target_subset {
-        "所选片段已处理完成。".to_string()
+        "所选改写单元已处理完成。".to_string()
     } else {
-        "没有可继续处理的片段，当前文档可能已经全部完成。".to_string()
+        "没有可继续处理的改写单元，当前文档可能已经全部完成。".to_string()
     }
 }
 
-fn build_available_targets<T, Build, IsEmpty>(
+pub(super) fn resolve_available_rewrite_targets(
     session: &DocumentSession,
-    target_chunk_indices: Option<Vec<usize>>,
-    build: Build,
-    is_empty: IsEmpty,
-) -> Result<T, String>
-where
-    Build: FnOnce(Option<&HashSet<usize>>) -> T,
-    IsEmpty: FnOnce(&T) -> bool,
-{
-    let target_indices =
-        rewrite_targets::resolve_target_indices(&session.chunks, target_chunk_indices)?;
-    let targets = build(target_indices.as_ref());
+    target_rewrite_unit_ids: Option<Vec<String>>,
+) -> Result<AvailableRewriteTargets, String> {
+    let target_unit_ids = rewrite_targets::resolve_target_rewrite_unit_ids(
+        &session.rewrite_units,
+        target_rewrite_unit_ids,
+    )?;
+    Ok(AvailableRewriteTargets {
+        has_target_subset: target_unit_ids.is_some(),
+        target_unit_ids,
+    })
+}
+
+pub(super) fn ensure_targets_available<T>(
+    targets: T,
+    has_target_subset: bool,
+    is_empty: impl FnOnce(&T) -> bool,
+) -> Result<T, String> {
     if is_empty(&targets) {
-        return Err(no_available_targets_error(target_indices.is_some()));
+        return Err(no_available_targets_error(has_target_subset));
     }
     Ok(targets)
-}
-
-pub(super) fn next_manual_batch(
-    session: &DocumentSession,
-    target_chunk_indices: Option<Vec<usize>>,
-    batch_size: usize,
-) -> Result<Vec<usize>, String> {
-    build_available_targets(
-        session,
-        target_chunk_indices,
-        |target_indices| {
-            rewrite_targets::find_next_manual_batch(&session.chunks, target_indices, batch_size)
-        },
-        Vec::is_empty,
-    )
-}
-
-pub(super) fn auto_pending_queue(
-    session: &DocumentSession,
-    target_chunk_indices: Option<Vec<usize>>,
-) -> Result<Option<HashSet<usize>>, String> {
-    build_available_targets(
-        session,
-        target_chunk_indices,
-        |target_indices| {
-            let pending =
-                rewrite_targets::build_auto_pending_queue(&session.chunks, target_indices);
-            (target_indices.cloned(), pending)
-        },
-        |(_, pending)| pending.is_empty(),
-    )
-    .map(|(target_indices, _)| target_indices)
 }
 
 pub(super) fn emit_rewrite_finished(app: &AppHandle, session_id: &str) -> Result<(), String> {
@@ -248,22 +206,22 @@ pub(super) fn emit_rewrite_finished(app: &AppHandle, session_id: &str) -> Result
 pub(super) fn emit_rewrite_progress(
     app: &AppHandle,
     session_id: &str,
-    completed_chunks: usize,
-    running_indices: Vec<usize>,
-    total_chunks: usize,
+    completed_units: usize,
+    in_flight: usize,
+    running_unit_ids: Vec<String>,
+    total_units: usize,
     mode: RewriteMode,
     running_state: RunningState,
     max_concurrency: usize,
 ) -> Result<(), String> {
-    let in_flight = running_indices.len();
     app.emit(
         "rewrite_progress",
         RewriteProgress {
             session_id: session_id.to_string(),
-            completed_chunks,
+            completed_units,
             in_flight,
-            running_indices,
-            total_chunks,
+            running_unit_ids,
+            total_units,
             mode,
             running_state,
             max_concurrency,
@@ -273,11 +231,13 @@ pub(super) fn emit_rewrite_progress(
 }
 
 pub(super) fn auto_running_state(job: &JobControl) -> RunningState {
-    if job.paused.load(Ordering::SeqCst) {
-        RunningState::Paused
-    } else {
-        RunningState::Running
+    if job.cancelled.load(Ordering::SeqCst) {
+        return RunningState::Cancelled;
     }
+    if job.paused.load(Ordering::SeqCst) {
+        return RunningState::Paused;
+    }
+    RunningState::Running
 }
 
 #[cfg(test)]

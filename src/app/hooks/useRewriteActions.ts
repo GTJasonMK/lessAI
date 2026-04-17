@@ -3,51 +3,55 @@ import {
   cancelRewrite,
   pauseRewrite,
   resumeRewrite,
-  retryChunk,
+  retryRewriteUnit,
   startRewrite
 } from "../../lib/api";
 import type {
-  ChunkTask,
   DocumentSession,
   RewriteMode,
-  RewriteProgress
+  RewriteProgress,
+  RewriteUnit
 } from "../../lib/types";
 import {
   countCharacters,
+  findRewriteUnit,
   getLatestSuggestion,
   readableError,
-  selectDefaultChunkIndex
+  rewriteUnitSourceText
 } from "../../lib/helpers";
 import {
-  findAutoPendingTargetChunks,
-  findNextManualTargetChunk,
-  hasSelectedChunks,
-  normalizeSelectedChunkIndices
-} from "../../lib/chunkSelection";
+  findAutoPendingTargetRewriteUnits,
+  findNextManualTargetRewriteUnit,
+  hasSelectedRewriteUnits,
+  normalizeSelectedRewriteUnitIds
+} from "../../lib/rewriteUnitSelection";
 import type { ConfirmModalOptions } from "../../components/ConfirmModal";
 import {
+  refreshSessionStateSilently,
   refreshRewriteableSessionOrNotify,
+  runSessionActionOrNotify,
   type ApplySessionState,
   type RefreshSessionState,
   type ShowNotice,
   type WithBusy
 } from "./sessionActionShared";
 
-const CHUNK_RISK_WARNING_NON_WHITESPACE_CHARS = 6000;
+const REWRITE_UNIT_RISK_WARNING_NON_WHITESPACE_CHARS = 6000;
 
-function chunkSizeSummary(chunk: ChunkTask) {
-  const rawChars = chunk.sourceText.length;
-  const nonWhitespaceChars = countCharacters(chunk.sourceText);
-  const lineBreaks = chunk.sourceText.split(/\r\n|\r|\n/).length - 1;
+function rewriteUnitSizeSummary(session: DocumentSession, rewriteUnit: RewriteUnit) {
+  const sourceText = rewriteUnitSourceText(session, rewriteUnit);
+  const rawChars = sourceText.length;
+  const nonWhitespaceChars = countCharacters(sourceText);
+  const lineBreaks = sourceText.split(/\r\n|\r|\n/).length - 1;
   return { rawChars, nonWhitespaceChars, lineBreaks };
 }
 
 export function useRewriteActions(options: {
   stageRef: React.MutableRefObject<"workbench" | "editor">;
   currentSessionRef: React.MutableRefObject<DocumentSession | null>;
-  activeChunkIndexRef: React.MutableRefObject<number>;
+  activeRewriteUnitIdRef: React.MutableRefObject<string | null>;
   activeSuggestionIdRef: React.MutableRefObject<string | null>;
-  selectedChunkIndicesRef: React.MutableRefObject<number[]>;
+  selectedRewriteUnitIdsRef: React.MutableRefObject<string[]>;
   captureDocumentScrollPosition: () => number | null;
   editorDirtyRef: React.MutableRefObject<boolean>;
   requestConfirm: (options: ConfirmModalOptions) => Promise<boolean>;
@@ -61,9 +65,9 @@ export function useRewriteActions(options: {
   const {
     stageRef,
     currentSessionRef,
-    activeChunkIndexRef,
+    activeRewriteUnitIdRef,
     activeSuggestionIdRef,
-    selectedChunkIndicesRef,
+    selectedRewriteUnitIdsRef,
     captureDocumentScrollPosition,
     editorDirtyRef,
     requestConfirm,
@@ -75,28 +79,28 @@ export function useRewriteActions(options: {
     withBusy
   } = options;
 
-  const confirmIfChunksTooLarge = useCallback(
+  const confirmIfRewriteUnitsTooLarge = useCallback(
     async (
       mode: RewriteMode,
       session: DocumentSession,
-      selectedChunkIndices: readonly number[]
+      selectedRewriteUnitIds: readonly string[]
     ) => {
       const pending =
         mode === "manual"
-          ? [findNextManualTargetChunk(session.chunks, selectedChunkIndices)].filter(
-              (chunk): chunk is ChunkTask => chunk != null
+          ? [findNextManualTargetRewriteUnit(session, selectedRewriteUnitIds)].filter(
+              (rewriteUnit): rewriteUnit is RewriteUnit => rewriteUnit != null
             )
-          : findAutoPendingTargetChunks(session.chunks, selectedChunkIndices);
+          : findAutoPendingTargetRewriteUnits(session, selectedRewriteUnitIds);
 
       if (pending.length === 0) return true;
 
       const risky = pending
-        .map((chunk) => ({
-          chunk,
-          size: chunkSizeSummary(chunk)
+        .map((rewriteUnit) => ({
+          rewriteUnit,
+          size: rewriteUnitSizeSummary(session, rewriteUnit)
         }))
         .filter(
-          ({ size }) => size.nonWhitespaceChars >= CHUNK_RISK_WARNING_NON_WHITESPACE_CHARS
+          ({ size }) => size.nonWhitespaceChars >= REWRITE_UNIT_RISK_WARNING_NON_WHITESPACE_CHARS
         );
 
       if (risky.length === 0) return true;
@@ -108,21 +112,21 @@ export function useRewriteActions(options: {
       const title = "片段过长风险提示";
       const header =
         mode === "manual"
-          ? `即将处理的片段过长，可能导致接口报错（上下文超限）或超时。`
-          : `待处理队列中存在超长片段，自动批处理可能在中途失败并停止。`;
+          ? "即将处理的片段过长，可能导致接口报错（上下文超限）或超时。"
+          : "待处理队列中存在超长片段，自动批处理可能在中途失败并停止。";
 
       const summaryLines =
         mode === "manual"
           ? [
-              `目标片段：第 ${maxRisk.chunk.index + 1} 段`,
-              `非空字符：${maxRisk.size.nonWhitespaceChars.toLocaleString()}（经验阈值 ${CHUNK_RISK_WARNING_NON_WHITESPACE_CHARS.toLocaleString()}）`,
+              `目标片段：第 ${maxRisk.rewriteUnit.order + 1} 段`,
+              `非空字符：${maxRisk.size.nonWhitespaceChars.toLocaleString()}（经验阈值 ${REWRITE_UNIT_RISK_WARNING_NON_WHITESPACE_CHARS.toLocaleString()}）`,
               `总字符：${maxRisk.size.rawChars.toLocaleString()}`,
               `换行数：${maxRisk.size.lineBreaks.toLocaleString()}`
             ]
           : [
               `待处理片段：${pending.length.toLocaleString()} 段`,
-              `超阈值片段：${risky.length.toLocaleString()} 段（经验阈值 ${CHUNK_RISK_WARNING_NON_WHITESPACE_CHARS.toLocaleString()} 非空字符）`,
-              `最长片段：第 ${maxRisk.chunk.index + 1} 段 / ${maxRisk.size.nonWhitespaceChars.toLocaleString()} 非空字符`
+              `超阈值片段：${risky.length.toLocaleString()} 段（经验阈值 ${REWRITE_UNIT_RISK_WARNING_NON_WHITESPACE_CHARS.toLocaleString()} 非空字符）`,
+              `最长片段：第 ${maxRisk.rewriteUnit.order + 1} 段 / ${maxRisk.size.nonWhitespaceChars.toLocaleString()} 非空字符`
             ];
 
       const guidanceLines = [
@@ -134,14 +138,13 @@ export function useRewriteActions(options: {
         "系统不会替你自动“降级分块”。选择继续将按当前分块直接调用模型。"
       ];
 
-      const ok = await requestConfirm({
+      return requestConfirm({
         title,
         message: [header, "", ...summaryLines, "", ...guidanceLines].join("\n"),
         okLabel: "继续优化",
         cancelLabel: "取消并调整",
         variant: "primary"
       });
-      return ok;
     },
     [requestConfirm]
   );
@@ -167,7 +170,7 @@ export function useRewriteActions(options: {
         session,
         refreshSessionState,
         options: {
-          preserveChunk: true,
+          preserveRewriteUnit: true,
           preserveSuggestion: true
         },
         showNotice,
@@ -178,88 +181,102 @@ export function useRewriteActions(options: {
         return;
       }
 
-      const normalizedSelectedChunkIndices = normalizeSelectedChunkIndices(
-        latestSession.chunks,
-        selectedChunkIndicesRef.current,
-        latestSession.chunkPreset
+      const normalizedSelectedRewriteUnitIds = normalizeSelectedRewriteUnitIds(
+        latestSession,
+        selectedRewriteUnitIdsRef.current
       );
-      const targetChunkIndices = hasSelectedChunks(normalizedSelectedChunkIndices)
-        ? normalizedSelectedChunkIndices
+      const targetRewriteUnitIds = hasSelectedRewriteUnits(normalizedSelectedRewriteUnitIds)
+        ? normalizedSelectedRewriteUnitIds
         : undefined;
 
-      const ok = await confirmIfChunksTooLarge(
+      const ok = await confirmIfRewriteUnitsTooLarge(
         mode,
         latestSession,
-        normalizedSelectedChunkIndices
+        normalizedSelectedRewriteUnitIds
       );
       if (!ok) {
         showNotice("info", "已取消执行，请调整切段策略或拆分文本后再重试。");
         return;
       }
 
-      try {
-        const preservedScrollTop = captureDocumentScrollPosition();
-        const updated = await withBusy(`start-${mode}`, () =>
-          startRewrite(latestSession.id, mode, targetChunkIndices)
-        );
-        if (mode === "manual") {
-          const existingSuggestionIds = new Set(latestSession.suggestions.map((item) => item.id));
-          const newSuggestions = updated.suggestions
-            .filter((item) => !existingSuggestionIds.has(item.id))
-            .sort((left, right) => left.sequence - right.sequence);
-          const preferredSuggestion = newSuggestions[0] ?? getLatestSuggestion(updated) ?? null;
-          const nextChunkIndex =
-            preferredSuggestion?.chunkIndex ?? selectDefaultChunkIndex(updated);
-
-          applySessionState(updated, nextChunkIndex, {
-            preferredSuggestionId: preferredSuggestion?.id ?? null,
-            preservedScrollTop
-          });
-          setReviewView("diff");
-          showNotice(
-            "success",
-            newSuggestions.length > 1
-              ? `已生成 ${newSuggestions.length} 条修改对，请在右侧审阅。`
-              : preferredSuggestion
-                ? `已生成修改对 #${preferredSuggestion.sequence}，请在右侧审阅。`
-                : "已生成下一段，请在右侧审阅。"
-          );
-          return;
-        }
-
-        applySessionState(updated, activeChunkIndexRef.current, {
-          preferredSuggestionId: activeSuggestionIdRef.current,
-          preservedScrollTop
-        });
-        showNotice("info", "自动批处理已启动，系统会后台连续处理并自动应用结果。");
-      } catch (error) {
-        if (session) {
-          try {
-            await refreshSessionState(session.id, {
-              preserveChunk: true,
-              preserveSuggestion: true
-            });
-          } catch {
-            // 保留原始错误提示，避免二次异常覆盖主错误。
+      const result = await runSessionActionOrNotify({
+        captureDocumentScrollPosition,
+        applySessionState,
+        showNotice,
+        errorPrefix: "执行失败",
+        formatError: readableError,
+        run: () =>
+          withBusy(`start-${mode}`, () =>
+            startRewrite(latestSession.id, mode, targetRewriteUnitIds)
+          ),
+        resolveState: (updatedSession) => {
+          if (mode === "manual") {
+            const existingSuggestionIds = new Set(latestSession.suggestions.map((item) => item.id));
+            const newSuggestions = updatedSession.suggestions
+              .filter((item) => !existingSuggestionIds.has(item.id))
+              .sort((left, right) => left.sequence - right.sequence);
+            const preferredSuggestion =
+              newSuggestions[0] ?? getLatestSuggestion(updatedSession) ?? null;
+            return {
+              preferredRewriteUnitId: preferredSuggestion?.rewriteUnitId,
+              preferredSuggestionId: preferredSuggestion?.id ?? null
+            };
           }
+
+          return {
+            preferredRewriteUnitId: activeRewriteUnitIdRef.current,
+            preferredSuggestionId: activeSuggestionIdRef.current
+          };
+        },
+        recover: async () => {
+          if (mode === "manual") {
+            setReviewView("diff");
+          }
+          await refreshSessionStateSilently({
+            sessionId: session.id,
+            refreshSessionState,
+            options: {
+              preserveRewriteUnit: true,
+              preserveSuggestion: true
+            }
+          });
         }
-        if (mode === "manual") {
-          setReviewView("diff");
-        }
-        showNotice("error", `执行失败：${readableError(error)}`);
+      });
+      if (!result) {
+        return;
       }
+
+      if (mode === "manual") {
+        const existingSuggestionIds = new Set(latestSession.suggestions.map((item) => item.id));
+        const newSuggestions = result.session.suggestions
+          .filter((item) => !existingSuggestionIds.has(item.id))
+          .sort((left, right) => left.sequence - right.sequence);
+        const preferredSuggestion = newSuggestions[0] ?? getLatestSuggestion(result.session) ?? null;
+        setReviewView("diff");
+        showNotice(
+          "success",
+          newSuggestions.length > 1
+            ? `已生成 ${newSuggestions.length} 条修改对，请在右侧审阅。`
+            : preferredSuggestion
+              ? `已生成修改对 #${preferredSuggestion.sequence}，请在右侧审阅。`
+              : "已生成下一段，请在右侧审阅。"
+        );
+        return;
+      }
+
+      showNotice("info", "自动批处理已启动，系统会后台连续处理并自动应用结果。");
     },
     [
-      activeChunkIndexRef,
+      activeRewriteUnitIdRef,
       activeSuggestionIdRef,
       applySessionState,
       captureDocumentScrollPosition,
-      confirmIfChunksTooLarge,
+      confirmIfRewriteUnitsTooLarge,
       currentSessionRef,
       editorDirtyRef,
       refreshSessionState,
+      selectedRewriteUnitIdsRef,
       setReviewView,
-      selectedChunkIndicesRef,
       showNotice,
       stageRef,
       withBusy
@@ -269,19 +286,25 @@ export function useRewriteActions(options: {
   const handlePause = useCallback(async () => {
     const session = currentSessionRef.current;
     if (!session) return;
-    try {
-      const preservedScrollTop = captureDocumentScrollPosition();
-      const updated = await withBusy("pause-rewrite", () => pauseRewrite(session.id));
-      applySessionState(updated, activeChunkIndexRef.current, {
-        preferredSuggestionId: activeSuggestionIdRef.current,
-        preservedScrollTop
-      });
-      showNotice("warning", "自动任务已暂停，可继续或取消。");
-    } catch (error) {
-      showNotice("error", `暂停失败：${readableError(error)}`);
+    const result = await runSessionActionOrNotify({
+      captureDocumentScrollPosition,
+      applySessionState,
+      showNotice,
+      errorPrefix: "暂停失败",
+      formatError: readableError,
+      run: () => withBusy("pause-rewrite", () => pauseRewrite(session.id)),
+      resolveState: () => ({
+        preferredRewriteUnitId: activeRewriteUnitIdRef.current,
+        preferredSuggestionId: activeSuggestionIdRef.current
+      })
+    });
+    if (!result) {
+      return;
     }
+
+    showNotice("warning", "自动任务已暂停，可继续或取消。");
   }, [
-    activeChunkIndexRef,
+    activeRewriteUnitIdRef,
     activeSuggestionIdRef,
     applySessionState,
     captureDocumentScrollPosition,
@@ -293,19 +316,25 @@ export function useRewriteActions(options: {
   const handleResume = useCallback(async () => {
     const session = currentSessionRef.current;
     if (!session) return;
-    try {
-      const preservedScrollTop = captureDocumentScrollPosition();
-      const updated = await withBusy("resume-rewrite", () => resumeRewrite(session.id));
-      applySessionState(updated, activeChunkIndexRef.current, {
-        preferredSuggestionId: activeSuggestionIdRef.current,
-        preservedScrollTop
-      });
-      showNotice("info", "自动任务已继续。");
-    } catch (error) {
-      showNotice("error", `继续失败：${readableError(error)}`);
+    const result = await runSessionActionOrNotify({
+      captureDocumentScrollPosition,
+      applySessionState,
+      showNotice,
+      errorPrefix: "继续失败",
+      formatError: readableError,
+      run: () => withBusy("resume-rewrite", () => resumeRewrite(session.id)),
+      resolveState: () => ({
+        preferredRewriteUnitId: activeRewriteUnitIdRef.current,
+        preferredSuggestionId: activeSuggestionIdRef.current
+      })
+    });
+    if (!result) {
+      return;
     }
+
+    showNotice("info", "自动任务已继续。");
   }, [
-    activeChunkIndexRef,
+    activeRewriteUnitIdRef,
     activeSuggestionIdRef,
     applySessionState,
     captureDocumentScrollPosition,
@@ -317,20 +346,26 @@ export function useRewriteActions(options: {
   const handleCancel = useCallback(async () => {
     const session = currentSessionRef.current;
     if (!session) return;
-    try {
-      const preservedScrollTop = captureDocumentScrollPosition();
-      const updated = await withBusy("cancel-rewrite", () => cancelRewrite(session.id));
-      applySessionState(updated, activeChunkIndexRef.current, {
-        preferredSuggestionId: activeSuggestionIdRef.current,
-        preservedScrollTop
-      });
-      setLiveProgress(null);
-      showNotice("warning", "自动任务已取消，已保留当前文档进度。");
-    } catch (error) {
-      showNotice("error", `取消失败：${readableError(error)}`);
+    const result = await runSessionActionOrNotify({
+      captureDocumentScrollPosition,
+      applySessionState,
+      showNotice,
+      errorPrefix: "取消失败",
+      formatError: readableError,
+      run: () => withBusy("cancel-rewrite", () => cancelRewrite(session.id)),
+      resolveState: () => ({
+        preferredRewriteUnitId: activeRewriteUnitIdRef.current,
+        preferredSuggestionId: activeSuggestionIdRef.current
+      })
+    });
+    if (!result) {
+      return;
     }
+
+    setLiveProgress(null);
+    showNotice("warning", "自动任务已取消，已保留当前文档进度。");
   }, [
-    activeChunkIndexRef,
+    activeRewriteUnitIdRef,
     activeSuggestionIdRef,
     applySessionState,
     captureDocumentScrollPosition,
@@ -342,13 +377,13 @@ export function useRewriteActions(options: {
 
   const handleRetry = useCallback(async () => {
     const session = currentSessionRef.current;
-    const chunk = session?.chunks[activeChunkIndexRef.current];
-    if (!session || !chunk) return;
+    const rewriteUnit = findRewriteUnit(session ?? null as never, activeRewriteUnitIdRef.current);
+    if (!session || !rewriteUnit) return;
     const latestSession = await refreshRewriteableSessionOrNotify({
       session,
       refreshSessionState,
       options: {
-        preferredChunkIndex: chunk.index,
+        preferredRewriteUnitId: rewriteUnit.id,
         preserveSuggestion: true
       },
       showNotice,
@@ -358,43 +393,56 @@ export function useRewriteActions(options: {
     if (!latestSession) {
       return;
     }
-    const latestChunk = latestSession.chunks[chunk.index];
-    if (!latestChunk) {
+    const latestRewriteUnit = findRewriteUnit(latestSession, rewriteUnit.id);
+    if (!latestRewriteUnit) {
       showNotice("warning", "当前片段已不存在，请刷新后重试。");
       return;
     }
-    try {
-      const preservedScrollTop = captureDocumentScrollPosition();
-      const updated = await withBusy("retry-chunk", () =>
-        retryChunk(latestSession.id, latestChunk.index)
-      );
-      const suggestion = getLatestSuggestion(updated);
-      const nextChunkIndex = suggestion?.chunkIndex ?? latestChunk.index;
-      applySessionState(updated, nextChunkIndex, {
-        preferredSuggestionId: suggestion?.id ?? null,
-        preservedScrollTop
-      });
-      setReviewView("diff");
-      showNotice(
-        "info",
-        suggestion
-          ? `已重新生成修改对 #${suggestion.sequence}（第 ${latestChunk.index + 1} 段）。`
-          : `第 ${latestChunk.index + 1} 段已重新生成。`
-      );
-    } catch (error) {
-      try {
-        await refreshSessionState(latestSession.id, {
-          preferredChunkIndex: latestChunk.index,
-          preserveSuggestion: true
+    const result = await runSessionActionOrNotify({
+      captureDocumentScrollPosition,
+      applySessionState,
+      showNotice,
+      errorPrefix: "重试失败",
+      formatError: readableError,
+      run: () =>
+        withBusy("retry-rewrite-unit", () =>
+          retryRewriteUnit(latestSession.id, latestRewriteUnit.id)
+        ),
+      resolveState: (updatedSession) => {
+        const suggestion = getLatestSuggestion(updatedSession);
+        return {
+          preferredRewriteUnitId: suggestion?.rewriteUnitId ?? latestRewriteUnit.id,
+          preferredSuggestionId: suggestion?.id ?? null
+        };
+      },
+      recover: async () => {
+        await refreshSessionStateSilently({
+          sessionId: latestSession.id,
+          refreshSessionState,
+          options: {
+            preferredRewriteUnitId: latestRewriteUnit.id,
+            preserveSuggestion: true
+          },
+          afterRefresh: async () => {
+            setReviewView("diff");
+          }
         });
-        setReviewView("diff");
-      } catch {
-        // 保留原始错误提示，避免二次异常覆盖主错误。
       }
-      showNotice("error", `重试失败：${readableError(error)}`);
+    });
+    if (!result) {
+      return;
     }
+
+    const suggestion = getLatestSuggestion(result.session);
+    setReviewView("diff");
+    showNotice(
+      "info",
+      suggestion
+        ? `已重新生成修改对 #${suggestion.sequence}（第 ${latestRewriteUnit.order + 1} 段）。`
+        : `第 ${latestRewriteUnit.order + 1} 段已重新生成。`
+    );
   }, [
-    activeChunkIndexRef,
+    activeRewriteUnitIdRef,
     applySessionState,
     captureDocumentScrollPosition,
     currentSessionRef,

@@ -6,13 +6,12 @@ use tauri::{AppHandle, State};
 use crate::{
     documents::document_session_id,
     models::DocumentSession,
+    session_access::{access_current_session, CurrentSessionRequest},
     session_access::open_session_for_path,
     session_loader::load_clean_session_from_existing,
     state::{with_session_lock, AppState},
     storage,
 };
-
-use super::support::{run_session_command, SessionCommandSource};
 
 #[tauri::command]
 pub fn load_session(
@@ -20,12 +19,8 @@ pub fn load_session(
     state: State<'_, AppState>,
     session_id: String,
 ) -> Result<DocumentSession, String> {
-    run_session_command(
-        &app,
-        &state,
-        &session_id,
-        SessionCommandSource::Refreshed,
-        None,
+    access_current_session(
+        CurrentSessionRequest::refreshed(&app, state.inner(), &session_id),
         Ok,
     )
 }
@@ -36,12 +31,9 @@ pub fn reset_session(
     state: State<'_, AppState>,
     session_id: String,
 ) -> Result<DocumentSession, String> {
-    run_session_command(
-        &app,
-        &state,
-        &session_id,
-        SessionCommandSource::Stored,
-        Some("当前文档正在执行自动任务，请先暂停并取消后再重置。"),
+    access_current_session(
+        CurrentSessionRequest::stored(&app, state.inner(), &session_id)
+            .with_active_job_error("当前文档正在执行自动任务，请先暂停并取消后再重置。"),
         |existing| {
             // 重置是“清空会话记录并重建切块”，不修改原文件。
             let session = load_clean_session_from_existing(&app, &existing, Utc::now(), true)?;

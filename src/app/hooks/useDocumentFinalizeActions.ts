@@ -18,6 +18,8 @@ import {
 import type { ConfirmModalOptions } from "../../components/ConfirmModal";
 import {
   refreshAllowedSessionOrNotify,
+  restoreLoadedSessionWithScroll,
+  runSessionActionOrNotify,
   type ApplySessionState,
   type RefreshSessionState,
   type ShowNotice,
@@ -28,15 +30,14 @@ import { logScrollRestore } from "./documentScrollRestoreDebug";
 export function useDocumentFinalizeActions(options: {
   stageRef: React.MutableRefObject<"workbench" | "editor">;
   currentSessionRef: React.MutableRefObject<DocumentSession | null>;
-  activeChunkIndexRef: React.MutableRefObject<number>;
+  activeRewriteUnitIdRef: React.MutableRefObject<string | null>;
   editorDirtyRef: React.MutableRefObject<boolean>;
   captureDocumentScrollPosition: () => number | null;
-  restoreDocumentScrollPosition: (scrollTop: number | null) => void;
   requestConfirm: (options: ConfirmModalOptions) => Promise<boolean>;
   applySessionState: ApplySessionState;
   refreshSessionState: RefreshSessionState;
   setCurrentSession: React.Dispatch<React.SetStateAction<DocumentSession | null>>;
-  setActiveChunkIndex: React.Dispatch<React.SetStateAction<number>>;
+  setActiveRewriteUnitId: React.Dispatch<React.SetStateAction<string | null>>;
   setActiveSuggestionId: React.Dispatch<React.SetStateAction<string | null>>;
   setReviewView: React.Dispatch<React.SetStateAction<"diff" | "source" | "candidate">>;
   setLiveProgress: React.Dispatch<React.SetStateAction<RewriteProgress | null>>;
@@ -47,15 +48,14 @@ export function useDocumentFinalizeActions(options: {
   const {
     stageRef,
     currentSessionRef,
-    activeChunkIndexRef,
+    activeRewriteUnitIdRef,
     editorDirtyRef,
     captureDocumentScrollPosition,
-    restoreDocumentScrollPosition,
     requestConfirm,
     applySessionState,
     refreshSessionState,
     setCurrentSession,
-    setActiveChunkIndex,
+    setActiveRewriteUnitId,
     setActiveSuggestionId,
     setReviewView,
     setLiveProgress,
@@ -107,7 +107,7 @@ export function useDocumentFinalizeActions(options: {
       session,
       refreshSessionState,
       options: {
-        preserveChunk: true,
+        preserveRewriteUnit: true,
         preserveSuggestion: true
       },
       showNotice,
@@ -143,7 +143,7 @@ export function useDocumentFinalizeActions(options: {
         : "",
       "",
       `文件：${formatDisplayPath(latestSession.documentPath)}`,
-      `已应用：${stats.chunksApplied}/${stats.total}`,
+      `已应用：${stats.unitsApplied}/${stats.total}`,
       stats.suggestionsProposed > 0
         ? `注意：仍有 ${stats.suggestionsProposed} 条待审阅修改对，不会写入文件。`
         : "待审阅：0（将完整写回已应用结果）",
@@ -170,9 +170,14 @@ export function useDocumentFinalizeActions(options: {
       path: latestSession.documentPath
     });
     try {
-      const reopened = await withBusy("finalize-document", async () => {
-        savedPath = await finalizeDocument(latestSession.id);
-        return openDocument(savedPath);
+      savedPath = await withBusy("finalize-document", () => finalizeDocument(latestSession.id));
+      const reopened = await openDocument(savedPath);
+      await restoreLoadedSessionWithScroll({
+        captureDocumentScrollPosition,
+        applySessionState,
+        session: reopened,
+        preservedScrollTop,
+        preferredRewriteUnitId: activeRewriteUnitIdRef.current
       });
 
       logScrollRestore("finalize-restoring", {
@@ -181,8 +186,6 @@ export function useDocumentFinalizeActions(options: {
         preservedScrollTop,
         savedPath
       });
-      restoreDocumentScrollPosition(preservedScrollTop);
-      applySessionState(reopened, Math.min(activeChunkIndexRef.current, Math.max(0, reopened.chunks.length - 1)));
       setReviewView("diff");
       setLiveProgress(null);
       closeSettings();
@@ -191,7 +194,7 @@ export function useDocumentFinalizeActions(options: {
       if (savedPath) {
         startTransition(() => {
           setCurrentSession(null);
-          setActiveChunkIndex(0);
+          setActiveRewriteUnitId(null);
           setActiveSuggestionId(null);
           setReviewView("diff");
           setLiveProgress(null);
@@ -207,26 +210,30 @@ export function useDocumentFinalizeActions(options: {
           preservedScrollTop,
           path: session.documentPath
         });
-        restoreDocumentScrollPosition(preservedScrollTop);
-        applySessionState(refreshed, Math.min(activeChunkIndexRef.current, Math.max(0, refreshed.chunks.length - 1)));
+        await restoreLoadedSessionWithScroll({
+          captureDocumentScrollPosition,
+          applySessionState,
+          session: refreshed,
+          preservedScrollTop,
+          preferredRewriteUnitId: activeRewriteUnitIdRef.current
+        });
         setReviewView("diff");
         setLiveProgress(null);
       } catch {
-        // 保留原始错误提示，避免二次异常覆盖主错误。
+        // ignore secondary failure
       }
 
       showNotice("error", `写回失败：${readableError(error)}`);
     }
   }, [
+    activeRewriteUnitIdRef,
     applySessionState,
-    activeChunkIndexRef,
     captureDocumentScrollPosition,
     closeSettings,
     currentSessionRef,
     refreshSessionState,
     requestConfirm,
-    restoreDocumentScrollPosition,
-    setActiveChunkIndex,
+    setActiveRewriteUnitId,
     setActiveSuggestionId,
     setCurrentSession,
     setLiveProgress,
@@ -253,7 +260,7 @@ export function useDocumentFinalizeActions(options: {
       "不会修改原文件内容。",
       "",
       `文件：${formatDisplayPath(session.documentPath)}`,
-      `当前记录：修改对 ${stats.suggestionsTotal}，已应用 ${stats.chunksApplied}/${stats.total}`,
+      `当前记录：修改对 ${stats.suggestionsTotal}，已应用 ${stats.unitsApplied}/${stats.total}`,
       stats.suggestionsProposed > 0
         ? `待审阅：${stats.suggestionsProposed}（会一起删除）`
         : "待审阅：0",
@@ -272,24 +279,30 @@ export function useDocumentFinalizeActions(options: {
 
     if (!ok) return;
 
-    try {
-      const preservedScrollTop = captureDocumentScrollPosition();
-      const rebuilt = await withBusy("reset-session", () => resetSession(session.id));
-      restoreDocumentScrollPosition(preservedScrollTop);
-      applySessionState(rebuilt, Math.min(activeChunkIndexRef.current, Math.max(0, rebuilt.chunks.length - 1)));
-      setReviewView("diff");
-      setLiveProgress(null);
-      showNotice("success", "已重置记录，并重新从原文件创建会话。");
-    } catch (error) {
-      showNotice("error", `重置失败：${readableError(error)}`);
+    const result = await runSessionActionOrNotify({
+      captureDocumentScrollPosition,
+      applySessionState,
+      showNotice,
+      errorPrefix: "重置失败",
+      formatError: readableError,
+      run: () => withBusy("reset-session", () => resetSession(session.id)),
+      resolveState: () => ({
+        preferredRewriteUnitId: activeRewriteUnitIdRef.current
+      })
+    });
+    if (!result) {
+      return;
     }
+
+    setReviewView("diff");
+    setLiveProgress(null);
+    showNotice("success", "已重置记录，并重新从原文件创建会话。");
   }, [
+    activeRewriteUnitIdRef,
     applySessionState,
-    activeChunkIndexRef,
     captureDocumentScrollPosition,
     currentSessionRef,
     requestConfirm,
-    restoreDocumentScrollPosition,
     setLiveProgress,
     setReviewView,
     showNotice,

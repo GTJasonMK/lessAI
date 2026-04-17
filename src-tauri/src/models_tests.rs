@@ -1,11 +1,11 @@
-use super::{AppSettings, ChunkPreset, DocumentSession, RunningState};
+use super::{AppSettings, SegmentationPreset, DocumentSession, RunningState};
 use crate::test_support::sample_clean_session;
 
 #[test]
-fn rejects_legacy_chunk_preset_aliases() {
+fn rejects_legacy_segmentation_preset_aliases() {
     for legacy in ["small", "medium", "large", "question"] {
         let payload = format!("\"{legacy}\"");
-        let parsed = serde_json::from_str::<ChunkPreset>(&payload);
+        let parsed = serde_json::from_str::<SegmentationPreset>(&payload);
         assert!(
             parsed.is_err(),
             "legacy preset should be rejected: {legacy}"
@@ -14,18 +14,18 @@ fn rejects_legacy_chunk_preset_aliases() {
 }
 
 #[test]
-fn accepts_current_chunk_preset_values() {
+fn accepts_current_segmentation_preset_values() {
     assert_eq!(
-        serde_json::from_str::<ChunkPreset>("\"clause\"").unwrap(),
-        ChunkPreset::Clause
+        serde_json::from_str::<SegmentationPreset>("\"clause\"").unwrap(),
+        SegmentationPreset::Clause
     );
     assert_eq!(
-        serde_json::from_str::<ChunkPreset>("\"sentence\"").unwrap(),
-        ChunkPreset::Sentence
+        serde_json::from_str::<SegmentationPreset>("\"sentence\"").unwrap(),
+        SegmentationPreset::Sentence
     );
     assert_eq!(
-        serde_json::from_str::<ChunkPreset>("\"paragraph\"").unwrap(),
-        ChunkPreset::Paragraph
+        serde_json::from_str::<SegmentationPreset>("\"paragraph\"").unwrap(),
+        SegmentationPreset::Paragraph
     );
 }
 
@@ -38,11 +38,11 @@ fn rejects_app_settings_payload_missing_current_required_fields() {
         "updateProxy": "",
         "timeoutMs": 45000,
         "temperature": 0.8,
-        "chunkPreset": "paragraph",
+        "segmentationPreset": "paragraph",
         "rewriteHeadings": false,
         "rewriteMode": "manual",
         "maxConcurrency": 2,
-        "chunksPerRequest": 1,
+        "unitsPerBatch": 1,
         "promptPresetId": "humanizer_zh",
         "customPrompts": []
     });
@@ -51,7 +51,7 @@ fn rejects_app_settings_payload_missing_current_required_fields() {
         "updateProxy",
         "rewriteHeadings",
         "maxConcurrency",
-        "chunksPerRequest",
+        "unitsPerBatch",
         "promptPresetId",
         "customPrompts",
     ] {

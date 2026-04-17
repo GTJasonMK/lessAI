@@ -155,7 +155,7 @@ export const PlainTextDocumentEditor = memo(
           return { ok: true };
         },
 
-        collectChunkEdits: () => null
+        collectSlotEdits: () => null
       }),
       [onChange]
     );

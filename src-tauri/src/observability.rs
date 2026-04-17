@@ -30,13 +30,13 @@ pub(crate) fn writeback_mode_label(mode: WritebackMode) -> &'static str {
     }
 }
 
-pub(crate) fn target_indices_label(indices: Option<&[usize]>) -> String {
-    match indices {
+pub(crate) fn target_rewrite_unit_ids_label(rewrite_unit_ids: Option<&[String]>) -> String {
+    match rewrite_unit_ids {
         None => "all".to_string(),
-        Some(indices) => {
-            let joined = indices
+        Some(rewrite_unit_ids) => {
+            let joined = rewrite_unit_ids
                 .iter()
-                .map(|index| index.to_string())
+                .map(String::as_str)
                 .collect::<Vec<_>>()
                 .join(",");
             format!("[{joined}]")
@@ -100,10 +100,16 @@ mod tests {
     }
 
     #[test]
-    fn target_indices_label_formats_none_and_values() {
-        assert_eq!(super::target_indices_label(None), "all");
-        assert_eq!(super::target_indices_label(Some(&[])), "[]");
-        assert_eq!(super::target_indices_label(Some(&[1, 3, 5])), "[1,3,5]");
+    fn target_rewrite_unit_ids_label_formats_none_and_values() {
+        assert_eq!(super::target_rewrite_unit_ids_label(None), "all");
+        assert_eq!(super::target_rewrite_unit_ids_label(Some(&[])), "[]");
+        assert_eq!(
+            super::target_rewrite_unit_ids_label(Some(&[
+                "unit-1".to_string(),
+                "unit-3".to_string()
+            ])),
+            "[unit-1,unit-3]"
+        );
     }
 
     #[test]

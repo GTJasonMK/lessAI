@@ -4,13 +4,12 @@ use std::{
 };
 
 use crate::{
-    adapters::TextRegion,
     documents::{
         ensure_document_can_write_back, execute_document_writeback, is_docx_path,
         normalize_text_against_source_layout, OwnedDocumentWriteback, WritebackMode,
     },
-    models::{ChunkStatus, DocumentSession, EditorChunkEdit, RunningState},
-    rewrite_projection::build_merged_regions,
+    models::{RewriteUnitStatus, DocumentSession, EditorSlotEdit, RunningState},
+    rewrite_unit::{apply_slot_updates, SlotUpdate},
 };
 
 const EDITOR_WRITEBACK_CONFLICT_ERROR: &str =
@@ -34,17 +33,6 @@ pub(crate) fn ensure_session_can_use_plain_text_editor(
     Ok(())
 }
 
-fn normalize_editor_writeback_content(
-    document_path: &str,
-    source_text: &str,
-    content: &str,
-) -> String {
-    if is_docx_path(Path::new(document_path)) {
-        return content.to_string();
-    }
-    normalize_text_against_source_layout(source_text, content)
-}
-
 pub(crate) fn build_plain_text_editor_writeback(
     session: &DocumentSession,
     content: &str,
@@ -54,21 +42,25 @@ pub(crate) fn build_plain_text_editor_writeback(
     }
     ensure_session_can_use_plain_text_editor(session)?;
     if is_docx_path(Path::new(&session.document_path)) {
-        return Err("docx 编辑模式必须按片段保存，不能再走整篇纯文本写回。".to_string());
+        return Err("docx 编辑模式必须按槽位保存，不能再走整篇纯文本写回。".to_string());
     }
 
     Ok(EditorWritebackPayload::Text(
-        normalize_editor_writeback_content(&session.document_path, &session.source_text, content),
+        normalize_text_against_source_layout(&session.source_text, content),
     ))
 }
 
-pub(crate) fn build_chunk_editor_writeback(
+pub(crate) fn build_slot_editor_writeback(
     session: &DocumentSession,
-    edits: &[EditorChunkEdit],
+    edits: &[EditorSlotEdit],
 ) -> Result<EditorWritebackPayload, String> {
-    Ok(EditorWritebackPayload::Regions(
-        build_updated_regions_from_chunk_edits(session, edits)?,
-    ))
+    ensure_session_can_use_plain_text_editor(session)?;
+    if !is_docx_path(Path::new(&session.document_path)) {
+        return Err("当前仅 docx 支持按槽位编辑写回。".to_string());
+    }
+    let slot_updates = collect_slot_edit_updates(session, edits)?;
+    let updated_slots = apply_slot_updates(&session.writeback_slots, &slot_updates)?;
+    Ok(EditorWritebackPayload::Slots(updated_slots))
 }
 
 pub(crate) fn execute_editor_writeback(
@@ -85,71 +77,49 @@ pub(crate) fn execute_editor_writeback(
     )
 }
 
-fn build_updated_regions_from_chunk_edits(
-    session: &DocumentSession,
-    edits: &[EditorChunkEdit],
-) -> Result<Vec<TextRegion>, String> {
-    with_chunk_edit_overrides(session, edits, |session, overrides| {
-        if !is_docx_path(Path::new(&session.document_path)) {
-            return Err("当前仅 docx 支持按片段编辑写回。".to_string());
-        }
-        Ok(build_merged_regions(session, Some(overrides)))
-    })
-}
-
 fn plain_text_editor_session_is_clean(session: &DocumentSession) -> bool {
     session.status == RunningState::Idle
         && session.suggestions.is_empty()
         && session
-            .chunks
+            .rewrite_units
             .iter()
-            .all(|chunk| chunk.status == ChunkStatus::Idle || chunk.skip_rewrite)
+            .all(|unit| unit.status == RewriteUnitStatus::Idle || unit.status == RewriteUnitStatus::Done)
 }
 
-fn collect_chunk_edit_overrides(
+fn collect_slot_edit_updates(
     session: &DocumentSession,
-    edits: &[EditorChunkEdit],
-) -> Result<HashMap<usize, String>, String> {
-    let editable_indices = session
-        .chunks
+    edits: &[EditorSlotEdit],
+) -> Result<Vec<SlotUpdate>, String> {
+    let editable_slot_ids = session
+        .writeback_slots
         .iter()
-        .filter(|chunk| !chunk.skip_rewrite)
-        .map(|chunk| chunk.index)
+        .filter(|slot| slot.editable)
+        .map(|slot| slot.id.clone())
         .collect::<HashSet<_>>();
-    if edits.len() != editable_indices.len() {
-        return Err("编辑器提交的可编辑片段数量与当前会话不一致，请重新进入编辑模式。".to_string());
+    if edits.len() != editable_slot_ids.len() {
+        return Err("编辑器提交的可编辑槽位数量与当前会话不一致，请重新进入编辑模式。".to_string());
     }
 
-    let mut overrides = HashMap::with_capacity(edits.len());
+    let mut seen = HashMap::with_capacity(edits.len());
     for edit in edits {
-        if !editable_indices.contains(&edit.index) {
+        if !editable_slot_ids.contains(&edit.slot_id) {
             return Err(format!(
-                "编辑器提交了不可编辑或不存在的片段 #{}, 无法安全写回。",
-                edit.index + 1
+                "编辑器提交了不可编辑或不存在的槽位 {}, 无法安全写回。",
+                edit.slot_id
             ));
         }
-        if overrides.insert(edit.index, edit.text.clone()).is_some() {
+        if seen.insert(edit.slot_id.clone(), edit.text.clone()).is_some() {
             return Err(format!(
-                "编辑器提交了重复的片段 #{}, 无法安全写回。",
-                edit.index + 1
+                "编辑器提交了重复的槽位 {}, 无法安全写回。",
+                edit.slot_id
             ));
         }
     }
 
-    Ok(overrides)
-}
-
-fn with_chunk_edit_overrides<T, Apply>(
-    session: &DocumentSession,
-    edits: &[EditorChunkEdit],
-    apply: Apply,
-) -> Result<T, String>
-where
-    Apply: FnOnce(&DocumentSession, &HashMap<usize, String>) -> Result<T, String>,
-{
-    ensure_session_can_use_plain_text_editor(session)?;
-    let overrides = collect_chunk_edit_overrides(session, edits)?;
-    apply(session, &overrides)
+    Ok(edits
+        .iter()
+        .map(|edit| SlotUpdate::new(&edit.slot_id, &edit.text))
+        .collect())
 }
 
 #[cfg(test)]

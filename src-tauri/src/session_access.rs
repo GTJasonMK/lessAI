@@ -183,6 +183,22 @@ where
     )
 }
 
+pub(crate) fn mutate_current_session<T, Guard, Mutate>(
+    request: CurrentSessionRequest<'_, Guard>,
+    mutate: Mutate,
+) -> Result<T, String>
+where
+    Guard: FnOnce(&DocumentSession) -> Result<(), String>,
+    Mutate:
+        FnOnce(&mut DocumentSession) -> Result<crate::session_edit::SessionMutation<T>, String>,
+{
+    let app = request.app;
+    access_current_session(request, move |mut session| {
+        let (value, should_save) = mutate(&mut session)?.into_parts();
+        persist::maybe_save_and_return(value, should_save, |_| storage::save_session(app, &session))
+    })
+}
+
 fn repair_stale_active_session(
     app: &AppHandle,
     state: &AppState,

@@ -20,6 +20,7 @@ use super::{
     package::{load_docx_document, DocxSupportData},
     placeholders,
     specials::{classify_block_sdt, classify_inline_special_region, is_inline_special_name},
+    slots::build_writeback_slots,
     styles::ParagraphStyles,
     xml::{
         attr_value, hyperlink_target, local_name, local_name_owned, toggle_attr_enabled,
@@ -28,7 +29,8 @@ use super::{
 };
 use crate::{
     adapters::TextRegion,
-    models::{ChunkPresentation, DiffType},
+    models::{TextPresentation, DiffType},
+    rewrite_unit::WritebackSlot,
 };
 
 /// Docx 适配器：从 `.docx`（Office Open XML）中抽取可改写的纯文本。
@@ -67,12 +69,22 @@ impl DocxAdapter {
         Ok(flatten_writeback_blocks_for_test(&blocks))
     }
 
+    #[cfg(test)]
     pub fn extract_regions(
         docx_bytes: &[u8],
         rewrite_headings: bool,
     ) -> Result<Vec<TextRegion>, String> {
         let loaded = load_docx_document(docx_bytes)?;
         extract_regions_from_document_xml(&loaded.document_xml, &loaded.support, rewrite_headings)
+    }
+
+    pub fn extract_writeback_slots(
+        docx_bytes: &[u8],
+        rewrite_headings: bool,
+    ) -> Result<Vec<crate::rewrite_unit::WritebackSlot>, String> {
+        let loaded = load_docx_document(docx_bytes)?;
+        let blocks = extract_writeback_paragraph_templates(&loaded.document_xml, &loaded.support)?;
+        Ok(build_writeback_slots(&blocks, rewrite_headings))
     }
 
     pub fn write_updated_text(
@@ -96,6 +108,7 @@ impl DocxAdapter {
         replace_document_xml(docx_bytes, &updated_xml)
     }
 
+    #[cfg(test)]
     pub fn write_updated_regions(
         docx_bytes: &[u8],
         expected_source_text: &str,
@@ -114,6 +127,28 @@ impl DocxAdapter {
 
         let updated_xml =
             rewrite_document_xml_with_regions(&loaded.document_xml, &paragraphs, updated_regions)?;
+        replace_document_xml(docx_bytes, &updated_xml)
+    }
+
+    pub fn write_updated_slots(
+        docx_bytes: &[u8],
+        expected_source_text: &str,
+        updated_slots: &[WritebackSlot],
+    ) -> Result<Vec<u8>, String> {
+        let loaded = load_docx_document(docx_bytes)?;
+        let paragraphs =
+            extract_writeback_paragraph_templates(&loaded.document_xml, &loaded.support)?;
+        let current_source_text = build_writeback_source_text(&paragraphs);
+        if current_source_text != expected_source_text {
+            return Err(
+                "docx 原文件内容与当前会话不一致，文件可能已在外部发生变化。为避免误写，请重新导入。"
+                    .to_string(),
+            );
+        }
+
+        let updated_regions = text_regions_from_writeback_slots(updated_slots);
+        let updated_xml =
+            rewrite_document_xml_with_regions(&loaded.document_xml, &paragraphs, &updated_regions)?;
         replace_document_xml(docx_bytes, &updated_xml)
     }
 
@@ -142,6 +177,7 @@ struct RunStyle {
     underline: bool,
 }
 
+#[cfg(test)]
 fn extract_regions_from_document_xml(
     xml: &str,
     support: &DocxSupportData,
@@ -149,6 +185,17 @@ fn extract_regions_from_document_xml(
 ) -> Result<Vec<TextRegion>, String> {
     let blocks = extract_writeback_paragraph_templates(xml, support)?;
     Ok(flatten_writeback_blocks(&blocks, rewrite_headings))
+}
+
+fn text_regions_from_writeback_slots(updated_slots: &[WritebackSlot]) -> Vec<TextRegion> {
+    updated_slots
+        .iter()
+        .map(|slot| TextRegion {
+            body: format!("{}{}", slot.text, slot.separator_after),
+            skip_rewrite: !slot.editable,
+            presentation: slot.presentation.clone(),
+        })
+        .collect()
 }
 
 fn is_ignorable_paragraph_name(name: &[u8]) -> bool {
@@ -407,7 +454,7 @@ fn current_editable_presentation(
     run_style: &RunStyle,
     href: Option<String>,
     writeback_key: Option<String>,
-) -> Option<ChunkPresentation> {
+) -> Option<TextPresentation> {
     if !run_style.bold
         && !run_style.italic
         && !run_style.underline
@@ -416,7 +463,7 @@ fn current_editable_presentation(
     {
         return None;
     }
-    Some(ChunkPresentation {
+    Some(TextPresentation {
         bold: run_style.bold,
         italic: run_style.italic,
         underline: run_style.underline,
@@ -707,6 +754,7 @@ fn display_block_text(
     }
 }
 
+#[cfg(test)]
 fn flatten_writeback_blocks(
     blocks: &[WritebackBlockTemplate],
     rewrite_headings: bool,
@@ -728,7 +776,7 @@ fn flatten_writeback_blocks(
                         } else {
                             String::new()
                         },
-                        skip_rewrite: paragraph.is_heading && !rewrite_headings,
+                        skip_rewrite: true,
                         presentation: None,
                     });
                     continue;
@@ -776,6 +824,7 @@ fn flatten_writeback_blocks(
     regions
 }
 
+#[cfg(test)]
 fn paragraph_region_skip_rewrite(
     paragraph: &WritebackParagraphTemplate,
     region: &WritebackRegionTemplate,
@@ -1033,9 +1082,11 @@ fn merge_adjacent_writeback_regions(
 }
 
 fn writeback_regions_have_visible_content(regions: &[WritebackRegionTemplate]) -> bool {
-    regions
-        .iter()
-        .any(|region| !region.text().trim().is_empty())
+    regions.iter().any(|region| text_has_visible_content(region.text()))
+}
+
+fn text_has_visible_content(text: &str) -> bool {
+    !text.trim().is_empty()
 }
 
 fn merge_writeback_region(
@@ -1378,7 +1429,7 @@ fn build_run_presentation(
     run_property_events: &[Event<'static>],
     href: Option<String>,
     hyperlink_signature: Option<&str>,
-) -> Option<ChunkPresentation> {
+) -> Option<TextPresentation> {
     let mut style = RunStyle::default();
     for event in run_property_events {
         if let Event::Start(e) | Event::Empty(e) = event {
@@ -1395,7 +1446,7 @@ fn build_run_presentation(
 fn flush_writeback_editable_region(
     regions: &mut Vec<WritebackRegionTemplate>,
     buffer: &mut String,
-    presentation: Option<ChunkPresentation>,
+    presentation: Option<TextPresentation>,
     hyperlink_start: Option<BytesStart<'static>>,
     run_property_events: &[Event<'static>],
 ) {
@@ -1411,12 +1462,158 @@ fn flush_writeback_editable_region(
             run_property_events: run_property_events.to_vec(),
         },
     };
-    regions.push(WritebackRegionTemplate::Editable(EditableRegionTemplate {
-        text: std::mem::take(buffer),
-        allow_rewrite: true,
-        presentation,
-        render,
-    }));
+    let text = std::mem::take(buffer);
+    push_writeback_editable_text_regions(regions, text, presentation, render);
+}
+
+fn push_writeback_editable_text_regions(
+    regions: &mut Vec<WritebackRegionTemplate>,
+    text: String,
+    presentation: Option<TextPresentation>,
+    render: EditableRegionRender,
+) {
+    for (segment_text, allow_rewrite) in split_editable_text_segments(&text, &presentation) {
+        regions.push(WritebackRegionTemplate::Editable(EditableRegionTemplate {
+            allow_rewrite,
+            text: segment_text.to_string(),
+            presentation: presentation.clone(),
+            render: render.clone(),
+        }));
+    }
+}
+
+fn split_editable_text_segments<'a>(
+    text: &'a str,
+    presentation: &Option<TextPresentation>,
+) -> Vec<(&'a str, bool)> {
+    let mut segments = Vec::new();
+    for (segment_text, allow_rewrite) in split_structured_text_segments(text, presentation) {
+        if !allow_rewrite {
+            segments.push((segment_text, false));
+            continue;
+        }
+        extend_url_locked_segments(&mut segments, segment_text);
+    }
+    segments
+}
+
+fn split_structured_text_segments<'a>(
+    text: &'a str,
+    presentation: &Option<TextPresentation>,
+) -> Vec<(&'a str, bool)> {
+    if !presentation.as_ref().is_some_and(|item| item.underline) || !text_has_visible_content(text)
+    {
+        return vec![(text, text_has_visible_content(text))];
+    }
+    let Some((content_start, content_end)) = text_content_bounds(text) else {
+        return vec![(text, false)];
+    };
+    if content_start == 0 && content_end == text.len() {
+        return vec![(text, true)];
+    }
+    let mut segments = Vec::with_capacity(3);
+    if content_start > 0 {
+        segments.push((&text[..content_start], false));
+    }
+    segments.push((&text[content_start..content_end], true));
+    if content_end < text.len() {
+        segments.push((&text[content_end..], false));
+    }
+    segments
+}
+
+fn text_content_bounds(text: &str) -> Option<(usize, usize)> {
+    let start = text.char_indices().find(|(_, ch)| !ch.is_whitespace())?.0;
+    let (end_start, end_ch) = text.char_indices().rev().find(|(_, ch)| !ch.is_whitespace())?;
+    Some((start, end_start + end_ch.len_utf8()))
+}
+
+fn extend_url_locked_segments<'a>(segments: &mut Vec<(&'a str, bool)>, text: &'a str) {
+    let spans = bare_url_spans(text);
+    if spans.is_empty() {
+        segments.push((text, true));
+        return;
+    }
+
+    let mut cursor = 0usize;
+    for (start, end) in spans {
+        if cursor < start {
+            let prefix = &text[cursor..start];
+            segments.push((prefix, text_has_visible_content(prefix)));
+        }
+        segments.push((&text[start..end], false));
+        cursor = end;
+    }
+    if cursor < text.len() {
+        let suffix = &text[cursor..];
+        segments.push((suffix, text_has_visible_content(suffix)));
+    }
+}
+
+fn bare_url_spans(text: &str) -> Vec<(usize, usize)> {
+    let mut spans = Vec::new();
+    let mut index = 0usize;
+    while index < text.len() {
+        let slice = &text[index..];
+        let prefix_len = if slice.starts_with("https://") {
+            Some("https://".len())
+        } else if slice.starts_with("http://") {
+            Some("http://".len())
+        } else if slice.starts_with("www.") {
+            Some("www.".len())
+        } else {
+            None
+        };
+        let Some(prefix_len) = prefix_len else {
+            index += text[index..].chars().next().map(|ch| ch.len_utf8()).unwrap_or(1);
+            continue;
+        };
+        if !url_start_allowed(text, index) {
+            index += prefix_len;
+            continue;
+        }
+        let end = find_bare_url_end(text, index, prefix_len);
+        if end > index + prefix_len {
+            spans.push((index, end));
+            index = end;
+        } else {
+            index += prefix_len;
+        }
+    }
+    spans
+}
+
+fn url_start_allowed(text: &str, start: usize) -> bool {
+    let Some(prev) = text[..start].chars().next_back() else {
+        return true;
+    };
+    !(prev.is_ascii_alphanumeric() || matches!(prev, '/' | '.' | '_' | '-' | '@'))
+}
+
+fn find_bare_url_end(text: &str, start: usize, prefix_len: usize) -> usize {
+    let bytes = text.as_bytes();
+    let mut end = start;
+    while end < bytes.len() && !bytes[end].is_ascii_whitespace() {
+        end += 1;
+    }
+    while end > start + prefix_len && url_trailing_punctuation(text[..end].chars().next_back()) {
+        end -= text[..end]
+            .chars()
+            .next_back()
+            .map(|ch| ch.len_utf8())
+            .unwrap_or(1);
+    }
+    end
+}
+
+fn url_trailing_punctuation(ch: Option<char>) -> bool {
+    matches!(
+        ch,
+        Some(
+            '.' | ',' | ';' | ':' | '!' | '?' | ')' | ']' | '}' | '"' | '\'' | '。' | '，'
+                | '；' | '：' | '！' | '？' | '）' | '】' | '」' | '』' | '、'
+        )
+    )
 }
 
 fn parse_writeback_formula_region(

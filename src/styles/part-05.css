@@ -29,7 +29,7 @@
   background: rgba(255, 255, 255, 0.76);
 }
 
-.chunk-ribbon {
+.unit-ribbon {
   display: flex;
   gap: 10px;
   overflow-x: auto;
@@ -38,7 +38,7 @@
   background: rgba(255, 255, 255, 0.78);
 }
 
-.chunk-pill {
+.unit-pill {
   min-width: 118px;
   display: flex;
   flex-direction: column;
@@ -54,29 +54,29 @@
     box-shadow var(--transition);
 }
 
-.chunk-pill strong {
+.unit-pill strong {
   font-size: 1rem;
 }
 
-.chunk-pill.is-active {
+.unit-pill.is-active {
   background:
     linear-gradient(135deg, rgba(23, 68, 207, 0.12), rgba(255, 250, 241, 0.96));
 }
 
-.chunk-pill.is-pending {
+.unit-pill.is-pending {
   border-color: var(--yellow);
 }
 
-.chunk-pill.is-approved {
+.unit-pill.is-approved {
   border-color: var(--green);
 }
 
-.chunk-pill.is-rejected {
+.unit-pill.is-rejected {
   border-color: var(--line);
   background: rgba(244, 239, 228, 0.92);
 }
 
-.chunk-pill.is-failed {
+.unit-pill.is-failed {
   border-color: var(--red);
   background: rgba(214, 45, 32, 0.12);
 }
@@ -315,7 +315,7 @@
     linear-gradient(135deg, rgba(239, 193, 34, 0.18), rgba(255, 250, 241, 0.94));
 }
 
-.chunk-heading strong {
+.unit-heading strong {
   font-size: 1rem;
 }
 

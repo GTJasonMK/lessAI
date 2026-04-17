@@ -11,23 +11,153 @@ use std::time::Duration;
 use serde_json::json;
 
 use crate::models::{AppSettings, DocumentFormat};
+use crate::rewrite_unit::{
+    parse_rewrite_batch_response, parse_rewrite_unit_response, RewriteBatchRequest,
+    RewriteUnitRequest, RewriteUnitSlot, WritebackSlotRole,
+};
 
-use super::llm::{build_client, rewrite_chunk_with_client, rewrite_chunks_with_client};
+use super::llm::{
+    build_client, rewrite_batch_with_client, rewrite_selection_text_with_client,
+    rewrite_unit_with_client,
+};
 
 #[test]
-fn plain_single_chunk_does_not_retry_after_validation_failure() {
+fn parse_rewrite_batch_response_rejects_mismatched_batch_id() {
+    let request = RewriteBatchRequest::new(
+        "batch-1",
+        "docx",
+        vec![RewriteUnitRequest::new(
+            "unit-1",
+            "docx",
+            vec![RewriteUnitSlot::editable("slot-1", "甲")],
+        )],
+    );
+
+    let error = parse_rewrite_batch_response(
+        &request,
+        r#"{"batchId":"batch-x","results":[{"rewriteUnitId":"unit-1","updates":[{"slotId":"slot-1","text":"乙"}]}]}"#,
+    )
+    .expect_err("expected invalid batch id");
+
+    assert!(error.contains("batchId"));
+}
+
+#[test]
+fn parse_rewrite_unit_response_rejects_unknown_slot_id() {
+    let request = RewriteUnitRequest::new(
+        "unit-1",
+        "docx",
+        vec![RewriteUnitSlot::editable("slot-1", "甲")],
+    );
+
+    let error = parse_rewrite_unit_response(
+        &request,
+        r#"{"rewriteUnitId":"unit-1","updates":[{"slotId":"slot-x","text":"乙"}]}"#,
+    )
+    .expect_err("expected validation error");
+
+    assert!(error.contains("未知 slot_id"));
+}
+
+#[test]
+fn rewrite_unit_with_client_returns_structured_updates() {
+    let server = TestServer::start(vec![json_http_response(
+        r#"{"rewriteUnitId":"unit-1","updates":[{"slotId":"slot-1","text":"改写后正文"}]}"#,
+    )]);
+    let settings = test_settings(&server.base_url);
+    let client = build_client(&settings).unwrap();
+    let request = RewriteUnitRequest::new(
+        "unit-1",
+        "docx",
+        vec![
+            RewriteUnitSlot::editable("slot-1", "原正文"),
+            RewriteUnitSlot::locked("slot-locked", "[公式]", WritebackSlotRole::LockedText),
+        ],
+    );
+
+    let result = run_async(rewrite_unit_with_client(&client, &settings, &request))
+        .expect("unit rewrite should succeed");
+
+    assert_eq!(result.rewrite_unit_id, "unit-1");
+    assert_eq!(result.updates.len(), 1);
+    assert_eq!(result.updates[0].slot_id, "slot-1");
+    assert_eq!(result.updates[0].text, "改写后正文");
+    assert_eq!(server.request_count(), 1);
+}
+
+#[test]
+fn rewrite_batch_with_client_sends_single_http_request() {
+    let server = TestServer::start(vec![json_http_response(
+        r#"{"batchId":"batch-1","results":[{"rewriteUnitId":"unit-1","updates":[{"slotId":"slot-1","text":"改写1"}]},{"rewriteUnitId":"unit-2","updates":[{"slotId":"slot-2","text":"改写2"}]}]}"#,
+    )]);
+    let settings = test_settings(&server.base_url);
+    let client = build_client(&settings).unwrap();
+    let request = RewriteBatchRequest::new(
+        "batch-1",
+        "docx",
+        vec![
+            RewriteUnitRequest::new(
+                "unit-1",
+                "docx",
+                vec![RewriteUnitSlot::editable("slot-1", "甲")],
+            ),
+            RewriteUnitRequest::new(
+                "unit-2",
+                "docx",
+                vec![RewriteUnitSlot::editable("slot-2", "乙")],
+            ),
+        ],
+    );
+
+    let result = run_async(rewrite_batch_with_client(&client, &settings, &request))
+        .expect("batch rewrite should succeed");
+
+    assert_eq!(result.results.len(), 2);
+    assert_eq!(server.request_count(), 1);
+}
+
+#[test]
+fn rewrite_unit_builds_client_and_parses_structured_response() {
+    let server = TestServer::start(vec![json_http_response(
+        r#"{"rewriteUnitId":"unit-2","updates":[{"slotId":"slot-2","text":"第二段改写"}]}"#,
+    )]);
+    let settings = test_settings(&server.base_url);
+    let client = build_client(&settings).unwrap();
+    let request = RewriteUnitRequest::new(
+        "unit-2",
+        "markdown",
+        vec![RewriteUnitSlot::editable("slot-2", "第二段原文")],
+    );
+
+    let result = run_async(rewrite_unit_with_client(&client, &settings, &request))
+        .expect("unit rewrite should succeed");
+
+    assert_eq!(result.rewrite_unit_id, "unit-2");
+    assert_eq!(result.updates.len(), 1);
+    assert_eq!(result.updates[0].slot_id, "slot-2");
+    assert_eq!(result.updates[0].text, "第二段改写");
+    assert_eq!(server.request_count(), 1);
+}
+
+#[test]
+fn plain_single_unit_does_not_retry_after_validation_failure() {
     let server = TestServer::start(vec![
-        json_http_response("I am Claude."),
-        json_http_response("自然改写后的正文。"),
+        json_http_response(
+            r#"{"rewriteUnitId":"selection","updates":[{"slotId":"slot-0","text":"I am Claude."}]}"#,
+        ),
+        json_http_response(
+            r#"{"rewriteUnitId":"selection","updates":[{"slotId":"slot-0","text":"自然改写后的正文。"}]}"#,
+        ),
     ]);
     let settings = test_settings(&server.base_url);
     let client = build_client(&settings).unwrap();
 
-    let result = run_async(rewrite_chunk_with_client(
+    let result = run_async(rewrite_selection_text_with_client(
         &client,
         &settings,
         "这是一段正文。",
         DocumentFormat::PlainText,
+        false,
     ));
 
     assert!(result.is_err());
@@ -35,44 +165,19 @@ fn plain_single_chunk_does_not_retry_after_validation_failure() {
 }
 
 #[test]
-fn plain_multiline_chunk_does_not_fallback_per_line() {
-    let server = TestServer::start(vec![
-        json_http_response("@@@1@@@第一行改写\n@@@2@@@不该出现的内容\n@@@3@@@第二行改写"),
-        json_http_response("第一行改写"),
-        json_http_response("第二行改写"),
-    ]);
+fn plain_multiline_unit_does_not_fallback_per_line() {
+    let server = TestServer::start(vec![json_http_response(
+        r#"{"rewriteUnitId":"selection","updates":[{"slotId":"slot-0","text":"@@@1@@@第一行改写\n@@@2@@@不该出现的内容\n@@@3@@@第二行改写"}]}"#,
+    )]);
     let settings = test_settings(&server.base_url);
     let client = build_client(&settings).unwrap();
 
-    let result = run_async(rewrite_chunk_with_client(
+    let result = run_async(rewrite_selection_text_with_client(
         &client,
         &settings,
         "第一行\n\n第二行",
         DocumentFormat::PlainText,
-    ));
-
-    assert!(result.is_err());
-    assert_eq!(server.request_count(), 1);
-}
-
-#[test]
-fn plain_batch_does_not_retry_after_invalid_candidate() {
-    let server = TestServer::start(vec![
-        json_http_response(
-            "<<<LESSAI_ITEM_1_BEGIN>>>\nI am Claude.\n<<<LESSAI_ITEM_1_END>>>\n\n<<<LESSAI_ITEM_2_BEGIN>>>\n第二项保留。\n<<<LESSAI_ITEM_2_END>>>",
-        ),
-        json_http_response(
-            "<<<LESSAI_ITEM_1_BEGIN>>>\n第一项改写。\n<<<LESSAI_ITEM_1_END>>>\n\n<<<LESSAI_ITEM_2_BEGIN>>>\n第二项改写。\n<<<LESSAI_ITEM_2_END>>>",
-        ),
-    ]);
-    let settings = test_settings(&server.base_url);
-    let client = build_client(&settings).unwrap();
-
-    let result = run_async(rewrite_chunks_with_client(
-        &client,
-        &settings,
-        &["第一项原文。".to_string(), "第二项原文。".to_string()],
-        DocumentFormat::PlainText,
+        false,
     ));
 
     assert!(result.is_err());
@@ -96,11 +201,12 @@ fn transport_does_not_retry_with_stream_after_stream_required_error() {
     let settings = test_settings(&server.base_url);
     let client = build_client(&settings).unwrap();
 
-    let result = run_async(rewrite_chunk_with_client(
+    let result = run_async(rewrite_selection_text_with_client(
         &client,
         &settings,
         "需要改写的正文。",
         DocumentFormat::PlainText,
+        false,
     ));
 
     assert!(result.is_err());

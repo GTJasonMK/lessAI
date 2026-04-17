@@ -141,15 +141,15 @@ fn validate_document_writeback_allows_docx_regions_with_adjacent_styles() {
     let bytes = build_minimal_docx(document_xml);
     let (root, target) = write_temp_file("adjacent-styled-region-pass", "docx", &bytes);
     let snapshot = capture_document_snapshot(&target).expect("capture snapshot");
-    let mut regions = DocxAdapter::extract_regions(&bytes, false).expect("extract regions");
-    regions[0].body = "新前文".to_string();
-    regions[1].body = "新后文".to_string();
+    let mut slots = DocxAdapter::extract_writeback_slots(&bytes, false).expect("extract slots");
+    slots[0].text = "新前文".to_string();
+    slots[1].text = "新后文".to_string();
 
     execute_document_writeback(
         &target,
         "前文后文",
         Some(&snapshot),
-        DocumentWriteback::Regions(&regions),
+        DocumentWriteback::Slots(&slots),
         WritebackMode::Validate,
     )
     .expect("expected region validation to preserve real adapter metadata");

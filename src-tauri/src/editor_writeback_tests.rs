@@ -1,35 +1,40 @@
 use chrono::Utc;
-use std::cell::{Cell, RefCell};
 
 use crate::{
-    models::{ChunkPresentation, ChunkStatus, ChunkTask, DocumentSession, RunningState},
-    rewrite_projection::merged_text_from_regions,
+    models::{SegmentationPreset, RewriteUnitStatus, DocumentSession, EditorSlotEdit, RunningState},
+    rewrite_unit::SlotUpdate,
+    test_support::{editable_slot, locked_slot, rewrite_unit},
 };
 
-use super::{
-    build_chunk_editor_writeback, build_plain_text_editor_writeback,
-    build_updated_regions_from_chunk_edits, EditorWritebackPayload,
-};
+use super::{build_plain_text_editor_writeback, build_slot_editor_writeback, EditorWritebackPayload};
 
-fn sample_session(chunks: Vec<ChunkTask>) -> DocumentSession {
+fn sample_docx_session() -> DocumentSession {
     let now = Utc::now();
     DocumentSession {
         id: "session-1".to_string(),
         title: "示例".to_string(),
         document_path: "/tmp/example.docx".to_string(),
-        source_text: chunks
-            .iter()
-            .map(|chunk| format!("{}{}", chunk.source_text, chunk.separator_after))
-            .collect::<String>(),
+        source_text: "前文[公式]后文".to_string(),
         source_snapshot: None,
-        normalized_text: String::new(),
+        normalized_text: "前文[公式]后文".to_string(),
         write_back_supported: true,
         write_back_block_reason: None,
         plain_text_editor_safe: true,
         plain_text_editor_block_reason: None,
-        chunk_preset: Some(crate::models::ChunkPreset::Paragraph),
+        segmentation_preset: Some(SegmentationPreset::Paragraph),
         rewrite_headings: Some(false),
-        chunks,
+        writeback_slots: vec![
+            editable_slot("slot-0", 0, "前文"),
+            locked_slot("slot-1", 1, "[公式]"),
+            editable_slot("slot-2", 2, "后文"),
+        ],
+        rewrite_units: vec![rewrite_unit(
+            "unit-0",
+            0,
+            &["slot-0", "slot-1", "slot-2"],
+            "前文[公式]后文",
+            RewriteUnitStatus::Idle,
+        )],
         suggestions: Vec::new(),
         next_suggestion_sequence: 1,
         status: RunningState::Idle,
@@ -38,345 +43,147 @@ fn sample_session(chunks: Vec<ChunkTask>) -> DocumentSession {
     }
 }
 
-fn editable_chunk(index: usize, text: &str, presentation: Option<ChunkPresentation>) -> ChunkTask {
-    ChunkTask {
-        index,
-        source_text: text.to_string(),
-        separator_after: String::new(),
-        skip_rewrite: false,
-        presentation,
-        status: ChunkStatus::Idle,
-        error_message: None,
+fn sample_text_session() -> DocumentSession {
+    let now = Utc::now();
+    DocumentSession {
+        id: "session-text".to_string(),
+        title: "示例".to_string(),
+        document_path: "/tmp/example.txt".to_string(),
+        source_text: "原文\r\n下一行\r\n".to_string(),
+        source_snapshot: None,
+        normalized_text: "原文\r\n下一行\r\n".to_string(),
+        write_back_supported: true,
+        write_back_block_reason: None,
+        plain_text_editor_safe: true,
+        plain_text_editor_block_reason: None,
+        segmentation_preset: Some(SegmentationPreset::Paragraph),
+        rewrite_headings: Some(false),
+        writeback_slots: vec![editable_slot("slot-0", 0, "原文\r\n下一行\r\n")],
+        rewrite_units: vec![rewrite_unit(
+            "unit-0",
+            0,
+            &["slot-0"],
+            "原文\r\n下一行\r\n",
+            RewriteUnitStatus::Idle,
+        )],
+        suggestions: Vec::new(),
+        next_suggestion_sequence: 1,
+        status: RunningState::Idle,
+        created_at: now,
+        updated_at: now,
     }
 }
 
-fn locked_chunk(index: usize, text: &str, protect_kind: &str) -> ChunkTask {
-    ChunkTask {
-        index,
-        source_text: text.to_string(),
-        separator_after: String::new(),
-        skip_rewrite: true,
-        presentation: Some(ChunkPresentation {
-            bold: false,
-            italic: false,
-            underline: false,
-            href: None,
-            protect_kind: Some(protect_kind.to_string()),
-            writeback_key: None,
-        }),
-        status: ChunkStatus::Done,
-        error_message: None,
+#[test]
+fn build_slot_editor_writeback_returns_updated_slots_for_docx() {
+    let session = sample_docx_session();
+    let edits = vec![
+        EditorSlotEdit {
+            slot_id: "slot-0".to_string(),
+            text: "新前文".to_string(),
+        },
+        EditorSlotEdit {
+            slot_id: "slot-2".to_string(),
+            text: "新后文".to_string(),
+        },
+    ];
+
+    let payload = build_slot_editor_writeback(&session, &edits).expect("slot writeback");
+
+    match payload {
+        EditorWritebackPayload::Slots(slots) => {
+            let updates = vec![
+                SlotUpdate::new("slot-0", "新前文"),
+                SlotUpdate::new("slot-2", "新后文"),
+            ];
+            let merged = crate::rewrite_unit::apply_slot_updates(&session.writeback_slots, &updates)
+                .expect("expected updates to be applicable");
+            assert_eq!(slots, merged);
+            assert_eq!(slots[0].text, "新前文");
+            assert_eq!(slots[1].text, "[公式]");
+            assert_eq!(slots[2].text, "新后文");
+        }
+        EditorWritebackPayload::Text(_) => panic!("docx slot editor should return slots"),
     }
 }
 
 #[test]
-fn with_chunk_edit_overrides_loads_overrides_then_runs() {
-    let session = sample_session(vec![
-        editable_chunk(0, "前文", None),
-        locked_chunk(1, "[公式]", "formula"),
-        editable_chunk(2, "后文", None),
-    ]);
-    let edits = vec![
-        crate::models::EditorChunkEdit {
-            index: 0,
-            text: "新前文".to_string(),
-        },
-        crate::models::EditorChunkEdit {
-            index: 2,
-            text: "新后文".to_string(),
-        },
-    ];
-    let calls = RefCell::new(Vec::new());
-
-    let text = super::with_chunk_edit_overrides(
-        &session,
-        &edits,
-        |session, overrides: &std::collections::HashMap<usize, String>| {
-            calls.borrow_mut().push(format!("run:{}", session.id));
-            Ok(session
-                .chunks
-                .iter()
-                .map(|chunk| {
-                    overrides
-                        .get(&chunk.index)
-                        .cloned()
-                        .unwrap_or_else(|| chunk.source_text.clone())
-                })
-                .collect::<String>())
-        },
-    )
-    .expect("expected helper to collect overrides then run");
-
-    assert_eq!(text, "新前文[公式]新后文");
-    assert_eq!(calls.into_inner(), vec!["run:session-1".to_string()]);
-}
-
-#[test]
-fn with_chunk_edit_overrides_stops_before_run_when_override_collection_fails() {
-    let session = sample_session(vec![
-        editable_chunk(0, "第一段", None),
-        editable_chunk(1, "第二段", None),
-    ]);
-    let edits = vec![crate::models::EditorChunkEdit {
-        index: 0,
-        text: "改第一段".to_string(),
-    }];
-    let run_calls = Cell::new(0);
-
-    let error = super::with_chunk_edit_overrides(&session, &edits, |_, _| {
-        run_calls.set(run_calls.get() + 1);
-        Ok(())
-    })
-    .expect_err("expected override collection failure to short-circuit");
-
-    assert!(error.contains("数量") || error.contains("可编辑"));
-    assert_eq!(run_calls.get(), 0);
-}
-
-#[test]
-fn builds_text_from_chunk_edits_with_locked_content_between_editable_chunks() {
-    let session = sample_session(vec![
-        editable_chunk(0, "前文", None),
-        locked_chunk(1, "[公式]", "formula"),
-        editable_chunk(2, "后文", None),
-    ]);
-    let edits = vec![
-        crate::models::EditorChunkEdit {
-            index: 0,
-            text: "新前文".to_string(),
-        },
-        crate::models::EditorChunkEdit {
-            index: 2,
-            text: "新后文".to_string(),
-        },
-    ];
-
-    let text = merged_text_from_regions(
-        &build_updated_regions_from_chunk_edits(&session, &edits).expect("expected chunk edits"),
-    );
-
-    assert_eq!(text, "新前文[公式]新后文");
-}
-
-#[test]
-fn rejects_chunk_edit_payload_when_any_editable_chunk_is_missing() {
-    let session = sample_session(vec![
-        editable_chunk(0, "第一段", None),
-        editable_chunk(1, "第二段", None),
-    ]);
-    let edits = vec![crate::models::EditorChunkEdit {
-        index: 0,
-        text: "改第一段".to_string(),
+fn build_slot_editor_writeback_rejects_missing_editable_slot() {
+    let session = sample_docx_session();
+    let edits = vec![EditorSlotEdit {
+        slot_id: "slot-0".to_string(),
+        text: "只改一半".to_string(),
     }];
 
-    let error = build_updated_regions_from_chunk_edits(&session, &edits)
-        .expect_err("expected missing editable chunk to be rejected");
+    let error = build_slot_editor_writeback(&session, &edits)
+        .expect_err("missing editable slot should fail");
 
-    assert!(error.contains("数量") || error.contains("可编辑"));
+    assert!(error.contains("数量"));
 }
 
 #[test]
-fn keeps_adjacent_editable_chunks_text_when_presentations_differ() {
-    let bold = Some(ChunkPresentation {
-        bold: true,
-        italic: false,
-        underline: false,
-        href: None,
-        protect_kind: None,
-        writeback_key: None,
-    });
-    let plain = Some(ChunkPresentation {
-        bold: false,
-        italic: false,
-        underline: false,
-        href: None,
-        protect_kind: None,
-        writeback_key: None,
-    });
-    let session = sample_session(vec![
-        editable_chunk(0, "加粗", bold.clone()),
-        editable_chunk(1, "正文", plain.clone()),
-    ]);
+fn build_slot_editor_writeback_rejects_locked_slot_edit() {
+    let session = sample_docx_session();
     let edits = vec![
-        crate::models::EditorChunkEdit {
-            index: 0,
-            text: "粗体".to_string(),
-        },
-        crate::models::EditorChunkEdit {
-            index: 1,
-            text: "内容".to_string(),
-        },
-    ];
-
-    let text = merged_text_from_regions(
-        &build_updated_regions_from_chunk_edits(&session, &edits)
-            .expect("expected adjacent editable chunks to stay writeback-safe"),
-    );
-
-    assert_eq!(text, "粗体内容");
-    assert!(bold.is_some());
-    assert!(plain.is_some());
-}
-
-#[test]
-fn preserves_empty_editable_region_text_when_presentation_boundary_matters() {
-    let bold = Some(ChunkPresentation {
-        bold: true,
-        italic: false,
-        underline: false,
-        href: None,
-        protect_kind: None,
-        writeback_key: Some("r:bold".to_string()),
-    });
-    let plain = Some(ChunkPresentation {
-        bold: false,
-        italic: false,
-        underline: false,
-        href: None,
-        protect_kind: None,
-        writeback_key: None,
-    });
-    let session = sample_session(vec![
-        editable_chunk(0, "标题", bold.clone()),
-        editable_chunk(1, "正文", plain.clone()),
-    ]);
-    let edits = vec![
-        crate::models::EditorChunkEdit {
-            index: 0,
-            text: String::new(),
-        },
-        crate::models::EditorChunkEdit {
-            index: 1,
-            text: "保留正文".to_string(),
-        },
-    ];
-
-    let text = merged_text_from_regions(
-        &build_updated_regions_from_chunk_edits(&session, &edits)
-            .expect("expected empty editable region text to stay buildable"),
-    );
-
-    assert_eq!(text, "保留正文");
-    assert!(bold.is_some());
-    assert!(plain.is_some());
-}
-
-#[test]
-fn builds_regions_from_chunk_edits_preserving_adjacent_presentation_boundaries() {
-    let bold = Some(ChunkPresentation {
-        bold: true,
-        italic: false,
-        underline: false,
-        href: None,
-        protect_kind: None,
-        writeback_key: Some("r:bold".to_string()),
-    });
-    let underline = Some(ChunkPresentation {
-        bold: false,
-        italic: false,
-        underline: true,
-        href: None,
-        protect_kind: None,
-        writeback_key: Some("r:u".to_string()),
-    });
-    let session = sample_session(vec![
-        editable_chunk(0, "前文", bold.clone()),
-        editable_chunk(1, "后文", underline.clone()),
-    ]);
-    let edits = vec![
-        crate::models::EditorChunkEdit {
-            index: 0,
+        EditorSlotEdit {
+            slot_id: "slot-0".to_string(),
             text: "新前文".to_string(),
         },
-        crate::models::EditorChunkEdit {
-            index: 1,
-            text: "新后文".to_string(),
+        EditorSlotEdit {
+            slot_id: "slot-1".to_string(),
+            text: "改公式".to_string(),
         },
     ];
 
-    let regions = build_updated_regions_from_chunk_edits(&session, &edits)
-        .expect("expected chunk edits to preserve region boundaries");
+    let error = build_slot_editor_writeback(&session, &edits)
+        .expect_err("locked slot edit should fail");
 
-    assert_eq!(regions.len(), 2);
-    assert_eq!(regions[0].body, "新前文");
-    assert_eq!(regions[1].body, "新后文");
-    assert_eq!(regions[0].presentation, bold);
-    assert_eq!(regions[1].presentation, underline);
+    assert!(error.contains("不可编辑") || error.contains("不存在"));
 }
 
 #[test]
-fn build_plain_text_editor_writeback_normalizes_non_docx_content() {
-    let mut session = sample_session(vec![editable_chunk(0, "原文\r\n下一行\r\n", None)]);
-    session.document_path = "/tmp/example.txt".to_string();
-    session.source_text = "原文\r\n下一行\r\n".to_string();
+fn build_slot_editor_writeback_rejects_non_docx_session() {
+    let session = sample_text_session();
+    let edits = vec![EditorSlotEdit {
+        slot_id: "slot-0".to_string(),
+        text: "改写".to_string(),
+    }];
+
+    let error = build_slot_editor_writeback(&session, &edits)
+        .expect_err("non-docx slot editing should fail");
+
+    assert_eq!(error, "当前仅 docx 支持按槽位编辑写回。");
+}
+
+#[test]
+fn build_plain_text_editor_writeback_normalizes_line_endings() {
+    let session = sample_text_session();
 
     let payload = build_plain_text_editor_writeback(&session, "新文\n下一行  \n")
-        .expect("expected plain text editor payload");
+        .expect("plain-text writeback should normalize");
 
     match payload {
         EditorWritebackPayload::Text(text) => assert_eq!(text, "新文\r\n下一行\r\n"),
-        EditorWritebackPayload::Regions(_) => panic!("expected plain text payload"),
+        EditorWritebackPayload::Slots(_) => panic!("plain-text editor should return text payload"),
     }
 }
 
 #[test]
-fn build_plain_text_editor_writeback_rejects_empty_content() {
-    let mut session = sample_session(vec![editable_chunk(0, "原文", None)]);
-    session.document_path = "/tmp/example.txt".to_string();
-    session.source_text = "原文".to_string();
+fn build_plain_text_editor_writeback_rejects_dirty_session() {
+    let mut session = sample_text_session();
+    session.status = RunningState::Completed;
+    session.suggestions.push(crate::test_support::rewrite_suggestion(
+        "suggestion-1",
+        1,
+        "unit-0",
+        "原文\r\n下一行\r\n",
+        "改写后",
+        crate::models::SuggestionDecision::Proposed,
+        vec![SlotUpdate::new("slot-0", "改写后")],
+    ));
 
-    let error = match build_plain_text_editor_writeback(&session, "   ") {
-        Ok(_) => panic!("expected empty plain text editor content to be rejected"),
-        Err(error) => error,
-    };
+    let error = build_plain_text_editor_writeback(&session, "新文")
+        .expect_err("dirty editor session should fail");
 
-    assert_eq!(error, "文档内容为空，无法保存。");
-}
-
-#[test]
-fn build_chunk_editor_writeback_builds_docx_regions_from_edits() {
-    let bold = Some(ChunkPresentation {
-        bold: true,
-        italic: false,
-        underline: false,
-        href: None,
-        protect_kind: None,
-        writeback_key: Some("r:bold".to_string()),
-    });
-    let underline = Some(ChunkPresentation {
-        bold: false,
-        italic: false,
-        underline: true,
-        href: None,
-        protect_kind: None,
-        writeback_key: Some("r:u".to_string()),
-    });
-    let session = sample_session(vec![
-        editable_chunk(0, "前文", bold.clone()),
-        editable_chunk(1, "后文", underline.clone()),
-    ]);
-    let edits = vec![
-        crate::models::EditorChunkEdit {
-            index: 0,
-            text: "新前文".to_string(),
-        },
-        crate::models::EditorChunkEdit {
-            index: 1,
-            text: "新后文".to_string(),
-        },
-    ];
-
-    let payload =
-        build_chunk_editor_writeback(&session, &edits).expect("expected docx editor payload");
-
-    match payload {
-        EditorWritebackPayload::Regions(regions) => {
-            assert_eq!(regions.len(), 2);
-            assert_eq!(regions[0].body, "新前文");
-            assert_eq!(regions[1].body, "新后文");
-            assert_eq!(regions[0].presentation, bold);
-            assert_eq!(regions[1].presentation, underline);
-        }
-        EditorWritebackPayload::Text(_) => panic!("expected region payload"),
-    }
+    assert!(error.contains("覆写并清理记录") || error.contains("重置记录"));
 }

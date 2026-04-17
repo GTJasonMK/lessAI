@@ -1,13 +1,16 @@
 use tauri::AppHandle;
 
 use crate::{
-    rewrite_batch_commit::{batch_commit_mode, commit_rewrite_result, emit_chunk_completed_events},
+    rewrite_batch_commit::{
+        batch_commit_mode, commit_rewrite_result, emit_rewrite_unit_completed_events,
+    },
     rewrite_job_state::{mark_auto_batch_failed, mark_session_cancelled, mark_session_failed},
     rewrite_writeback::validate_candidate_batch_writeback,
+    rewrite_unit::RewriteBatchResponse,
     state::AppState,
 };
 
-pub(super) type AutoTaskJoin = (Vec<usize>, Result<Vec<String>, String>);
+pub(super) type AutoTaskJoin = (Vec<String>, Result<RewriteBatchResponse, String>);
 
 pub(super) const UNKNOWN_IN_FLIGHT_BATCH_ERROR: &str =
     "自动改写任务状态异常：收到未登记批次的完成结果。";
@@ -17,26 +20,30 @@ pub(super) const TASK_SET_DRAINED_WITH_IN_FLIGHT_BATCHES_ERROR: &str =
 pub(super) enum AutoLoopStop<'a> {
     Cancelled,
     SessionFailed(String),
-    BatchFailed { indices: &'a [usize], error: String },
+    SettledFailure(String),
+    BatchFailed {
+        rewrite_unit_ids: &'a [String],
+        error: String,
+    },
 }
 
 pub(super) fn commit_auto_batch(
     app: &AppHandle,
     state: &AppState,
     session_id: &str,
-    indices: &[usize],
-    candidate_texts: Vec<String>,
-) -> Result<Vec<(usize, String, u64)>, String> {
+    rewrite_unit_ids: &[String],
+    response: RewriteBatchResponse,
+) -> Result<Vec<(String, String, u64)>, String> {
     let completed_batch = commit_rewrite_result(
         app,
         state,
         session_id,
-        indices,
-        Ok(candidate_texts),
+        rewrite_unit_ids,
+        Ok(response),
         batch_commit_mode(true),
         validate_candidate_batch_writeback,
     )?;
-    emit_chunk_completed_events(app, session_id, &completed_batch)?;
+    emit_rewrite_unit_completed_events(app, session_id, &completed_batch)?;
     Ok(completed_batch)
 }
 
@@ -45,7 +52,7 @@ pub(super) fn finish_auto_loop(
     state: &AppState,
     session_id: &str,
     tasks: &mut tokio::task::JoinSet<AutoTaskJoin>,
-    in_flight_batches: &mut Vec<Vec<usize>>,
+    in_flight_batches: &mut Vec<Vec<String>>,
     stop: AutoLoopStop<'_>,
 ) -> Result<(), String> {
     abort_in_flight(tasks, in_flight_batches);
@@ -58,15 +65,19 @@ pub(super) fn finish_auto_loop(
             mark_session_failed(app, state, session_id, error.clone())?;
             Err(error)
         }
-        AutoLoopStop::BatchFailed { indices, error } => {
-            mark_auto_batch_failed(app, state, session_id, indices, error.clone())?;
+        AutoLoopStop::SettledFailure(error) => Err(error),
+        AutoLoopStop::BatchFailed {
+            rewrite_unit_ids,
+            error,
+        } => {
+            mark_auto_batch_failed(app, state, session_id, rewrite_unit_ids, error.clone())?;
             Err(error)
         }
     }
 }
 
 pub(super) fn ensure_in_flight_batches_drained(
-    in_flight_batches: &[Vec<usize>],
+    in_flight_batches: &[Vec<String>],
 ) -> Result<(), String> {
     if in_flight_batches.is_empty() {
         return Ok(());
@@ -75,10 +86,13 @@ pub(super) fn ensure_in_flight_batches_drained(
 }
 
 pub(super) fn remove_in_flight_batch(
-    in_flight_batches: &mut Vec<Vec<usize>>,
-    indices: &[usize],
+    in_flight_batches: &mut Vec<Vec<String>>,
+    rewrite_unit_ids: &[String],
 ) -> Result<(), String> {
-    let Some(position) = in_flight_batches.iter().position(|batch| batch == indices) else {
+    let Some(position) = in_flight_batches
+        .iter()
+        .position(|batch| batch == rewrite_unit_ids)
+    else {
         return Err(UNKNOWN_IN_FLIGHT_BATCH_ERROR.to_string());
     };
     in_flight_batches.remove(position);
@@ -87,7 +101,7 @@ pub(super) fn remove_in_flight_batch(
 
 pub(super) fn abort_in_flight(
     tasks: &mut tokio::task::JoinSet<AutoTaskJoin>,
-    in_flight_batches: &mut Vec<Vec<usize>>,
+    in_flight_batches: &mut Vec<Vec<String>>,
 ) {
     tasks.abort_all();
     in_flight_batches.clear();

@@ -3,10 +3,9 @@ import type { MutableRefObject } from "react";
 import type {
   AppSettings,
   DocumentSession,
-  EditSuggestion,
-  RewriteMode
+  RewriteSuggestion
 } from "../../lib/types";
-import type { EditorChunkOverrides } from "../../lib/editorChunks";
+import type { EditorSlotOverrides } from "../../lib/editorSlots";
 import type { SessionStats } from "../../lib/helpers";
 import {
   canRewriteSession,
@@ -15,11 +14,11 @@ import {
   rewriteBlockedReason
 } from "../../lib/helpers";
 import {
-  countSelectedChunkUnits,
-  findAutoPendingTargetChunks,
-  findNextManualTargetChunk,
-  hasSelectedChunks
-} from "../../lib/chunkSelection";
+  countSelectedRewriteUnits,
+  findAutoPendingTargetRewriteUnits,
+  findNextManualTargetRewriteUnit,
+  hasSelectedRewriteUnits
+} from "../../lib/rewriteUnitSelection";
 import { guessClientDocumentFormat } from "../../lib/protectedText";
 import { Panel } from "../../components/Panel";
 import { useCopyDocument, type DocumentView } from "./hooks/useCopyDocument";
@@ -34,24 +33,24 @@ interface DocumentPanelProps {
   currentSession: DocumentSession | null;
   currentStats: SessionStats | null;
   showMarkers: boolean;
-  suggestionsByChunk: Map<number, EditSuggestion[]>;
-  runningIndexSet: Set<number>;
-  optimisticManualRunningIndex: number | null;
-  activeChunkIndex: number;
-  selectedChunkIndices: number[];
+  suggestionsByRewriteUnit: Map<string, RewriteSuggestion[]>;
+  runningRewriteUnitIdSet: Set<string>;
+  optimisticManualRunningRewriteUnitId: string | null;
+  activeRewriteUnitId: string | null;
+  selectedRewriteUnitIds: string[];
   busyAction: string | null;
   editorMode: boolean;
   editorText: string;
-  editorChunkOverrides: EditorChunkOverrides;
+  editorSlotOverrides: EditorSlotOverrides;
   editorDirty: boolean;
   editorHasSelection: boolean;
   editorRef: MutableRefObject<DocumentEditorHandle | null>;
   documentScrollRef: MutableRefObject<HTMLDivElement | null>;
   onOpenDocument: () => void;
   onOpenSettings: () => void;
-  onSelectChunk: (index: number, options?: { multiSelect?: boolean }) => void;
+  onSelectRewriteUnit: (rewriteUnitId: string, options?: { multiSelect?: boolean }) => void;
   onSelectSuggestion: (suggestionId: string) => void;
-  onStartRewrite: (mode: RewriteMode) => void;
+  onStartRewrite: (mode: AppSettings["rewriteMode"]) => void;
   onPause: () => void;
   onResume: () => void;
   onCancel: () => void;
@@ -59,7 +58,7 @@ interface DocumentPanelProps {
   onResetSession: () => void;
   onEnterEditor: () => void;
   onChangeEditorText: (value: string) => void;
-  onChangeEditorChunkText: (index: number, value: string) => void;
+  onChangeEditorSlotText: (slotId: string, value: string) => void;
   onChangeEditorHasSelection: (value: boolean) => void;
   onSaveEditor: () => void;
   onSaveEditorAndExit: () => void;
@@ -75,22 +74,22 @@ export const DocumentPanel = memo(function DocumentPanel({
   currentSession,
   currentStats,
   showMarkers,
-  suggestionsByChunk,
-  runningIndexSet,
-  optimisticManualRunningIndex,
-  activeChunkIndex,
-  selectedChunkIndices,
+  suggestionsByRewriteUnit,
+  runningRewriteUnitIdSet,
+  optimisticManualRunningRewriteUnitId,
+  activeRewriteUnitId,
+  selectedRewriteUnitIds,
   busyAction,
   editorMode,
   editorText,
-  editorChunkOverrides,
+  editorSlotOverrides,
   editorDirty,
   editorHasSelection,
   editorRef,
   documentScrollRef,
   onOpenDocument,
   onOpenSettings,
-  onSelectChunk,
+  onSelectRewriteUnit,
   onSelectSuggestion,
   onStartRewrite,
   onPause,
@@ -100,7 +99,7 @@ export const DocumentPanel = memo(function DocumentPanel({
   onResetSession,
   onEnterEditor,
   onChangeEditorText,
-  onChangeEditorChunkText,
+  onChangeEditorSlotText,
   onChangeEditorHasSelection,
   onSaveEditor,
   onSaveEditorAndExit,
@@ -113,9 +112,7 @@ export const DocumentPanel = memo(function DocumentPanel({
 
   const rewriteRunning = currentSession?.status === "running";
   const rewritePaused = currentSession?.status === "paused";
-  const readOnlyDocument = Boolean(
-    currentSession && isPdfPath(currentSession.documentPath)
-  );
+  const readOnlyDocument = Boolean(currentSession && isPdfPath(currentSession.documentPath));
   const anyBusy = Boolean(busyAction);
 
   const startKey = `start-${settings.rewriteMode}`;
@@ -130,33 +127,23 @@ export const DocumentPanel = memo(function DocumentPanel({
 
   const showCancelAction = rewriteRunning || rewritePaused;
   const hasAppliedEdits = Boolean(currentStats && currentStats.suggestionsApplied > 0);
-  const hasChunkSelection = hasSelectedChunks(selectedChunkIndices);
-  const effectiveChunkPreset = currentSession?.chunkPreset ?? settings.chunkPreset;
-  const selectedDisplayCount = useMemo(
-    () =>
-      currentSession
-        ? countSelectedChunkUnits(
-            currentSession.chunks,
-            selectedChunkIndices,
-            effectiveChunkPreset
-          )
-        : 0,
-    [currentSession, effectiveChunkPreset, selectedChunkIndices]
-  );
+  const hasRewriteUnitSelection = hasSelectedRewriteUnits(selectedRewriteUnitIds);
+  const effectiveSegmentationPreset = currentSession?.segmentationPreset ?? settings.segmentationPreset;
+  const selectedDisplayCount = countSelectedRewriteUnits(selectedRewriteUnitIds);
   const rewriteBlockReason = rewriteBlockedReason(currentSession);
-  const nextManualTargetChunk = useMemo(
+  const nextManualTargetRewriteUnit = useMemo(
     () =>
       currentSession
-        ? findNextManualTargetChunk(currentSession.chunks, selectedChunkIndices)
+        ? findNextManualTargetRewriteUnit(currentSession, selectedRewriteUnitIds)
         : null,
-    [currentSession, selectedChunkIndices]
+    [currentSession, selectedRewriteUnitIds]
   );
-  const autoPendingTargetChunks = useMemo(
+  const autoPendingTargetRewriteUnits = useMemo(
     () =>
       currentSession
-        ? findAutoPendingTargetChunks(currentSession.chunks, selectedChunkIndices)
+        ? findAutoPendingTargetRewriteUnits(currentSession, selectedRewriteUnitIds)
         : [],
-    [currentSession, selectedChunkIndices]
+    [currentSession, selectedRewriteUnitIds]
   );
 
   const canStartRewrite = Boolean(
@@ -166,8 +153,8 @@ export const DocumentPanel = memo(function DocumentPanel({
       !rewriteRunning &&
       !rewritePaused &&
       (settings.rewriteMode === "manual"
-        ? nextManualTargetChunk
-        : autoPendingTargetChunks.length > 0)
+        ? nextManualTargetRewriteUnit
+        : autoPendingTargetRewriteUnits.length > 0)
   );
 
   const runKey = rewriteRunning
@@ -180,9 +167,9 @@ export const DocumentPanel = memo(function DocumentPanel({
   const runLabel = useMemo(() => {
     if (rewriteRunning) return "暂停";
     if (rewritePaused) return "继续";
-    if (hasChunkSelection) return "处理所选";
+    if (hasRewriteUnitSelection) return "处理所选";
     return settings.rewriteMode === "auto" ? "开始批处理" : "开始优化";
-  }, [hasChunkSelection, rewritePaused, rewriteRunning, settings.rewriteMode]);
+  }, [hasRewriteUnitSelection, rewritePaused, rewriteRunning, settings.rewriteMode]);
 
   const runTitle = useMemo(() => {
     if (rewriteRunning) return "暂停自动任务";
@@ -190,19 +177,19 @@ export const DocumentPanel = memo(function DocumentPanel({
     if (!currentSession) return "请先打开一个文档";
     if (!settingsReady) return "请先在设置里配置 Base URL / Key / Model";
     if (rewriteBlockReason) return rewriteBlockReason;
-    if (settings.rewriteMode === "manual" && !nextManualTargetChunk) {
-      return hasChunkSelection ? "所选片段已处理完成" : "全部片段已生成，可在右侧审阅并导出";
+    if (settings.rewriteMode === "manual" && !nextManualTargetRewriteUnit) {
+      return hasRewriteUnitSelection ? "所选片段已处理完成" : "全部片段已生成，可在右侧审阅并导出";
     }
-    if (settings.rewriteMode === "auto" && autoPendingTargetChunks.length === 0) {
-      return hasChunkSelection ? "所选片段已处理完成" : "全部片段已生成，可在右侧审阅并导出";
+    if (settings.rewriteMode === "auto" && autoPendingTargetRewriteUnits.length === 0) {
+      return hasRewriteUnitSelection ? "所选片段已处理完成" : "全部片段已生成，可在右侧审阅并导出";
     }
-    if (hasChunkSelection) return `处理所选 ${selectedDisplayCount} 段`;
+    if (hasRewriteUnitSelection) return `处理所选 ${selectedDisplayCount} 段`;
     return settings.rewriteMode === "auto" ? "自动批处理生成并应用" : "生成下一条修改对";
   }, [
-    autoPendingTargetChunks.length,
+    autoPendingTargetRewriteUnits.length,
     currentSession,
-    hasChunkSelection,
-    nextManualTargetChunk,
+    hasRewriteUnitSelection,
+    nextManualTargetRewriteUnit,
     rewritePaused,
     rewriteRunning,
     rewriteBlockReason,
@@ -224,8 +211,8 @@ export const DocumentPanel = memo(function DocumentPanel({
       !rewritePaused &&
       currentSession.status === "idle" &&
       currentSession.suggestions.length === 0 &&
-      currentSession.chunks.every(
-        (chunk) => chunk.status === "idle" || chunk.skipRewrite
+      currentSession.rewriteUnits.every(
+        (rewriteUnit) => rewriteUnit.status === "idle" || rewriteUnit.status === "done"
       ) &&
       !anyBusy
   );
@@ -236,10 +223,7 @@ export const DocumentPanel = memo(function DocumentPanel({
       return "pdf 目前仅支持导入/改写/导出，暂不支持终稿编辑或写回覆盖";
     }
     if (!currentSession.plainTextEditorSafe) {
-      return (
-        currentSession.plainTextEditorBlockReason ??
-        "当前文档暂不支持进入编辑模式。"
-      );
+      return currentSession.plainTextEditorBlockReason ?? "当前文档暂不支持进入编辑模式。";
     }
     if (rewriteRunning || rewritePaused) {
       return "请先取消自动任务后再编辑终稿";
@@ -251,7 +235,7 @@ export const DocumentPanel = memo(function DocumentPanel({
     if (currentSession.suggestions.length > 0) {
       return "该文档存在修订记录，为避免冲突，请先“覆写并清理记录”或“重置记录”后再编辑";
     }
-    if (currentSession.chunks.some((chunk) => !chunk.skipRewrite && chunk.status !== "idle")) {
+    if (currentSession.rewriteUnits.some((rewriteUnit) => !["idle", "done"].includes(rewriteUnit.status))) {
       return "该文档存在生成进度/失败片段，为避免冲突，请先“覆写并清理记录”或“重置记录”后再编辑";
     }
     return "编辑终稿（仅在无修订记录时开放）";
@@ -285,8 +269,7 @@ export const DocumentPanel = memo(function DocumentPanel({
     editorMode,
     editorText,
     documentView,
-    chunks: currentSession?.chunks ?? null,
-    suggestionsByChunk
+    currentSession
   });
 
   const documentFormat = useMemo(
@@ -423,30 +406,31 @@ export const DocumentPanel = memo(function DocumentPanel({
                 ref={editorRef}
                 session={currentSession}
                 value={editorText}
-                chunkOverrides={editorChunkOverrides}
+                slotOverrides={editorSlotOverrides}
                 dirty={editorDirty}
                 busy={anyBusy}
                 onChange={onChangeEditorText}
-                onChangeChunkText={onChangeEditorChunkText}
+                onChangeSlotText={onChangeEditorSlotText}
                 onSave={onSaveEditor}
                 onSelectionChange={onChangeEditorHasSelection}
               />
             ) : (
               <DocumentFlow
                 sessionId={currentSession.id}
-                chunks={currentSession.chunks}
-                chunkPreset={effectiveChunkPreset}
+                session={currentSession}
+                rewriteUnits={currentSession.rewriteUnits}
+                segmentationPreset={effectiveSegmentationPreset}
                 documentView={documentView}
                 documentFormat={documentFormat}
                 rewriteEnabled={!rewriteBlockReason}
                 rewriteBlockedReason={rewriteBlockReason}
                 showMarkers={showMarkers}
-                suggestionsByChunk={suggestionsByChunk}
-                runningIndexSet={runningIndexSet}
-                optimisticManualRunningIndex={optimisticManualRunningIndex}
-                activeChunkIndex={activeChunkIndex}
-                selectedChunkIndices={selectedChunkIndices}
-                onSelectChunk={onSelectChunk}
+                suggestionsByRewriteUnit={suggestionsByRewriteUnit}
+                runningRewriteUnitIdSet={runningRewriteUnitIdSet}
+                optimisticManualRunningRewriteUnitId={optimisticManualRunningRewriteUnitId}
+                activeRewriteUnitId={activeRewriteUnitId}
+                selectedRewriteUnitIds={selectedRewriteUnitIds}
+                onSelectRewriteUnit={onSelectRewriteUnit}
                 onSelectSuggestion={onSelectSuggestion}
               />
             )}

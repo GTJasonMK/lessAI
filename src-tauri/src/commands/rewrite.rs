@@ -5,7 +5,7 @@ use tauri::{AppHandle, State};
 
 use crate::{
     models::{DocumentSession, RewriteMode},
-    observability::{rewrite_mode_label, target_indices_label},
+    observability::{rewrite_mode_label, target_rewrite_unit_ids_label},
     rewrite_job_state, rewrite_jobs,
     session_access::{access_current_session, CurrentSessionRequest},
     state::{load_job, require_job, AppState},
@@ -27,33 +27,38 @@ pub async fn start_rewrite(
     state: State<'_, AppState>,
     session_id: String,
     mode: RewriteMode,
-    target_chunk_indices: Option<Vec<usize>>,
+    target_rewrite_unit_ids: Option<Vec<String>>,
 ) -> Result<DocumentSession, String> {
-    let target_label = target_indices_label(target_chunk_indices.as_deref());
+    let target_label = target_rewrite_unit_ids_label(target_rewrite_unit_ids.as_deref());
     info!(
-        "rewrite requested: session_id={} mode={} target_chunk_indices={target_label}",
+        "rewrite requested: session_id={} mode={} target_rewrite_unit_ids={target_label}",
         session_id,
         rewrite_mode_label(mode),
     );
 
     let result = match mode {
         RewriteMode::Manual => {
-            rewrite_jobs::run_manual_rewrite(&app, state.inner(), &session_id, target_chunk_indices)
-                .await
+            rewrite_jobs::run_manual_rewrite(
+                &app,
+                state.inner(),
+                &session_id,
+                target_rewrite_unit_ids,
+            )
+            .await
         }
         RewriteMode::Auto => {
-            rewrite_jobs::run_auto_rewrite(app, state, &session_id, target_chunk_indices)
+            rewrite_jobs::run_auto_rewrite(app, state, &session_id, target_rewrite_unit_ids)
         }
     };
 
     match &result {
         Ok(_) => info!(
-            "rewrite request accepted: session_id={} mode={} target_chunk_indices={target_label}",
+            "rewrite request accepted: session_id={} mode={} target_rewrite_unit_ids={target_label}",
             session_id,
             rewrite_mode_label(mode),
         ),
         Err(message) => error!(
-            "rewrite request failed: session_id={} mode={} target_chunk_indices={target_label} error={message}",
+            "rewrite request failed: session_id={} mode={} target_rewrite_unit_ids={target_label} error={message}",
             session_id,
             rewrite_mode_label(mode),
         ),
@@ -113,13 +118,14 @@ pub fn cancel_rewrite(
 }
 
 #[tauri::command]
-pub async fn retry_chunk(
+pub async fn retry_rewrite_unit(
     app: AppHandle,
     state: State<'_, AppState>,
     session_id: String,
-    index: usize,
+    rewrite_unit_id: String,
 ) -> Result<DocumentSession, String> {
-    rewrite_jobs::process_chunk(&app, state.inner(), &session_id, index, false).await?;
+    rewrite_jobs::process_rewrite_unit(&app, state.inner(), &session_id, &rewrite_unit_id, false)
+        .await?;
     access_current_session(
         CurrentSessionRequest::stored(&app, state.inner(), &session_id),
         Ok,

@@ -3,138 +3,122 @@ import type {
   AppSettings,
   DocumentSession,
   DocumentSnapshot,
-  EditorChunkEdit,
+  EditorSlotEdit,
   ProviderCheckResult,
   RewriteMode
 } from "./types";
 
+type EditorWritebackMode = "validate" | "write";
+export type EditorWritebackInput =
+  | { kind: "text"; content: string }
+  | { kind: "slotEdits"; edits: EditorSlotEdit[] };
+
+type CommandPayload = Record<string, unknown>;
+
+function invokeCommand<T>(command: string, payload?: CommandPayload) {
+  return invoke<T>(command, payload);
+}
+
+function invokeSessionCommand<T>(
+  command: string,
+  sessionId: string,
+  payload?: CommandPayload
+) {
+  return invokeCommand<T>(command, { sessionId, ...payload });
+}
+
 export async function loadSettings() {
-  return invoke<AppSettings>("load_settings");
+  return invokeCommand<AppSettings>("load_settings");
 }
 
 export async function saveSettings(settings: AppSettings) {
-  return invoke<AppSettings>("save_settings", { settings });
+  return invokeCommand<AppSettings>("save_settings", { settings });
 }
 
 export async function testProvider(settings: AppSettings) {
-  return invoke<ProviderCheckResult>("test_provider", { settings });
+  return invokeCommand<ProviderCheckResult>("test_provider", { settings });
 }
 
 export async function openDocument(path: string) {
-  return invoke<DocumentSession>("open_document", { path });
+  return invokeCommand<DocumentSession>("open_document", { path });
 }
 
 export async function loadSession(sessionId: string) {
-  return invoke<DocumentSession>("load_session", { sessionId });
+  return invokeSessionCommand<DocumentSession>("load_session", sessionId);
 }
 
 export async function resetSession(sessionId: string) {
-  return invoke<DocumentSession>("reset_session", { sessionId });
+  return invokeSessionCommand<DocumentSession>("reset_session", sessionId);
 }
 
 export async function startRewrite(
   sessionId: string,
   mode: RewriteMode,
-  targetChunkIndices?: number[]
+  targetRewriteUnitIds?: string[]
 ) {
-  return invoke<DocumentSession>("start_rewrite", {
-    sessionId,
+  return invokeSessionCommand<DocumentSession>("start_rewrite", sessionId, {
     mode,
-    targetChunkIndices
+    targetRewriteUnitIds
   });
 }
 
 export async function pauseRewrite(sessionId: string) {
-  return invoke<DocumentSession>("pause_rewrite", { sessionId });
+  return invokeSessionCommand<DocumentSession>("pause_rewrite", sessionId);
 }
 
 export async function resumeRewrite(sessionId: string) {
-  return invoke<DocumentSession>("resume_rewrite", { sessionId });
+  return invokeSessionCommand<DocumentSession>("resume_rewrite", sessionId);
 }
 
 export async function cancelRewrite(sessionId: string) {
-  return invoke<DocumentSession>("cancel_rewrite", { sessionId });
+  return invokeSessionCommand<DocumentSession>("cancel_rewrite", sessionId);
 }
 
-export async function retryChunk(sessionId: string, index: number) {
-  return invoke<DocumentSession>("retry_chunk", { sessionId, index });
+export async function retryRewriteUnit(sessionId: string, rewriteUnitId: string) {
+  return invokeSessionCommand<DocumentSession>("retry_rewrite_unit", sessionId, {
+    rewriteUnitId
+  });
 }
 
 export async function applySuggestion(sessionId: string, suggestionId: string) {
-  return invoke<DocumentSession>("apply_suggestion", { sessionId, suggestionId });
+  return invokeSessionCommand<DocumentSession>("apply_suggestion", sessionId, { suggestionId });
 }
 
 export async function dismissSuggestion(sessionId: string, suggestionId: string) {
-  return invoke<DocumentSession>("dismiss_suggestion", { sessionId, suggestionId });
+  return invokeSessionCommand<DocumentSession>("dismiss_suggestion", sessionId, { suggestionId });
 }
 
 export async function deleteSuggestion(sessionId: string, suggestionId: string) {
-  return invoke<DocumentSession>("delete_suggestion", { sessionId, suggestionId });
+  return invokeSessionCommand<DocumentSession>("delete_suggestion", sessionId, { suggestionId });
 }
 
 export async function exportDocument(sessionId: string, path: string) {
-  return invoke<string>("export_document", { sessionId, path });
+  return invokeSessionCommand<string>("export_document", sessionId, { path });
 }
 
 export async function finalizeDocument(sessionId: string) {
-  return invoke<string>("finalize_document", { sessionId });
+  return invokeSessionCommand<string>("finalize_document", sessionId);
 }
 
-export async function saveDocumentEdits(
+export async function runDocumentWriteback(
   sessionId: string,
-  content: string,
+  mode: EditorWritebackMode,
+  input: EditorWritebackInput,
   editorBaseSnapshot: DocumentSnapshot | null
 ) {
-  return invoke<DocumentSession>("save_document_edits", {
-    sessionId,
-    content,
+  return invokeSessionCommand<DocumentSession>("run_document_writeback", sessionId, {
+    mode,
+    input,
     editorBaseSnapshot
   });
 }
 
-export async function validateDocumentEdits(
-  sessionId: string,
-  content: string,
-  editorBaseSnapshot: DocumentSnapshot | null
-) {
-  return invoke<void>("validate_document_edits", {
-    sessionId,
-    content,
-    editorBaseSnapshot
-  });
-}
-
-export async function validateDocumentChunkEdits(
-  sessionId: string,
-  edits: EditorChunkEdit[],
-  editorBaseSnapshot: DocumentSnapshot | null
-) {
-  return invoke<void>("validate_document_chunk_edits", {
-    sessionId,
-    edits,
-    editorBaseSnapshot
-  });
-}
-
-export async function saveDocumentChunkEdits(
-  sessionId: string,
-  edits: EditorChunkEdit[],
-  editorBaseSnapshot: DocumentSnapshot | null
-) {
-  return invoke<DocumentSession>("save_document_chunk_edits", {
-    sessionId,
-    edits,
-    editorBaseSnapshot
-  });
-}
-
-export async function rewriteSnippet(
+export async function rewriteSelection(
   sessionId: string,
   text: string,
   editorBaseSnapshot: DocumentSnapshot | null
 ) {
-  return invoke<string>("rewrite_snippet", {
-    sessionId,
+  return invokeSessionCommand<string>("rewrite_selection", sessionId, {
     text,
     editorBaseSnapshot
   });

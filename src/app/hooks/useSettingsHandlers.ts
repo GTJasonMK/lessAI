@@ -16,7 +16,7 @@ export function useSettingsHandlers(options: {
   showNotice: ShowNotice;
   withBusy: WithBusy;
   closeSettings: () => void;
-  readChunkStrategyLockedReason: () => string | null;
+  readSegmentationPresetLockedReason: () => string | null;
   refreshSessionState: RefreshSessionState;
 }) {
   const {
@@ -27,7 +27,7 @@ export function useSettingsHandlers(options: {
     showNotice,
     withBusy,
     closeSettings,
-    readChunkStrategyLockedReason,
+    readSegmentationPresetLockedReason,
     refreshSessionState
   } = options;
 
@@ -43,11 +43,11 @@ export function useSettingsHandlers(options: {
 
   const handleUpdateNumberSetting = useCallback(
     (
-      key: "timeoutMs" | "temperature" | "maxConcurrency" | "chunksPerRequest",
+      key: "timeoutMs" | "temperature" | "maxConcurrency" | "unitsPerBatch",
       value: string
     ) => {
       const parsed =
-        key === "timeoutMs" || key === "maxConcurrency" || key === "chunksPerRequest"
+        key === "timeoutMs" || key === "maxConcurrency" || key === "unitsPerBatch"
           ? Number.parseInt(value, 10)
           : Number.parseFloat(value);
 
@@ -63,7 +63,7 @@ export function useSettingsHandlers(options: {
             ? Math.max(1_000, parsed)
             : key === "maxConcurrency"
               ? Math.max(1, Math.min(8, parsed))
-              : key === "chunksPerRequest"
+              : key === "unitsPerBatch"
                 ? Math.max(1, parsed)
               : Math.max(0, Math.min(2, parsed))
       }));
@@ -71,22 +71,22 @@ export function useSettingsHandlers(options: {
     [setProviderStatus, setSettings]
   );
 
-  const handleUpdateChunkPreset = useCallback(
-    (value: AppSettings["chunkPreset"]) => {
-      const lockedReason = readChunkStrategyLockedReason();
+  const handleUpdateSegmentationPreset = useCallback(
+    (value: AppSettings["segmentationPreset"]) => {
+      const lockedReason = readSegmentationPresetLockedReason();
       if (lockedReason) {
         showNotice("warning", lockedReason);
         return;
       }
       setProviderStatus(null);
-      setSettings((current) => ({ ...current, chunkPreset: value }));
+      setSettings((current) => ({ ...current, segmentationPreset: value }));
     },
-    [readChunkStrategyLockedReason, setProviderStatus, setSettings, showNotice]
+    [readSegmentationPresetLockedReason, setProviderStatus, setSettings, showNotice]
   );
 
   const handleUpdateRewriteHeadings = useCallback(
     (value: boolean) => {
-      const lockedReason = readChunkStrategyLockedReason();
+      const lockedReason = readSegmentationPresetLockedReason();
       if (lockedReason) {
         showNotice("warning", lockedReason);
         return;
@@ -94,7 +94,7 @@ export function useSettingsHandlers(options: {
       setProviderStatus(null);
       setSettings((current) => ({ ...current, rewriteHeadings: value }));
     },
-    [readChunkStrategyLockedReason, setProviderStatus, setSettings, showNotice]
+    [readSegmentationPresetLockedReason, setProviderStatus, setSettings, showNotice]
   );
 
   const handleUpdateRewriteMode = useCallback(
@@ -150,7 +150,7 @@ export function useSettingsHandlers(options: {
   const handleSaveSettings = useCallback(async () => {
     const shouldRefreshCurrentSession =
       !!currentSession &&
-      (currentSession.chunkPreset !== settings.chunkPreset ||
+      (currentSession.segmentationPreset !== settings.segmentationPreset ||
         currentSession.rewriteHeadings !== settings.rewriteHeadings);
 
     try {
@@ -160,7 +160,7 @@ export function useSettingsHandlers(options: {
       if (shouldRefreshCurrentSession && currentSession) {
         try {
           await refreshSessionState(currentSession.id, {
-            preserveChunk: false,
+            preserveRewriteUnit: false,
             preserveSuggestion: true
           });
           showNotice("success", "配置已保存，当前文档已按新的切段策略刷新。");
@@ -202,7 +202,7 @@ export function useSettingsHandlers(options: {
   return {
     handleUpdateStringSetting,
     handleUpdateNumberSetting,
-    handleUpdateChunkPreset,
+    handleUpdateSegmentationPreset,
     handleUpdateRewriteHeadings,
     handleUpdateRewriteMode,
     handleUpdatePromptPresetId,

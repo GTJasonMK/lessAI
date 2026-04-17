@@ -15,8 +15,8 @@ pub(crate) fn validate_numeric_settings(settings: &AppSettings) -> Result<(), St
             "自动并发数必须在 1 到 {MAX_CONCURRENCY_LIMIT} 之间。"
         ));
     }
-    if settings.chunks_per_request == 0 {
-        return Err("单次请求处理块数必须大于等于 1。".to_string());
+    if settings.units_per_batch == 0 {
+        return Err("单批处理单元数必须大于等于 1。".to_string());
     }
 
     Ok(())
@@ -48,13 +48,13 @@ mod tests {
     }
 
     #[test]
-    fn rejects_zero_chunks_per_request() {
+    fn rejects_zero_units_per_batch() {
         let mut settings = AppSettings::default();
-        settings.chunks_per_request = 0;
+        settings.units_per_batch = 0;
 
         let error = validate_numeric_settings(&settings).expect_err("expected invalid batch size");
 
-        assert_eq!(error, "单次请求处理块数必须大于等于 1。");
+        assert_eq!(error, "单批处理单元数必须大于等于 1。");
     }
 
     #[test]

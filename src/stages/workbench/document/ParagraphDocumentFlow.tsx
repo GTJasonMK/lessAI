@@ -1,39 +1,40 @@
 import { memo, useEffect, useMemo, useRef } from "react";
 import { logScrollRestore } from "../../../app/hooks/documentScrollRestoreDebug";
-import { summarizeChunkSuggestions } from "../../../lib/helpers";
-import { buildChunkGroups } from "../../../lib/chunkGroups";
-import { isChunkSelected } from "../../../lib/chunkSelection";
-import type { ChunkPreset } from "../../../lib/types";
+import {
+  rewriteUnitHasEditableSlot,
+  summarizeRewriteUnitSuggestions
+} from "../../../lib/helpers";
+import { isRewriteUnitSelected } from "../../../lib/rewriteUnitSelection";
+import type { SegmentationPreset } from "../../../lib/types";
 import type { DocumentFlowBodyProps } from "./documentFlowShared";
 import {
-  chunkTitle,
-  fragmentClassNames,
-  renderChunkContent
+  renderRewriteUnitContent,
+  rewriteUnitTitle
 } from "./documentFlowShared";
 
 interface ParagraphDocumentFlowProps extends DocumentFlowBodyProps {
   sessionId: string;
-  chunkPreset: ChunkPreset;
+  segmentationPreset: SegmentationPreset;
 }
 
-function buildGroupClassNames(
-  hasActiveChunk: boolean,
-  hasSelectedChunk: boolean,
-  hasEditableChunk: boolean,
-  hasRunningChunk: boolean,
-  hasFailedChunk: boolean,
+function buildRewriteUnitClassNames(
+  hasActiveRewriteUnit: boolean,
+  hasSelectedRewriteUnit: boolean,
+  hasEditableSlot: boolean,
+  isRunning: boolean,
+  isFailed: boolean,
   hasAppliedSuggestion: boolean,
   hasProposedSuggestion: boolean,
   documentView: DocumentFlowBodyProps["documentView"]
 ) {
   return [
-    "doc-chunk",
-    "doc-paragraph-chunk",
-    hasActiveChunk ? "is-active" : "",
-    hasSelectedChunk ? "is-selected" : "",
-    !hasEditableChunk ? "is-protected" : "",
-    hasRunningChunk ? "is-running" : "",
-    hasFailedChunk ? "is-failed" : "",
+    "doc-unit",
+    "doc-paragraph-unit",
+    hasActiveRewriteUnit ? "is-active" : "",
+    hasSelectedRewriteUnit ? "is-selected" : "",
+    !hasEditableSlot ? "is-protected" : "",
+    isRunning ? "is-running" : "",
+    isFailed ? "is-failed" : "",
     documentView === "markup" && hasAppliedSuggestion ? "is-applied" : "",
     documentView === "markup" && !hasAppliedSuggestion && hasProposedSuggestion
       ? "is-proposed"
@@ -45,135 +46,120 @@ function buildGroupClassNames(
 
 export const ParagraphDocumentFlow = memo(function ParagraphDocumentFlow({
   sessionId,
-  chunkPreset,
-  chunks,
+  segmentationPreset,
+  session,
+  rewriteUnits,
   documentView,
   documentFormat,
   rewriteEnabled,
   rewriteBlockedReason,
   showMarkers,
-  suggestionsByChunk,
-  runningIndexSet,
-  optimisticManualRunningIndex,
-  activeChunkIndex,
-  selectedChunkIndices,
-  onSelectChunk,
+  suggestionsByRewriteUnit,
+  runningRewriteUnitIdSet,
+  optimisticManualRunningRewriteUnitId,
+  activeRewriteUnitId,
+  selectedRewriteUnitIds,
+  onSelectRewriteUnit,
   onSelectSuggestion
 }: ParagraphDocumentFlowProps) {
-  const groupNodesRef = useRef<Record<string, HTMLSpanElement | null>>({});
-  const previousActiveTargetRef = useRef<{ sessionId: string; activeChunkIndex: number } | null>(
+  const rewriteUnitNodesRef = useRef<Record<string, HTMLSpanElement | null>>({});
+  const previousActiveTargetRef = useRef<{ sessionId: string; activeRewriteUnitId: string | null } | null>(
     null
   );
 
-  const groups = useMemo(() => buildChunkGroups(chunks, chunkPreset), [chunkPreset, chunks]);
-
   useEffect(() => {
     const previous = previousActiveTargetRef.current;
-    previousActiveTargetRef.current = { sessionId, activeChunkIndex };
+    previousActiveTargetRef.current = { sessionId, activeRewriteUnitId };
     if (!previous) return;
     if (previous.sessionId !== sessionId) return;
-    if (previous.activeChunkIndex === activeChunkIndex) return;
+    if (previous.activeRewriteUnitId === activeRewriteUnitId) return;
+    if (!activeRewriteUnitId) return;
 
-    const activeGroup = groups.find((group) => group.chunkIndices.includes(activeChunkIndex));
-    if (!activeGroup) return;
     logScrollRestore("paragraph-scroll-into-view", {
       sessionId,
-      previousActiveChunkIndex: previous.activeChunkIndex,
-      activeChunkIndex,
-      groupId: activeGroup.id
+      previousActiveRewriteUnitId: previous.activeRewriteUnitId,
+      activeRewriteUnitId
     });
-    groupNodesRef.current[activeGroup.id]?.scrollIntoView({
+    rewriteUnitNodesRef.current[activeRewriteUnitId]?.scrollIntoView({
       block: "center",
       behavior: "smooth"
     });
-  }, [sessionId, activeChunkIndex, groups]);
+  }, [activeRewriteUnitId, sessionId]);
 
   const computed = useMemo(
     () =>
-      groups.map((group) => {
-        const fragments = group.chunks.map((chunk) => {
-          const chunkSuggestions = suggestionsByChunk.get(chunk.index) ?? [];
-          const summary = summarizeChunkSuggestions(chunkSuggestions);
-          const displaySuggestion = summary.applied ?? summary.proposed ?? null;
-          const isRunning =
-            chunk.status === "running" ||
-            runningIndexSet.has(chunk.index) ||
-            chunk.index === optimisticManualRunningIndex;
-
-          return {
-            chunk,
-            displaySuggestion,
-            isRunning,
-            hasApplied: Boolean(summary.applied),
-            hasProposed: Boolean(summary.proposed)
-          };
-        });
+      rewriteUnits.map((rewriteUnit) => {
+        const unitSuggestions = suggestionsByRewriteUnit.get(rewriteUnit.id) ?? [];
+        const summary = summarizeRewriteUnitSuggestions(unitSuggestions);
+        const displaySuggestion = summary.applied ?? summary.proposed ?? null;
+        const isRunning =
+          rewriteUnit.status === "running" ||
+          runningRewriteUnitIdSet.has(rewriteUnit.id) ||
+          rewriteUnit.id === optimisticManualRunningRewriteUnitId;
+        const hasEditableSlot = rewriteUnitHasEditableSlot(session, rewriteUnit);
 
         return {
-          group,
-          fragments,
-          classes: buildGroupClassNames(
-            group.chunkIndices.includes(activeChunkIndex),
-            group.editableIndices.some((index) => isChunkSelected(selectedChunkIndices, index)),
-            group.editableIndices.length > 0,
-            fragments.some((fragment) => fragment.isRunning),
-            group.chunks.some((chunk) => chunk.status === "failed"),
-            fragments.some((fragment) => fragment.hasApplied),
-            fragments.some((fragment) => fragment.hasProposed),
+          rewriteUnit,
+          displaySuggestion,
+          isRunning,
+          classes: buildRewriteUnitClassNames(
+            rewriteUnit.id === activeRewriteUnitId,
+            isRewriteUnitSelected(selectedRewriteUnitIds, rewriteUnit.id),
+            hasEditableSlot,
+            isRunning,
+            rewriteUnit.status === "failed",
+            Boolean(summary.applied),
+            Boolean(summary.proposed),
             documentView
-          ),
-          trailingSeparator: group.chunks[group.chunks.length - 1]?.separatorAfter ?? ""
+          )
         };
       }),
     [
-      activeChunkIndex,
+      activeRewriteUnitId,
       documentView,
-      groups,
-      optimisticManualRunningIndex,
-      runningIndexSet,
-      selectedChunkIndices,
-      suggestionsByChunk
+      optimisticManualRunningRewriteUnitId,
+      rewriteUnits,
+      runningRewriteUnitIdSet,
+      selectedRewriteUnitIds,
+      session,
+      suggestionsByRewriteUnit
     ]
   );
 
-  return computed.map(({ group, fragments, classes, trailingSeparator }) => (
-    <span key={group.id} className="doc-chunk-wrap">
-      <span
-        ref={(node) => {
-          groupNodesRef.current[group.id] = node;
-        }}
-        className={classes}
-      >
-        {fragments.map((fragment, index) => {
-          const suffix = index + 1 < fragments.length ? fragment.chunk.separatorAfter : "";
-          return (
-            <span
-              key={fragment.chunk.index}
-              className={fragmentClassNames(fragment.chunk, fragment.isRunning)}
-              data-chunk-index={fragment.chunk.index + 1}
-              title={chunkTitle(fragment.chunk, rewriteEnabled, rewriteBlockedReason)}
-              onClick={(event) => {
-                onSelectChunk(fragment.chunk.index, {
-                  multiSelect: event.metaKey || event.ctrlKey
-                });
-                if (fragment.displaySuggestion) {
-                  onSelectSuggestion(fragment.displaySuggestion.id);
-                }
-              }}
-            >
-              {renderChunkContent(
-                fragment.chunk,
-                fragment.displaySuggestion,
-                documentView,
-                showMarkers,
-                documentFormat
-              )}
-              {suffix}
-            </span>
-          );
-        })}
+  return computed.map(({ rewriteUnit, displaySuggestion, classes }) => {
+    const rendered = renderRewriteUnitContent(
+      session,
+      rewriteUnit,
+      displaySuggestion,
+      documentView,
+      showMarkers,
+      documentFormat
+    );
+
+    return (
+      <span key={rewriteUnit.id} className="doc-unit-wrap">
+        <span
+          ref={(node) => {
+            rewriteUnitNodesRef.current[rewriteUnit.id] = node;
+          }}
+          className={classes}
+          data-rewrite-unit-id={rewriteUnit.id}
+          title={rewriteUnitTitle(session, rewriteUnit, rewriteEnabled, rewriteBlockedReason)}
+          onClick={(event) => {
+            onSelectRewriteUnit(rewriteUnit.id, {
+              multiSelect: event.metaKey || event.ctrlKey
+            });
+            if (displaySuggestion) {
+              onSelectSuggestion(displaySuggestion.id);
+            }
+          }}
+        >
+          {rendered.body}
+        </span>
+        {rendered.separatorText ? (
+          <span className="doc-unit-separator">{rendered.separatorText}</span>
+        ) : null}
       </span>
-      {trailingSeparator}
-    </span>
-  ));
+    );
+  });
 });

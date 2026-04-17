@@ -4,10 +4,13 @@ use tauri::{AppHandle, State};
 
 use crate::{
     documents::{document_format, ensure_document_source_matches_session},
-    editor_session::with_idle_editor_session,
+    editor_session::{
+        ensure_editor_base_snapshot_matches_path, ACTIVE_EDITOR_SESSION_ERROR,
+    },
     editor_writeback::ensure_session_can_use_plain_text_editor,
     models::{DocumentSession, DocumentSnapshot},
     rewrite,
+    session_access::{access_current_session, CurrentSessionRequest},
     state::AppState,
     storage,
 };
@@ -21,7 +24,7 @@ fn ensure_session_can_rewrite_snippet(session: &DocumentSession) -> Result<(), S
 }
 
 #[tauri::command]
-pub async fn rewrite_snippet(
+pub async fn rewrite_selection(
     app: AppHandle,
     state: State<'_, AppState>,
     session_id: String,
@@ -32,11 +35,19 @@ pub async fn rewrite_snippet(
         return Err("选区内容为空。".to_string());
     }
 
-    let session = with_idle_editor_session(
-        &app,
-        &state,
-        &session_id,
-        &editor_base_snapshot,
+    let session = access_current_session(
+        CurrentSessionRequest::guarded_refresh(
+            &app,
+            state.inner(),
+            &session_id,
+            |session: &DocumentSession| {
+                ensure_editor_base_snapshot_matches_path(
+                    Path::new(&session.document_path),
+                    editor_base_snapshot.as_ref(),
+                )
+            },
+        )
+        .with_active_job_error(ACTIVE_EDITOR_SESSION_ERROR),
         |session| {
             ensure_session_can_rewrite_snippet(&session)?;
             Ok(session)
@@ -45,7 +56,13 @@ pub async fn rewrite_snippet(
 
     let settings = storage::load_settings(&app)?;
     let format = document_format(Path::new(&session.document_path));
-    rewrite::rewrite_chunk(&settings, &text, format).await
+    rewrite::rewrite_selection_text(
+        &settings,
+        &text,
+        format,
+        session.rewrite_headings.unwrap_or(false),
+    )
+    .await
 }
 
 #[cfg(test)]
@@ -55,21 +72,24 @@ mod tests {
     use super::ensure_session_can_rewrite_snippet;
     use crate::{
         document_snapshot::capture_document_snapshot,
-        models::{ChunkStatus, ChunkTask, DocumentSession, EditSuggestion, SuggestionDecision},
-        test_support::{cleanup_dir, sample_clean_session, write_temp_file},
+        models::{DocumentSession, SuggestionDecision},
+        rewrite_unit::SlotUpdate,
+        test_support::{
+            cleanup_dir, editable_slot, rewrite_suggestion, rewrite_unit, sample_clean_session,
+            write_temp_file,
+        },
     };
 
     fn sample_session() -> DocumentSession {
         let mut session = sample_clean_session("session-1", "/tmp/example.docx", "正文");
-        session.chunks = vec![ChunkTask {
-            index: 0,
-            source_text: "正文".to_string(),
-            separator_after: String::new(),
-            skip_rewrite: false,
-            presentation: None,
-            status: ChunkStatus::Idle,
-            error_message: None,
-        }];
+        session.writeback_slots = vec![editable_slot("slot-0", 0, "正文")];
+        session.rewrite_units = vec![rewrite_unit(
+            "unit-0",
+            0,
+            &["slot-0"],
+            "正文",
+            crate::models::RewriteUnitStatus::Idle,
+        )];
         session
     }
 
@@ -94,17 +114,15 @@ mod tests {
         session.source_text = "正文".to_string();
         session.source_snapshot =
             Some(capture_document_snapshot(&target).expect("capture initial snapshot"));
-        session.suggestions.push(EditSuggestion {
-            id: "s1".to_string(),
-            sequence: 1,
-            chunk_index: 0,
-            before_text: "正文".to_string(),
-            after_text: "改写正文".to_string(),
-            diff_spans: Vec::new(),
-            decision: SuggestionDecision::Proposed,
-            created_at: chrono::Utc::now(),
-            updated_at: chrono::Utc::now(),
-        });
+        session.suggestions.push(rewrite_suggestion(
+            "s1",
+            1,
+            "unit-0",
+            "正文",
+            "改写正文",
+            SuggestionDecision::Proposed,
+            vec![SlotUpdate::new("slot-0", "改写正文")],
+        ));
 
         let error = ensure_session_can_rewrite_snippet(&session)
             .expect_err("expected dirty editor session to be blocked");

@@ -318,7 +318,7 @@
   display: block;
 }
 
-.chunk-legend {
+.unit-legend {
   display: flex;
   flex-wrap: wrap;
   align-items: center;
@@ -330,7 +330,7 @@
   position: relative;
 }
 
-.document-flow-wrap.has-status .chunk-legend {
+.document-flow-wrap.has-status .unit-legend {
   padding-right: 132px;
 }
 
@@ -391,13 +391,13 @@
   margin: 0;
 }
 
-.doc-chunk {
+.doc-unit {
   border-radius: 10px;
   cursor: pointer;
   padding: 1px 3px;
-  /* chunk 可能会跨行换行：
-   * - clone 会让每一行都变成一个“独立胶囊”，视觉上容易被误判为“被切成多个 chunk”
-   * - slice 更像“同一个 chunk 在自然换行”，更贴近审阅单元的直觉
+  /* 审阅单元可能会跨行换行：
+   * - clone 会让每一行都变成一个“独立胶囊”，视觉上容易被误判为“被切成多个单元”
+   * - slice 更像“同一个单元在自然换行”，更贴近审阅单元的直觉
    */
   -webkit-box-decoration-break: slice;
   box-decoration-break: slice;
@@ -408,9 +408,13 @@
   box-shadow: inset 0 0 0 1px rgba(23, 68, 207, 0.12);
 }
 
-.doc-paragraph-chunk {
+.doc-paragraph-unit {
   display: inline;
   padding: 3px 6px;
+}
+
+.doc-unit-separator {
+  white-space: pre-wrap;
 }
 
 .doc-paragraph-fragment {
@@ -434,7 +438,7 @@
   background: rgba(214, 45, 32, 0.1);
 }
 
-.document-flow-wrap.is-quiet .doc-chunk {
+.document-flow-wrap.is-quiet .doc-unit {
   background: transparent;
   box-shadow: none;
 }
@@ -444,94 +448,94 @@
   box-shadow: none;
 }
 
-.document-flow-wrap.is-quiet .doc-chunk:hover {
+.document-flow-wrap.is-quiet .doc-unit:hover {
   background: rgba(23, 68, 207, 0.04);
   box-shadow: inset 0 0 0 1px rgba(23, 68, 207, 0.1);
 }
 
-.document-flow-wrap.is-quiet .doc-chunk.is-protected,
-.document-flow-wrap.is-quiet .doc-chunk.is-protected:hover {
+.document-flow-wrap.is-quiet .doc-unit.is-protected,
+.document-flow-wrap.is-quiet .doc-unit.is-protected:hover {
   background: transparent;
   box-shadow: none;
 }
 
-.document-flow-wrap.is-quiet .doc-chunk.is-active {
+.document-flow-wrap.is-quiet .doc-unit.is-active {
   background: rgba(23, 68, 207, 0.06);
   box-shadow: 0 0 0 2px rgba(23, 68, 207, 0.18);
 }
 
-.document-flow-wrap.is-quiet .doc-chunk.is-selected {
+.document-flow-wrap.is-quiet .doc-unit.is-selected {
   background: rgba(184, 92, 26, 0.08);
   box-shadow: inset 0 0 0 1px rgba(184, 92, 26, 0.24);
 }
 
-.document-flow-wrap.is-quiet .doc-chunk.is-active.is-selected {
+.document-flow-wrap.is-quiet .doc-unit.is-active.is-selected {
   box-shadow:
     0 0 0 2px rgba(23, 68, 207, 0.18),
     inset 0 0 0 1px rgba(184, 92, 26, 0.3);
 }
 
-.document-flow-wrap.is-quiet .doc-chunk.is-running {
+.document-flow-wrap.is-quiet .doc-unit.is-running {
   background: rgba(134, 93, 255, 0.08);
   box-shadow: inset 0 0 0 1px rgba(134, 93, 255, 0.22);
   animation: none;
 }
 
-.document-flow-wrap.is-quiet .doc-chunk.is-failed {
+.document-flow-wrap.is-quiet .doc-unit.is-failed {
   background: rgba(214, 45, 32, 0.08);
 }
 
-.doc-chunk:hover {
+.doc-unit:hover {
   background: rgba(23, 68, 207, 0.06);
   box-shadow: inset 0 0 0 1px rgba(23, 68, 207, 0.18);
 }
 
-.doc-chunk.is-protected {
+.doc-unit.is-protected {
   background: rgba(236, 227, 211, 0.78);
   box-shadow: inset 0 0 0 1px rgba(20, 20, 20, 0.18);
 }
 
-.doc-chunk.is-protected:hover {
+.doc-unit.is-protected:hover {
   background: rgba(236, 227, 211, 0.92);
 }
 
-.doc-chunk.is-active {
+.doc-unit.is-active {
   background: rgba(23, 68, 207, 0.08);
   box-shadow: 0 0 0 2px rgba(23, 68, 207, 0.22);
 }
 
-.doc-chunk.is-selected {
+.doc-unit.is-selected {
   background: rgba(184, 92, 26, 0.12);
   box-shadow: inset 0 0 0 1px rgba(184, 92, 26, 0.26);
 }
 
-.doc-chunk.is-active.is-selected {
+.doc-unit.is-active.is-selected {
   background: rgba(184, 92, 26, 0.14);
   box-shadow:
     0 0 0 2px rgba(23, 68, 207, 0.22),
     inset 0 0 0 1px rgba(184, 92, 26, 0.3);
 }
 
-.doc-chunk.is-active.is-protected {
+.doc-unit.is-active.is-protected {
   background: rgba(236, 227, 211, 0.88);
   box-shadow:
     0 0 0 2px rgba(23, 68, 207, 0.22),
     inset 0 0 0 1px rgba(20, 20, 20, 0.2);
 }
 
-.doc-chunk.is-running {
+.doc-unit.is-running {
   background: rgba(134, 93, 255, 0.12);
   box-shadow: inset 0 0 0 1px rgba(134, 93, 255, 0.32);
-  animation: docChunkRunningPulse 1.25s ease-in-out infinite;
+  animation: docUnitRunningPulse 1.25s ease-in-out infinite;
 }
 
-.doc-chunk.is-active.is-running {
+.doc-unit.is-active.is-running {
   box-shadow:
     0 0 0 2px rgba(23, 68, 207, 0.22),
     inset 0 0 0 1px rgba(134, 93, 255, 0.35);
 }
 
-@keyframes docChunkRunningPulse {
+@keyframes docUnitRunningPulse {
   0% {
     background: rgba(134, 93, 255, 0.1);
   }
@@ -544,20 +548,20 @@
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .doc-chunk.is-running {
+  .doc-unit.is-running {
     animation: none;
   }
 }
 
-.doc-chunk.is-proposed {
+.doc-unit.is-proposed {
   background: rgba(239, 193, 34, 0.14);
 }
 
-.doc-chunk.is-applied {
+.doc-unit.is-applied {
   background: rgba(28, 163, 84, 0.12);
 }
 
-.doc-chunk.is-failed {
+.doc-unit.is-failed {
   background: rgba(214, 45, 32, 0.12);
 }
 
@@ -587,7 +591,7 @@
 }
 
 .assistant-card,
-.chunk-ribbon,
+.unit-ribbon,
 .review-minimap,
 .editor-paper {
   border: var(--border);
@@ -676,51 +680,51 @@
   line-height: 1.92;
 }
 
-.docx-editor-chunk {
+.docx-editor-slot {
   display: inline;
   border-radius: 10px;
   outline: none;
 }
 
-.docx-editor-chunk.is-editable {
+.docx-editor-slot.is-editable {
   padding: 0.05em 0.12em;
   background: rgba(23, 68, 207, 0.06);
 }
 
-.docx-editor-chunk.is-editable:focus {
+.docx-editor-slot.is-editable:focus {
   background: rgba(23, 68, 207, 0.12);
   box-shadow: inset 0 0 0 1px rgba(23, 68, 207, 0.32);
 }
 
-.docx-editor-chunk.is-locked {
+.docx-editor-slot.is-locked {
   padding: 0.05em 0.16em;
   background: rgba(20, 20, 20, 0.08);
   color: var(--muted);
 }
 
-.docx-editor-chunk.is-bold {
+.docx-editor-slot.is-bold {
   font-weight: 700;
 }
 
-.docx-editor-chunk.is-italic {
+.docx-editor-slot.is-italic {
   font-style: italic;
 }
 
-.docx-editor-chunk.is-underline,
-.docx-editor-chunk.is-link {
+.docx-editor-slot.is-underline,
+.docx-editor-slot.is-link {
   text-decoration: underline;
   text-decoration-thickness: 1.5px;
 }
 
-.docx-editor-chunk.is-editable.is-underline:focus {
+.docx-editor-slot.is-editable.is-underline:focus {
   text-decoration: none;
 }
 
-.docx-editor-chunk.is-editable.is-link:focus {
+.docx-editor-slot.is-editable.is-link:focus {
   text-decoration: none;
 }
 
-.docx-editor-chunk.is-link {
+.docx-editor-slot.is-link {
   color: rgb(23, 68, 207);
 }
 
@@ -820,7 +824,7 @@
 
 .assistant-stat span,
 .assistant-note span,
-.chunk-pill span {
+.unit-pill span {
   color: var(--muted);
 }
 

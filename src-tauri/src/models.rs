@@ -1,6 +1,8 @@
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 
+use crate::rewrite_unit::{RewriteSuggestion, RewriteUnit, WritebackSlot};
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct AppSettings {
@@ -10,11 +12,11 @@ pub struct AppSettings {
     pub update_proxy: String,
     pub timeout_ms: u64,
     pub temperature: f32,
-    pub chunk_preset: ChunkPreset,
+    pub segmentation_preset: SegmentationPreset,
     pub rewrite_headings: bool,
     pub rewrite_mode: RewriteMode,
     pub max_concurrency: usize,
-    pub chunks_per_request: usize,
+    pub units_per_batch: usize,
     pub prompt_preset_id: String,
     pub custom_prompts: Vec<PromptTemplate>,
 }
@@ -23,7 +25,7 @@ fn default_max_concurrency() -> usize {
     2
 }
 
-fn default_chunks_per_request() -> usize {
+fn default_units_per_batch() -> usize {
     1
 }
 
@@ -56,11 +58,11 @@ impl Default for AppSettings {
             update_proxy: String::new(),
             timeout_ms: 45_000,
             temperature: 0.8,
-            chunk_preset: ChunkPreset::Paragraph,
+            segmentation_preset: SegmentationPreset::Paragraph,
             rewrite_headings: false,
             rewrite_mode: RewriteMode::Manual,
             max_concurrency: default_max_concurrency(),
-            chunks_per_request: default_chunks_per_request(),
+            units_per_batch: default_units_per_batch(),
             prompt_preset_id: default_prompt_preset_id(),
             custom_prompts: Vec::new(),
         }
@@ -69,7 +71,7 @@ impl Default for AppSettings {
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "lowercase")]
-pub enum ChunkPreset {
+pub enum SegmentationPreset {
     Clause,
     Sentence,
     Paragraph,
@@ -92,7 +94,7 @@ pub enum RewriteMode {
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "lowercase")]
-pub enum ChunkStatus {
+pub enum RewriteUnitStatus {
     Idle,
     Running,
     Done,
@@ -141,7 +143,7 @@ pub struct DiffSpan {
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
-pub struct ChunkPresentation {
+pub struct TextPresentation {
     #[serde(default)]
     pub bold: bool,
     #[serde(default)]
@@ -164,37 +166,9 @@ pub struct DocumentSnapshot {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
-pub struct ChunkTask {
-    pub index: usize,
-    pub source_text: String,
-    pub separator_after: String,
-    #[serde(default)]
-    pub skip_rewrite: bool,
-    #[serde(default)]
-    pub presentation: Option<ChunkPresentation>,
-    pub status: ChunkStatus,
-    pub error_message: Option<String>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct EditorChunkEdit {
-    pub index: usize,
+pub struct EditorSlotEdit {
+    pub slot_id: String,
     pub text: String,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct EditSuggestion {
-    pub id: String,
-    pub sequence: u64,
-    pub chunk_index: usize,
-    pub before_text: String,
-    pub after_text: String,
-    pub diff_spans: Vec<DiffSpan>,
-    pub decision: SuggestionDecision,
-    pub created_at: DateTime<Utc>,
-    pub updated_at: DateTime<Utc>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -216,11 +190,14 @@ pub struct DocumentSession {
     #[serde(default)]
     pub plain_text_editor_block_reason: Option<String>,
     #[serde(default)]
-    pub chunk_preset: Option<ChunkPreset>,
+    pub segmentation_preset: Option<SegmentationPreset>,
     #[serde(default)]
     pub rewrite_headings: Option<bool>,
-    pub chunks: Vec<ChunkTask>,
-    pub suggestions: Vec<EditSuggestion>,
+    #[serde(default)]
+    pub writeback_slots: Vec<WritebackSlot>,
+    #[serde(default)]
+    pub rewrite_units: Vec<RewriteUnit>,
+    pub suggestions: Vec<RewriteSuggestion>,
     pub next_suggestion_sequence: u64,
     pub status: RunningState,
     pub created_at: DateTime<Utc>,
@@ -252,10 +229,10 @@ pub struct ProviderCheckResult {
 #[serde(rename_all = "camelCase")]
 pub struct RewriteProgress {
     pub session_id: String,
-    pub completed_chunks: usize,
+    pub completed_units: usize,
     pub in_flight: usize,
-    pub running_indices: Vec<usize>,
-    pub total_chunks: usize,
+    pub running_unit_ids: Vec<String>,
+    pub total_units: usize,
     pub mode: RewriteMode,
     pub running_state: RunningState,
     pub max_concurrency: usize,
@@ -263,9 +240,9 @@ pub struct RewriteProgress {
 
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
-pub struct ChunkCompletedEvent {
+pub struct RewriteUnitCompletedEvent {
     pub session_id: String,
-    pub index: usize,
+    pub rewrite_unit_id: String,
     pub suggestion_id: String,
     pub suggestion_sequence: u64,
 }

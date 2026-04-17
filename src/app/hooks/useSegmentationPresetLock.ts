@@ -1,21 +1,19 @@
 import { useCallback, useMemo } from "react";
 import type { DocumentSession } from "../../lib/types";
+import { rewriteUnitHasEditableSlot } from "../../lib/helpers";
 
 type Stage = "workbench" | "editor";
 
-export interface ChunkStrategyLockState {
+export interface SegmentationPresetLockState {
   locked: boolean;
   reason: string;
 }
 
-function computeChunkStrategyLockState(
+function computeSegmentationPresetLockState(
   stage: Stage,
   editorDirty: boolean,
   session: DocumentSession | null
-): ChunkStrategyLockState {
-  // 切段策略（chunkPreset + rewriteHeadings）属于“项目级配置”：
-  // - 项目一旦产生修改对/进度，切段策略必须保持稳定，否则最小审阅单元（chunk）会失去一致性；
-  // - 需要调整时，应先回到“空项目”（无修改对/无进度）的边界，再修改策略，并通过重置/新导入生效。
+): SegmentationPresetLockState {
   if (stage === "editor") {
     return {
       locked: true,
@@ -44,8 +42,9 @@ function computeChunkStrategyLockState(
     };
   }
 
-  const hasProgress = session.chunks.some(
-    (chunk) => !chunk.skipRewrite && chunk.status !== "idle"
+  const hasProgress = session.rewriteUnits.some(
+    (rewriteUnit) =>
+      rewriteUnitHasEditableSlot(session, rewriteUnit) && rewriteUnit.status !== "idle"
   );
   if (hasProgress) {
     return {
@@ -58,7 +57,7 @@ function computeChunkStrategyLockState(
   return { locked: false, reason: "" };
 }
 
-export function useChunkStrategyLock(options: {
+export function useSegmentationPresetLock(options: {
   stage: Stage;
   editorDirty: boolean;
   currentSession: DocumentSession | null;
@@ -69,13 +68,13 @@ export function useChunkStrategyLock(options: {
   const { stage, editorDirty, currentSession, stageRef, editorDirtyRef, currentSessionRef } =
     options;
 
-  const chunkStrategyLock = useMemo(
-    () => computeChunkStrategyLockState(stage, editorDirty, currentSession),
+  const segmentationPresetLock = useMemo(
+    () => computeSegmentationPresetLockState(stage, editorDirty, currentSession),
     [currentSession, editorDirty, stage]
   );
 
-  const readChunkStrategyLockedReason = useCallback(() => {
-    const { locked, reason } = computeChunkStrategyLockState(
+  const readSegmentationPresetLockedReason = useCallback(() => {
+    const { locked, reason } = computeSegmentationPresetLockState(
       stageRef.current,
       editorDirtyRef.current,
       currentSessionRef.current
@@ -83,6 +82,5 @@ export function useChunkStrategyLock(options: {
     return locked ? reason : null;
   }, [currentSessionRef, editorDirtyRef, stageRef]);
 
-  return { chunkStrategyLock, readChunkStrategyLockedReason } as const;
+  return { segmentationPresetLock, readSegmentationPresetLockedReason } as const;
 }
-

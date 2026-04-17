@@ -4,26 +4,6 @@ use super::super::text::{
 };
 use super::validate::validate_rewrite_output;
 
-pub(super) fn build_numbered_multiline_template(source_body: &str) -> (String, usize) {
-    let normalized = normalize_line_endings_to_lf(source_body);
-    let lines = normalized.split('\n').collect::<Vec<_>>();
-    let expected = lines.len().max(1);
-    let mut template = String::new();
-
-    for (index, line) in lines.iter().enumerate() {
-        let number = index + 1;
-        template.push_str("@@@");
-        template.push_str(&number.to_string());
-        template.push_str("@@@");
-        template.push_str(line);
-        if number < expected {
-            template.push('\n');
-        }
-    }
-
-    (template, expected)
-}
-
 pub(super) fn finalize_plain_candidate(
     source_text: &str,
     candidate_text: &str,

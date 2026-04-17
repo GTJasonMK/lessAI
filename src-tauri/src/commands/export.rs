@@ -5,13 +5,13 @@ use tauri::{AppHandle, State};
 use crate::{
     atomic_write::write_bytes_atomically,
     documents::{normalize_text_against_source_layout, WritebackMode},
-    rewrite_projection::{build_merged_regions, merged_text_from_regions},
+    rewrite_projection::build_applied_slot_projection,
+    rewrite_unit::merged_text_from_slots,
     rewrite_writeback::execute_session_writeback,
+    session_access::{access_current_session, CurrentSessionRequest},
     state::AppState,
     storage,
 };
-
-use super::support::{run_session_command, SessionCommandSource};
 
 #[tauri::command]
 pub fn export_document(
@@ -20,18 +20,13 @@ pub fn export_document(
     session_id: String,
     path: String,
 ) -> Result<String, String> {
-    let session = run_session_command(
-        &app,
-        &state,
-        &session_id,
-        SessionCommandSource::Stored,
-        None,
+    let session = access_current_session(
+        CurrentSessionRequest::stored(&app, state.inner(), &session_id),
         Ok,
     )?;
-    let merged = build_merged_regions(&session, None);
     let content = normalize_text_against_source_layout(
         &session.source_text,
-        &merged_text_from_regions(&merged),
+        &merged_text_from_slots(&build_applied_slot_projection(&session)?),
     );
     let path_buf = PathBuf::from(&path);
 
@@ -45,12 +40,9 @@ pub fn finalize_document(
     state: State<'_, AppState>,
     session_id: String,
 ) -> Result<String, String> {
-    run_session_command(
-        &app,
-        &state,
-        &session_id,
-        SessionCommandSource::Refreshed,
-        Some("当前文档正在执行自动任务，请先暂停并取消后再写回原文件。"),
+    access_current_session(
+        CurrentSessionRequest::refreshed(&app, state.inner(), &session_id)
+            .with_active_job_error("当前文档正在执行自动任务，请先暂停并取消后再写回原文件。"),
         |session| {
             execute_session_writeback(&session, WritebackMode::Write)?;
 

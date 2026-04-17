@@ -13,6 +13,8 @@ mod package_tests;
 mod placeholders;
 #[path = "docx/simple.rs"]
 mod simple;
+#[path = "docx/slots.rs"]
+mod slots;
 #[path = "docx/specials.rs"]
 mod specials;
 #[path = "docx/styles.rs"]

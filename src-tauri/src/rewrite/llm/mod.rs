@@ -1,15 +1,14 @@
 use std::time::Duration;
 
 use crate::models::{AppSettings, DocumentFormat, ProviderCheckResult};
+use crate::rewrite_unit::{
+    parse_rewrite_batch_response, parse_rewrite_unit_response, RewriteBatchRequest,
+    RewriteBatchResponse, RewriteUnitRequest, RewriteUnitResponse,
+};
 use crate::settings_validation::validate_numeric_settings;
 
-mod batch;
-mod markdown;
-mod plain;
 mod plain_support;
-mod plans;
-mod prompt;
-mod tex;
+mod selection;
 pub(in crate::rewrite) mod transport;
 mod validate;
 
@@ -41,77 +40,66 @@ pub async fn test_provider(settings: &AppSettings) -> Result<ProviderCheckResult
     })
 }
 
-pub async fn rewrite_chunk_with_client(
+pub async fn rewrite_selection_text_with_client(
     client: &reqwest::Client,
     settings: &AppSettings,
     source_text: &str,
     format: DocumentFormat,
+    rewrite_headings: bool,
 ) -> Result<String, String> {
-    match format {
-        DocumentFormat::Tex => {
-            tex::rewrite_tex_chunk_with_client(client, settings, source_text).await
-        }
-        DocumentFormat::Markdown => {
-            markdown::rewrite_markdown_chunk_with_client(client, settings, source_text).await
-        }
-        DocumentFormat::PlainText => {
-            plain::rewrite_plain_chunk_with_client(client, settings, source_text, None).await
-        }
-    }
+    selection::rewrite_selection_text_with_client(
+        client,
+        settings,
+        source_text,
+        format,
+        rewrite_headings,
+    )
+    .await
 }
 
-pub async fn rewrite_chunks_with_client(
+pub async fn rewrite_unit_with_client(
     client: &reqwest::Client,
     settings: &AppSettings,
-    source_texts: &[String],
-    format: DocumentFormat,
-) -> Result<Vec<String>, String> {
-    if source_texts.is_empty() {
-        return Ok(Vec::new());
-    }
-    if source_texts.len() == 1 {
-        return Ok(vec![
-            rewrite_chunk_with_client(client, settings, &source_texts[0], format).await?,
-        ]);
-    }
-
-    match format {
-        DocumentFormat::Tex => {
-            let plans = source_texts
-                .iter()
-                .map(|source| tex::plan_tex_chunk(source, settings))
-                .collect::<Vec<_>>();
-            plans::execute_chunk_plans_batched(client, settings, &plans).await
-        }
-        DocumentFormat::Markdown => {
-            let plans = source_texts
-                .iter()
-                .map(|source| markdown::plan_markdown_chunk(source, settings))
-                .collect::<Vec<_>>();
-            plans::execute_chunk_plans_batched(client, settings, &plans).await
-        }
-        DocumentFormat::PlainText => {
-            batch::rewrite_plain_chunks_with_client(client, settings, source_texts, None).await
-        }
-    }
+    request: &RewriteUnitRequest,
+) -> Result<RewriteUnitResponse, String> {
+    let system_prompt = request.system_prompt();
+    let user_prompt = request.user_prompt();
+    let raw =
+        transport::call_chat_model(client, settings, &system_prompt, &user_prompt, settings.temperature)
+            .await?;
+    parse_rewrite_unit_response(request, &raw)
 }
 
-pub async fn rewrite_chunk(
+pub async fn rewrite_batch_with_client(
+    client: &reqwest::Client,
+    settings: &AppSettings,
+    request: &RewriteBatchRequest,
+) -> Result<RewriteBatchResponse, String> {
+    let system_prompt = request.system_prompt();
+    let user_prompt = request.user_prompt();
+    let raw =
+        transport::call_chat_model(client, settings, &system_prompt, &user_prompt, settings.temperature)
+            .await?;
+    parse_rewrite_batch_response(request, &raw)
+}
+
+pub async fn rewrite_selection_text(
     settings: &AppSettings,
     source_text: &str,
     format: DocumentFormat,
+    rewrite_headings: bool,
 ) -> Result<String, String> {
     let client = build_client(settings)?;
-    rewrite_chunk_with_client(&client, settings, source_text, format).await
+    rewrite_selection_text_with_client(&client, settings, source_text, format, rewrite_headings)
+        .await
 }
 
-pub async fn rewrite_chunks(
+pub async fn rewrite_batch(
     settings: &AppSettings,
-    source_texts: &[String],
-    format: DocumentFormat,
-) -> Result<Vec<String>, String> {
+    request: &RewriteBatchRequest,
+) -> Result<RewriteBatchResponse, String> {
     let client = build_client(settings)?;
-    rewrite_chunks_with_client(&client, settings, source_texts, format).await
+    rewrite_batch_with_client(&client, settings, request).await
 }
 
 fn validate_settings(settings: &AppSettings) -> Result<(), String> {
@@ -135,13 +123,13 @@ mod tests {
     use crate::models::AppSettings;
 
     #[test]
-    fn validate_settings_rejects_zero_chunks_per_request() {
+    fn validate_settings_rejects_zero_units_per_batch() {
         let mut settings = valid_settings();
-        settings.chunks_per_request = 0;
+        settings.units_per_batch = 0;
 
         let error = validate_settings(&settings).expect_err("expected invalid batch size");
 
-        assert_eq!(error, "单次请求处理块数必须大于等于 1。");
+        assert_eq!(error, "单批处理单元数必须大于等于 1。");
     }
 
     #[test]

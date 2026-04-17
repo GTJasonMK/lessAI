@@ -3,7 +3,8 @@ use std::{collections::HashSet, sync::Arc};
 use chrono::Utc;
 
 use crate::{
-    models::{ChunkPreset, ChunkStatus, ChunkTask, DocumentSession, RunningState},
+    models::{SegmentationPreset, RewriteUnitStatus, DocumentSession, RunningState},
+    rewrite_unit::RewriteUnit,
     state::JobControl,
 };
 
@@ -20,15 +21,16 @@ fn sample_session() -> DocumentSession {
         write_back_block_reason: None,
         plain_text_editor_safe: true,
         plain_text_editor_block_reason: None,
-        chunk_preset: Some(ChunkPreset::Paragraph),
+        segmentation_preset: Some(SegmentationPreset::Paragraph),
         rewrite_headings: Some(false),
-        chunks: vec![ChunkTask {
-            index: 0,
-            source_text: "正文".to_string(),
-            separator_after: String::new(),
-            skip_rewrite: false,
-            presentation: None,
-            status: ChunkStatus::Idle,
+        writeback_slots: Vec::new(),
+        rewrite_units: vec![RewriteUnit {
+            id: "unit-0".to_string(),
+            order: 0,
+            slot_ids: vec!["slot-0".to_string()],
+            display_text: "正文".to_string(),
+            segmentation_preset: SegmentationPreset::Paragraph,
+            status: RewriteUnitStatus::Idle,
             error_message: None,
         }],
         suggestions: Vec::new(),
@@ -43,7 +45,7 @@ fn sample_session() -> DocumentSession {
 fn start_auto_rewrite_session_steps_marks_running_and_saves() {
     let mut session = sample_session();
     let reserved_job = Arc::new(JobControl::default());
-    let target_indices = Some(HashSet::from([0usize]));
+    let target_indices = Some(HashSet::from(["unit-0".to_string()]));
     let now = Utc::now();
     let calls = std::cell::RefCell::new(Vec::new());
 

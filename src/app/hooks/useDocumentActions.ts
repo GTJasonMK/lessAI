@@ -1,16 +1,17 @@
 import { open } from "@tauri-apps/plugin-dialog";
 import { startTransition, useCallback } from "react";
-import { openDocument, saveDocumentChunkEdits, saveDocumentEdits } from "../../lib/api";
+import { openDocument, runDocumentWriteback } from "../../lib/api";
+import { buildEditorSlotEdits, buildEditorTextFromSession } from "../../lib/editorSlots";
 import type { DocumentSession, DocumentSnapshot, RewriteProgress } from "../../lib/types";
-import { buildEditorChunkEdits, buildEditorTextFromChunks } from "../../lib/editorChunks";
 import {
   isDocxPath,
   isPdfPath,
   normalizeNewlines,
-  readableError,
-  selectDefaultChunkIndex
+  readableError
 } from "../../lib/helpers";
 import {
+  applyUpdatedSessionState,
+  runSessionActionWithScroll,
   refreshAllowedSessionOrNotify,
   type ApplySessionState,
   type RefreshSessionState,
@@ -23,21 +24,20 @@ export function useDocumentActions(options: {
   busyAction: string | null;
   stageRef: React.MutableRefObject<"workbench" | "editor">;
   currentSessionRef: React.MutableRefObject<DocumentSession | null>;
-  activeChunkIndexRef: React.MutableRefObject<number>;
+  activeRewriteUnitIdRef: React.MutableRefObject<string | null>;
   captureDocumentScrollPosition: () => number | null;
-  restoreDocumentScrollPosition: (scrollTop: number | null) => void;
   editorDirtyRef: React.MutableRefObject<boolean>;
   editorTextRef: React.MutableRefObject<string>;
   editorBaselineTextRef: React.MutableRefObject<string>;
   editorBaseSnapshotRef: React.MutableRefObject<DocumentSnapshot | null>;
-  editorChunkOverridesRef: React.MutableRefObject<Record<number, string>>;
+  editorSlotOverridesRef: React.MutableRefObject<Record<string, string>>;
   applySessionState: ApplySessionState;
   refreshSessionState: RefreshSessionState;
   setStage: React.Dispatch<React.SetStateAction<"workbench" | "editor">>;
   setReviewView: React.Dispatch<React.SetStateAction<"diff" | "source" | "candidate">>;
   setEditorBaselineText: React.Dispatch<React.SetStateAction<string>>;
   setEditorText: React.Dispatch<React.SetStateAction<string>>;
-  setEditorChunkOverrides: React.Dispatch<React.SetStateAction<Record<number, string>>>;
+  setEditorSlotOverrides: React.Dispatch<React.SetStateAction<Record<string, string>>>;
   setLiveProgress: React.Dispatch<React.SetStateAction<RewriteProgress | null>>;
   setSettingsOpen: React.Dispatch<React.SetStateAction<boolean>>;
   closeSettings: () => void;
@@ -48,21 +48,20 @@ export function useDocumentActions(options: {
     busyAction,
     stageRef,
     currentSessionRef,
-    activeChunkIndexRef,
+    activeRewriteUnitIdRef,
     captureDocumentScrollPosition,
-    restoreDocumentScrollPosition,
     editorDirtyRef,
     editorTextRef,
     editorBaselineTextRef,
     editorBaseSnapshotRef,
-    editorChunkOverridesRef,
+    editorSlotOverridesRef,
     applySessionState,
     refreshSessionState,
     setStage,
     setReviewView,
     setEditorBaselineText,
     setEditorText,
-    setEditorChunkOverrides,
+    setEditorSlotOverrides,
     setLiveProgress,
     setSettingsOpen,
     closeSettings,
@@ -104,17 +103,17 @@ export function useDocumentActions(options: {
       if (!path) return;
 
       const opened = await withBusy("open-document", () => openDocument(path));
-      applySessionState(opened, selectDefaultChunkIndex(opened));
+      applyUpdatedSessionState({ session: opened, applySessionState });
       setReviewView("diff");
       setStage("workbench");
       setEditorBaselineText("");
       setEditorText("");
       editorBaseSnapshotRef.current = null;
-      setEditorChunkOverrides({});
+      setEditorSlotOverrides({});
       closeSettings();
       showNotice(
         "success",
-        `已打开文档：${opened.title}（共 ${opened.chunks.length} 段，可继续上次进度）。`
+        `已打开文档：${opened.title}（共 ${opened.rewriteUnits.length} 段，可继续上次进度）。`
       );
     } catch (error) {
       showNotice("error", `打开失败：${readableError(error)}`);
@@ -126,7 +125,7 @@ export function useDocumentActions(options: {
     editorDirtyRef,
     editorBaseSnapshotRef,
     setEditorBaselineText,
-    setEditorChunkOverrides,
+    setEditorSlotOverrides,
     setEditorText,
     setReviewView,
     setStage,
@@ -146,7 +145,7 @@ export function useDocumentActions(options: {
       session,
       refreshSessionState,
       options: {
-        preserveChunk: true,
+        preserveRewriteUnit: true,
         preserveSuggestion: true
       },
       showNotice,
@@ -180,7 +179,9 @@ export function useDocumentActions(options: {
     const cleanSession =
       latestSession.status === "idle" &&
       latestSession.suggestions.length === 0 &&
-      latestSession.chunks.every((chunk) => chunk.status === "idle" || chunk.skipRewrite);
+      latestSession.rewriteUnits.every(
+        (rewriteUnit) => rewriteUnit.status === "idle" || rewriteUnit.status === "done"
+      );
 
     if (!cleanSession) {
       showNotice(
@@ -193,9 +194,9 @@ export function useDocumentActions(options: {
     startTransition(() => {
       setStage("editor");
       const baseline = isDocxPath(latestSession.documentPath)
-        ? buildEditorTextFromChunks(latestSession.chunks, {})
+        ? buildEditorTextFromSession(latestSession, {})
         : normalizeNewlines(latestSession.sourceText);
-      setEditorChunkOverrides({});
+      setEditorSlotOverrides({});
       setEditorBaselineText(baseline);
       setEditorText(baseline);
       setLiveProgress(null);
@@ -205,21 +206,21 @@ export function useDocumentActions(options: {
     if (isDocxPath(latestSession.documentPath)) {
       showNotice(
         "info",
-        "docx 编辑模式已按可写回片段开放：锁定内容保持只读，可编辑范围与 AI 改写和写回范围一致。"
+        "docx 编辑模式已按可写回槽位开放：锁定内容保持只读，可编辑范围与 AI 改写和写回范围一致。"
       );
     }
   }, [
     busyAction,
     currentSessionRef,
     editorBaseSnapshotRef,
+    refreshSessionState,
     setEditorBaselineText,
+    setEditorSlotOverrides,
     setEditorText,
-    setEditorChunkOverrides,
     setLiveProgress,
     setSettingsOpen,
     setStage,
-    showNotice,
-    refreshSessionState
+    showNotice
   ]);
 
   const handleDiscardEditorChanges = useCallback(() => {
@@ -229,14 +230,14 @@ export function useDocumentActions(options: {
       return;
     }
     startTransition(() => {
-      setEditorChunkOverrides({});
+      setEditorSlotOverrides({});
       setEditorText(editorBaselineTextRef.current);
     });
     showNotice("warning", "已放弃未保存的修改。");
   }, [
     editorBaselineTextRef,
     editorDirtyRef,
-    setEditorChunkOverrides,
+    setEditorSlotOverrides,
     setEditorText,
     showNotice,
     stageRef
@@ -279,41 +280,40 @@ export function useDocumentActions(options: {
       });
 
       try {
-        const updated = await withBusy(actionKey, () => {
-          if (!isDocxPath(session.documentPath)) {
-            return saveDocumentEdits(session.id, content, editorBaseSnapshotRef.current);
-          }
+        const {
+          session: updated,
+          preservedScrollTop: restoredScrollTop
+        } = await runSessionActionWithScroll({
+          captureDocumentScrollPosition,
+          applySessionState,
+          preservedScrollTop,
+          run: () =>
+            withBusy(actionKey, () => {
+              if (!isDocxPath(session.documentPath)) {
+                return runDocumentWriteback(session.id, "write", { kind: "text", content }, editorBaseSnapshotRef.current);
+              }
 
-          const edits = buildEditorChunkEdits(
-            session.chunks,
-            editorChunkOverridesRef.current
-          );
-          return saveDocumentChunkEdits(
-            session.id,
-            edits,
-            editorBaseSnapshotRef.current
-          );
+              const edits = buildEditorSlotEdits(session, editorSlotOverridesRef.current);
+              return runDocumentWriteback(session.id, "write", { kind: "slotEdits", edits }, editorBaseSnapshotRef.current);
+            }),
+          resolveState: () => ({
+            preferredRewriteUnitId: activeRewriteUnitIdRef.current
+          })
         });
-
-        applySessionState(
-          updated,
-          Math.min(activeChunkIndexRef.current, Math.max(0, updated.chunks.length - 1))
-        );
         editorBaseSnapshotRef.current = updated.sourceSnapshot ?? null;
         logScrollRestore("editor-save-restoring", {
           sessionId: session.id,
           updatedSessionId: updated.id,
-          preservedScrollTop
+          preservedScrollTop: restoredScrollTop
         });
-        restoreDocumentScrollPosition(preservedScrollTop);
         setReviewView("diff");
         setLiveProgress(null);
 
         startTransition(() => {
           const baseline = isDocxPath(updated.documentPath)
-            ? buildEditorTextFromChunks(updated.chunks, {})
+            ? buildEditorTextFromSession(updated, {})
             : normalizeNewlines(updated.sourceText);
-          setEditorChunkOverrides({});
+          setEditorSlotOverrides({});
           setEditorBaselineText(baseline);
           setEditorText(baseline);
         });
@@ -331,23 +331,22 @@ export function useDocumentActions(options: {
       }
     },
     [
-      activeChunkIndexRef,
+      activeRewriteUnitIdRef,
       applySessionState,
       captureDocumentScrollPosition,
       currentSessionRef,
       editorDirtyRef,
       editorBaseSnapshotRef,
-      editorChunkOverridesRef,
+      editorSlotOverridesRef,
       editorTextRef,
       setEditorBaselineText,
-      setEditorChunkOverrides,
+      setEditorSlotOverrides,
       setEditorText,
       setLiveProgress,
       setReviewView,
       setStage,
       showNotice,
       stageRef,
-      restoreDocumentScrollPosition,
       withBusy
     ]
   );

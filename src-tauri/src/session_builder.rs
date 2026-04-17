@@ -3,44 +3,10 @@ use std::path::Path;
 use chrono::{DateTime, Utc};
 
 use crate::{
-    documents::{document_format, LoadedDocumentSource, RegionSegmentationStrategy},
-    models::{
-        ChunkPreset, ChunkStatus, ChunkTask, DocumentSession, DocumentSnapshot, RunningState,
-    },
-    rewrite,
+    documents::LoadedDocumentSource,
+    models::{SegmentationPreset, DocumentSession, DocumentSnapshot, RunningState},
+    rewrite_unit::build_rewrite_units,
 };
-
-pub(crate) struct ChunkBuildInput<'a> {
-    pub path: &'a Path,
-    pub regions: Vec<crate::adapters::TextRegion>,
-    pub region_segmentation_strategy: RegionSegmentationStrategy,
-    pub chunk_preset: ChunkPreset,
-}
-
-pub(crate) fn build_chunks(input: ChunkBuildInput<'_>) -> Vec<ChunkTask> {
-    rewrite::segment_regions_with_strategy(
-        input.regions,
-        input.chunk_preset,
-        document_format(input.path),
-        input.region_segmentation_strategy,
-    )
-    .into_iter()
-    .enumerate()
-    .map(|(index, chunk)| ChunkTask {
-        index,
-        source_text: chunk.text,
-        separator_after: chunk.separator_after,
-        skip_rewrite: chunk.skip_rewrite,
-        presentation: chunk.presentation,
-        status: if chunk.skip_rewrite {
-            ChunkStatus::Done
-        } else {
-            ChunkStatus::Idle
-        },
-        error_message: None,
-    })
-    .collect()
-}
 
 pub(crate) struct CleanSessionBuildInput<'a> {
     pub session_id: String,
@@ -48,7 +14,7 @@ pub(crate) struct CleanSessionBuildInput<'a> {
     pub document_path: String,
     pub loaded: LoadedDocumentSource,
     pub source_snapshot: Option<DocumentSnapshot>,
-    pub chunk_preset: ChunkPreset,
+    pub segmentation_preset: SegmentationPreset,
     pub rewrite_headings: bool,
     pub created_at: DateTime<Utc>,
 }
@@ -56,20 +22,14 @@ pub(crate) struct CleanSessionBuildInput<'a> {
 pub(crate) fn build_clean_session(input: CleanSessionBuildInput<'_>) -> DocumentSession {
     let LoadedDocumentSource {
         source_text,
-        regions,
-        region_segmentation_strategy,
+        writeback_slots,
         write_back_supported,
         write_back_block_reason,
         plain_text_editor_safe,
         plain_text_editor_block_reason,
     } = input.loaded;
-    let normalized_text = rewrite::normalize_text(&source_text);
-    let chunks = build_chunks(ChunkBuildInput {
-        path: input.canonical_path,
-        regions,
-        region_segmentation_strategy,
-        chunk_preset: input.chunk_preset,
-    });
+    let normalized_text = crate::rewrite::normalize_text(&source_text);
+    let rewrite_units = build_rewrite_units(&writeback_slots, input.segmentation_preset);
     let now = Utc::now();
 
     DocumentSession {
@@ -83,9 +43,10 @@ pub(crate) fn build_clean_session(input: CleanSessionBuildInput<'_>) -> Document
         write_back_block_reason,
         plain_text_editor_safe,
         plain_text_editor_block_reason,
-        chunk_preset: Some(input.chunk_preset),
+        segmentation_preset: Some(input.segmentation_preset),
         rewrite_headings: Some(input.rewrite_headings),
-        chunks,
+        writeback_slots,
+        rewrite_units,
         suggestions: Vec::new(),
         next_suggestion_sequence: 1,
         status: RunningState::Idle,
@@ -106,65 +67,21 @@ mod tests {
     use chrono::Utc;
 
     use crate::{
-        adapters::TextRegion,
-        documents::{LoadedDocumentSource, RegionSegmentationStrategy},
-        models::{ChunkPreset, ChunkStatus, DocumentSnapshot, RunningState},
+        documents::LoadedDocumentSource,
+        models::{SegmentationPreset, DocumentSnapshot, RunningState},
+        rewrite_unit::WritebackSlot,
     };
 
     #[test]
-    fn build_chunks_maps_locked_regions_to_done_status() {
-        let chunks = super::build_chunks(super::ChunkBuildInput {
-            path: std::path::Path::new("/tmp/example.docx"),
-            regions: vec![
-                TextRegion {
-                    body: "前文".to_string(),
-                    skip_rewrite: false,
-                    presentation: None,
-                },
-                TextRegion {
-                    body: "[公式]".to_string(),
-                    skip_rewrite: true,
-                    presentation: None,
-                },
-                TextRegion {
-                    body: "后文".to_string(),
-                    skip_rewrite: false,
-                    presentation: None,
-                },
-            ],
-            region_segmentation_strategy: RegionSegmentationStrategy::PreserveBoundaries,
-            chunk_preset: ChunkPreset::Paragraph,
-        });
-
-        assert_eq!(chunks.len(), 3);
-        assert_eq!(chunks[0].status, ChunkStatus::Idle);
-        assert_eq!(chunks[1].status, ChunkStatus::Done);
-        assert_eq!(chunks[2].status, ChunkStatus::Idle);
-    }
-
-    #[test]
-    fn build_clean_session_reuses_loaded_capabilities_and_chunk_settings() {
+    fn build_clean_session_reuses_loaded_capabilities_and_segmentation_settings() {
         let created_at = Utc::now();
         let loaded = LoadedDocumentSource {
             source_text: "前文[公式]后文".to_string(),
-            regions: vec![
-                TextRegion {
-                    body: "前文".to_string(),
-                    skip_rewrite: false,
-                    presentation: None,
-                },
-                TextRegion {
-                    body: "[公式]".to_string(),
-                    skip_rewrite: true,
-                    presentation: None,
-                },
-                TextRegion {
-                    body: "后文".to_string(),
-                    skip_rewrite: false,
-                    presentation: None,
-                },
+            writeback_slots: vec![
+                WritebackSlot::editable("slot-0", 0, "前文"),
+                WritebackSlot::locked("slot-1", 1, "[公式]"),
+                WritebackSlot::editable("slot-2", 2, "后文"),
             ],
-            region_segmentation_strategy: RegionSegmentationStrategy::PreserveBoundaries,
             write_back_supported: false,
             write_back_block_reason: Some("blocked".to_string()),
             plain_text_editor_safe: false,
@@ -179,7 +96,7 @@ mod tests {
             source_snapshot: Some(DocumentSnapshot {
                 sha256: "new".to_string(),
             }),
-            chunk_preset: ChunkPreset::Paragraph,
+            segmentation_preset: SegmentationPreset::Paragraph,
             rewrite_headings: true,
             created_at,
         });
@@ -193,8 +110,14 @@ mod tests {
                 .map(|item| item.sha256.as_str()),
             Some("new")
         );
-        assert_eq!(session.chunk_preset, Some(ChunkPreset::Paragraph));
+        assert_eq!(session.segmentation_preset, Some(SegmentationPreset::Paragraph));
         assert_eq!(session.rewrite_headings, Some(true));
+        assert_eq!(session.writeback_slots.len(), 3);
+        assert_eq!(session.rewrite_units.len(), 1);
+        assert_eq!(
+            session.rewrite_units[0].slot_ids,
+            vec!["slot-0", "slot-1", "slot-2"]
+        );
         assert!(!session.write_back_supported);
         assert_eq!(session.write_back_block_reason.as_deref(), Some("blocked"));
         assert!(!session.plain_text_editor_safe);
@@ -206,5 +129,35 @@ mod tests {
         assert_eq!(session.next_suggestion_sequence, 1);
         assert!(session.suggestions.is_empty());
         assert_eq!(session.status, RunningState::Idle);
+    }
+
+    #[test]
+    fn build_clean_session_stores_writeback_slots_and_rewrite_units() {
+        let loaded = LoadedDocumentSource {
+            source_text: "甲乙".to_string(),
+            writeback_slots: vec![
+                WritebackSlot::editable("slot-1", 0, "甲"),
+                WritebackSlot::editable("slot-2", 1, "乙"),
+            ],
+            write_back_supported: true,
+            write_back_block_reason: None,
+            plain_text_editor_safe: true,
+            plain_text_editor_block_reason: None,
+        };
+
+        let session = super::build_clean_session(super::CleanSessionBuildInput {
+            session_id: "session-1".to_string(),
+            canonical_path: std::path::Path::new("/tmp/example.txt"),
+            document_path: "/tmp/example.txt".to_string(),
+            loaded,
+            source_snapshot: None,
+            segmentation_preset: SegmentationPreset::Sentence,
+            rewrite_headings: false,
+            created_at: Utc::now(),
+        });
+
+        assert_eq!(session.writeback_slots.len(), 2);
+        assert_eq!(session.rewrite_units.len(), 1);
+        assert_eq!(session.rewrite_units[0].slot_ids, vec!["slot-1", "slot-2"]);
     }
 }

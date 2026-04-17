@@ -1,103 +1,95 @@
 use std::collections::{HashSet, VecDeque};
 
-use crate::models::{ChunkStatus, ChunkTask};
+use crate::models::RewriteUnitStatus;
+use crate::rewrite_unit::RewriteUnit;
 
-pub fn resolve_target_indices(
-    chunks: &[ChunkTask],
-    target_chunk_indices: Option<Vec<usize>>,
-) -> Result<Option<HashSet<usize>>, String> {
-    let Some(indices) = target_chunk_indices else {
+pub fn resolve_target_rewrite_unit_ids(
+    units: &[RewriteUnit],
+    target_rewrite_unit_ids: Option<Vec<String>>,
+) -> Result<Option<HashSet<String>>, String> {
+    let Some(unit_ids) = target_rewrite_unit_ids else {
         return Ok(None);
     };
 
     let mut selected = HashSet::new();
-    for index in indices {
-        let Some(chunk) = chunks.get(index) else {
-            return Err(format!("所选片段索引越界：{index}"));
+    for unit_id in unit_ids {
+        let Some(unit) = units.iter().find(|unit| unit.id == unit_id) else {
+            return Err(format!("所选改写单元不存在：{unit_id}"));
         };
-        if chunk.skip_rewrite {
+        if unit.status == RewriteUnitStatus::Done {
             continue;
         }
-        selected.insert(index);
+        selected.insert(unit.id.clone());
     }
 
     if selected.is_empty() {
-        return Err("所选片段均不可改写。".to_string());
+        return Err("所选改写单元均不可改写。".to_string());
     }
 
     Ok(Some(selected))
 }
 
 pub fn find_next_manual_batch(
-    chunks: &[ChunkTask],
-    target_indices: Option<&HashSet<usize>>,
+    units: &[RewriteUnit],
+    target_unit_ids: Option<&HashSet<String>>,
     batch_size: usize,
-) -> Vec<usize> {
-    chunks
+) -> Vec<String> {
+    units
         .iter()
-        .filter(|chunk| {
-            !chunk.skip_rewrite
-                && is_target_chunk(target_indices, chunk.index)
-                && matches!(chunk.status, ChunkStatus::Idle | ChunkStatus::Failed)
+        .filter(|unit| {
+            is_target_unit(target_unit_ids, &unit.id)
+                && matches!(unit.status, RewriteUnitStatus::Idle | RewriteUnitStatus::Failed)
         })
         .take(batch_size.max(1))
-        .map(|chunk| chunk.index)
+        .map(|unit| unit.id.clone())
         .collect()
 }
 
 pub fn build_auto_pending_queue(
-    chunks: &[ChunkTask],
-    target_indices: Option<&HashSet<usize>>,
-) -> VecDeque<usize> {
-    chunks
+    units: &[RewriteUnit],
+    target_unit_ids: Option<&HashSet<String>>,
+) -> VecDeque<String> {
+    units
         .iter()
-        .filter(|chunk| {
-            !chunk.skip_rewrite
-                && is_target_chunk(target_indices, chunk.index)
-                && chunk.status != ChunkStatus::Done
-        })
-        .map(|chunk| chunk.index)
+        .filter(|unit| is_target_unit(target_unit_ids, &unit.id) && unit.status != RewriteUnitStatus::Done)
+        .map(|unit| unit.id.clone())
         .collect()
 }
 
-pub fn take_next_auto_batch(pending: &mut VecDeque<usize>, batch_size: usize) -> Vec<usize> {
+pub fn take_next_auto_batch(pending: &mut VecDeque<String>, batch_size: usize) -> Vec<String> {
     let mut batch = Vec::new();
     while batch.len() < batch_size.max(1) {
-        let Some(index) = pending.pop_front() else {
+        let Some(unit_id) = pending.pop_front() else {
             break;
         };
-        batch.push(index);
+        batch.push(unit_id);
     }
     batch
 }
 
-pub fn count_target_total_chunks(
-    chunks: &[ChunkTask],
-    target_indices: Option<&HashSet<usize>>,
+pub fn count_target_total_units(
+    units: &[RewriteUnit],
+    target_unit_ids: Option<&HashSet<String>>,
 ) -> usize {
-    chunks
+    units
         .iter()
-        .filter(|chunk| !chunk.skip_rewrite && is_target_chunk(target_indices, chunk.index))
+        .filter(|unit| is_target_unit(target_unit_ids, &unit.id))
         .count()
 }
 
-pub fn count_target_completed_chunks(
-    chunks: &[ChunkTask],
-    target_indices: Option<&HashSet<usize>>,
+pub fn count_target_completed_units(
+    units: &[RewriteUnit],
+    target_unit_ids: Option<&HashSet<String>>,
 ) -> usize {
-    chunks
+    units
         .iter()
-        .filter(|chunk| {
-            !chunk.skip_rewrite
-                && is_target_chunk(target_indices, chunk.index)
-                && chunk.status == ChunkStatus::Done
-        })
+        .filter(|unit| is_target_unit(target_unit_ids, &unit.id) && unit.status == RewriteUnitStatus::Done)
         .count()
 }
 
-fn is_target_chunk(target_indices: Option<&HashSet<usize>>, index: usize) -> bool {
-    match target_indices {
-        Some(indices) => indices.contains(&index),
+fn is_target_unit(target_unit_ids: Option<&HashSet<String>>, unit_id: &str) -> bool {
+    match target_unit_ids {
+        Some(unit_ids) => unit_ids.contains(unit_id),
         None => true,
     }
 }
@@ -107,112 +99,114 @@ mod tests {
     use std::collections::VecDeque;
 
     use super::{
-        build_auto_pending_queue, count_target_completed_chunks, count_target_total_chunks,
-        find_next_manual_batch, resolve_target_indices, take_next_auto_batch,
+        build_auto_pending_queue, count_target_completed_units, count_target_total_units,
+        find_next_manual_batch, resolve_target_rewrite_unit_ids, take_next_auto_batch,
     };
-    use crate::models::{ChunkStatus, ChunkTask};
+    use crate::{
+        models::{SegmentationPreset, RewriteUnitStatus},
+        rewrite_unit::RewriteUnit,
+    };
 
-    fn chunk(index: usize, status: ChunkStatus, skip_rewrite: bool) -> ChunkTask {
-        ChunkTask {
-            index,
-            source_text: format!("chunk-{index}"),
-            separator_after: "\n".to_string(),
-            skip_rewrite,
-            presentation: None,
+    fn unit(id: &str, status: RewriteUnitStatus) -> RewriteUnit {
+        RewriteUnit {
+            id: id.to_string(),
+            order: 0,
+            slot_ids: vec![format!("slot-{id}")],
+            display_text: id.to_string(),
+            segmentation_preset: SegmentationPreset::Paragraph,
             status,
             error_message: None,
         }
     }
 
     #[test]
-    fn resolve_target_indices_keeps_only_selected_rewriteable_chunks() {
-        let chunks = vec![
-            chunk(0, ChunkStatus::Done, false),
-            chunk(1, ChunkStatus::Idle, true),
-            chunk(2, ChunkStatus::Failed, false),
-            chunk(3, ChunkStatus::Idle, false),
+    fn resolve_target_rewrite_unit_ids_keeps_only_selected_rewriteable_units() {
+        let units = vec![
+            unit("unit-0", RewriteUnitStatus::Done),
+            unit("unit-1", RewriteUnitStatus::Idle),
+            unit("unit-2", RewriteUnitStatus::Failed),
         ];
 
-        let selected = resolve_target_indices(&chunks, Some(vec![1, 2, 3])).unwrap();
+        let selected = resolve_target_rewrite_unit_ids(
+            &units,
+            Some(vec!["unit-0".to_string(), "unit-2".to_string()]),
+        )
+        .unwrap();
 
         let mut actual = selected.unwrap().into_iter().collect::<Vec<_>>();
-        actual.sort_unstable();
-        assert_eq!(actual, vec![2, 3]);
+        actual.sort();
+        assert_eq!(actual, vec!["unit-2".to_string()]);
     }
 
     #[test]
-    fn resolve_target_indices_rejects_out_of_range_indices() {
-        let chunks = vec![chunk(0, ChunkStatus::Idle, false)];
+    fn resolve_target_rewrite_unit_ids_rejects_missing_unit() {
+        let error = resolve_target_rewrite_unit_ids(&[unit("unit-0", RewriteUnitStatus::Idle)], Some(vec![
+            "unit-x".to_string(),
+        ]))
+        .expect_err("missing unit should fail");
 
-        let error = resolve_target_indices(&chunks, Some(vec![2])).unwrap_err();
-
-        assert!(error.contains("越界"));
+        assert!(error.contains("不存在"));
     }
 
     #[test]
-    fn find_next_manual_batch_returns_first_rewriteable_chunk_when_batch_size_is_one() {
-        let chunks = vec![
-            chunk(0, ChunkStatus::Idle, false),
-            chunk(1, ChunkStatus::Failed, false),
-            chunk(2, ChunkStatus::Idle, false),
+    fn find_next_manual_batch_returns_target_units_in_order() {
+        let units = vec![
+            unit("unit-0", RewriteUnitStatus::Idle),
+            unit("unit-1", RewriteUnitStatus::Failed),
+            unit("unit-2", RewriteUnitStatus::Done),
         ];
-        let selected = resolve_target_indices(&chunks, Some(vec![2])).unwrap();
+        let selected =
+            resolve_target_rewrite_unit_ids(&units, Some(vec!["unit-1".to_string()])).unwrap();
 
-        let next = find_next_manual_batch(&chunks, selected.as_ref(), 1);
-
-        assert_eq!(next, vec![2]);
+        assert_eq!(find_next_manual_batch(&units, selected.as_ref(), 2), vec!["unit-1"]);
     }
 
     #[test]
-    fn build_auto_pending_queue_uses_only_selected_chunks() {
-        let chunks = vec![
-            chunk(0, ChunkStatus::Idle, false),
-            chunk(1, ChunkStatus::Done, false),
-            chunk(2, ChunkStatus::Failed, false),
-            chunk(3, ChunkStatus::Idle, false),
+    fn take_next_auto_batch_pops_pending_unit_ids_in_order() {
+        let mut pending = VecDeque::from(vec!["unit-2".to_string(), "unit-4".to_string()]);
+
+        assert_eq!(
+            take_next_auto_batch(&mut pending, 1),
+            vec!["unit-2".to_string()]
+        );
+        assert_eq!(pending.into_iter().collect::<Vec<_>>(), vec!["unit-4"]);
+    }
+
+    #[test]
+    fn target_counts_are_scoped_to_selected_units() {
+        let units = vec![
+            unit("unit-0", RewriteUnitStatus::Done),
+            unit("unit-1", RewriteUnitStatus::Idle),
+            unit("unit-2", RewriteUnitStatus::Done),
         ];
-        let selected = resolve_target_indices(&chunks, Some(vec![1, 2])).unwrap();
+        let selected = resolve_target_rewrite_unit_ids(
+            &units,
+            Some(vec!["unit-1".to_string(), "unit-2".to_string()]),
+        )
+        .unwrap();
 
-        let pending = build_auto_pending_queue(&chunks, selected.as_ref());
-
-        assert_eq!(pending.into_iter().collect::<Vec<_>>(), vec![2]);
+        assert_eq!(count_target_total_units(&units, selected.as_ref()), 1);
+        assert_eq!(count_target_completed_units(&units, selected.as_ref()), 0);
     }
 
     #[test]
-    fn find_next_manual_batch_respects_target_subset_and_batch_size() {
-        let chunks = vec![
-            chunk(0, ChunkStatus::Idle, false),
-            chunk(1, ChunkStatus::Failed, false),
-            chunk(2, ChunkStatus::Done, false),
-            chunk(3, ChunkStatus::Idle, true),
-            chunk(4, ChunkStatus::Idle, false),
+    fn build_auto_pending_queue_uses_only_selected_units() {
+        let units = vec![
+            unit("unit-0", RewriteUnitStatus::Idle),
+            unit("unit-1", RewriteUnitStatus::Done),
+            unit("unit-2", RewriteUnitStatus::Failed),
         ];
-        let selected = resolve_target_indices(&chunks, Some(vec![0, 1, 4])).unwrap();
+        let selected = resolve_target_rewrite_unit_ids(
+            &units,
+            Some(vec!["unit-1".to_string(), "unit-2".to_string()]),
+        )
+        .unwrap();
 
-        let batch = find_next_manual_batch(&chunks, selected.as_ref(), 2);
-
-        assert_eq!(batch, vec![0, 1]);
-    }
-
-    #[test]
-    fn take_next_auto_batch_pops_pending_indices_in_order() {
-        let mut pending = VecDeque::from(vec![2, 4, 6]);
-
-        assert_eq!(take_next_auto_batch(&mut pending, 2), vec![2, 4]);
-        assert_eq!(pending.into_iter().collect::<Vec<_>>(), vec![6]);
-    }
-
-    #[test]
-    fn target_counts_are_scoped_to_selected_chunks() {
-        let chunks = vec![
-            chunk(0, ChunkStatus::Done, false),
-            chunk(1, ChunkStatus::Idle, false),
-            chunk(2, ChunkStatus::Done, false),
-            chunk(3, ChunkStatus::Idle, false),
-        ];
-        let selected = resolve_target_indices(&chunks, Some(vec![1, 2])).unwrap();
-
-        assert_eq!(count_target_total_chunks(&chunks, selected.as_ref()), 2);
-        assert_eq!(count_target_completed_chunks(&chunks, selected.as_ref()), 1);
+        assert_eq!(
+            build_auto_pending_queue(&units, selected.as_ref())
+                .into_iter()
+                .collect::<Vec<_>>(),
+            vec!["unit-2".to_string()]
+        );
     }
 }

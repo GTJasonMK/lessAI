@@ -1,6 +1,6 @@
 use quick_xml::events::{BytesEnd, BytesStart, Event};
 
-use crate::models::ChunkPresentation;
+use crate::models::TextPresentation;
 
 #[derive(Debug, Clone)]
 pub(crate) enum WritebackBlockTemplate {
@@ -38,7 +38,7 @@ impl WritebackRegionTemplate {
         }
     }
 
-    pub fn presentation(&self) -> Option<&ChunkPresentation> {
+    pub fn presentation(&self) -> Option<&TextPresentation> {
         match self {
             Self::Editable(region) => region.presentation.as_ref(),
             Self::Locked(region) => region.presentation.as_ref(),
@@ -50,7 +50,7 @@ impl WritebackRegionTemplate {
 pub(crate) struct EditableRegionTemplate {
     pub text: String,
     pub allow_rewrite: bool,
-    pub presentation: Option<ChunkPresentation>,
+    pub presentation: Option<TextPresentation>,
     pub render: EditableRegionRender,
 }
 
@@ -68,7 +68,7 @@ pub(crate) enum EditableRegionRender {
 #[derive(Debug, Clone)]
 pub(crate) struct LockedRegionTemplate {
     pub text: String,
-    pub presentation: Option<ChunkPresentation>,
+    pub presentation: Option<TextPresentation>,
     pub render: LockedRegionRender,
     pub display_mode: LockedDisplayMode,
 }
