@@ -57,7 +57,6 @@ export function useRewriteActions(options: {
   requestConfirm: (options: ConfirmModalOptions) => Promise<boolean>;
   applySessionState: ApplySessionState;
   refreshSessionState: RefreshSessionState;
-  setReviewView: React.Dispatch<React.SetStateAction<"diff" | "source" | "candidate">>;
   setLiveProgress: React.Dispatch<React.SetStateAction<RewriteProgress | null>>;
   showNotice: ShowNotice;
   withBusy: WithBusy;
@@ -73,7 +72,6 @@ export function useRewriteActions(options: {
     requestConfirm,
     applySessionState,
     refreshSessionState,
-    setReviewView,
     setLiveProgress,
     showNotice,
     withBusy
@@ -229,9 +227,6 @@ export function useRewriteActions(options: {
           };
         },
         recover: async () => {
-          if (mode === "manual") {
-            setReviewView("diff");
-          }
           await refreshSessionStateSilently({
             sessionId: session.id,
             refreshSessionState,
@@ -252,14 +247,13 @@ export function useRewriteActions(options: {
           .filter((item) => !existingSuggestionIds.has(item.id))
           .sort((left, right) => left.sequence - right.sequence);
         const preferredSuggestion = newSuggestions[0] ?? getLatestSuggestion(result.session) ?? null;
-        setReviewView("diff");
         showNotice(
           "success",
           newSuggestions.length > 1
-            ? `已生成 ${newSuggestions.length} 条修改对，请在右侧审阅。`
+            ? `已生成 ${newSuggestions.length} 条建议，请在右侧处理。`
             : preferredSuggestion
-              ? `已生成修改对 #${preferredSuggestion.sequence}，请在右侧审阅。`
-              : "已生成下一段，请在右侧审阅。"
+              ? `已生成建议 #${preferredSuggestion.sequence}，请在右侧处理。`
+              : "已生成下一段，请在右侧处理。"
         );
         return;
       }
@@ -276,7 +270,6 @@ export function useRewriteActions(options: {
       editorDirtyRef,
       refreshSessionState,
       selectedRewriteUnitIdsRef,
-      setReviewView,
       showNotice,
       stageRef,
       withBusy
@@ -422,9 +415,6 @@ export function useRewriteActions(options: {
           options: {
             preferredRewriteUnitId: latestRewriteUnit.id,
             preserveSuggestion: true
-          },
-          afterRefresh: async () => {
-            setReviewView("diff");
           }
         });
       }
@@ -434,11 +424,10 @@ export function useRewriteActions(options: {
     }
 
     const suggestion = getLatestSuggestion(result.session);
-    setReviewView("diff");
     showNotice(
       "info",
       suggestion
-        ? `已重新生成修改对 #${suggestion.sequence}（第 ${latestRewriteUnit.order + 1} 段）。`
+        ? `已重新生成建议 #${suggestion.sequence}（第 ${latestRewriteUnit.order + 1} 段）。`
         : `第 ${latestRewriteUnit.order + 1} 段已重新生成。`
     );
   }, [
@@ -447,7 +436,6 @@ export function useRewriteActions(options: {
     captureDocumentScrollPosition,
     currentSessionRef,
     refreshSessionState,
-    setReviewView,
     showNotice,
     withBusy
   ]);

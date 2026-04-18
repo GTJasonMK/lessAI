@@ -18,7 +18,7 @@ function computeSegmentationPresetLockState(
     return {
       locked: true,
       reason: editorDirty
-        ? "当前有未保存的手动编辑。为保证审阅单元稳定，请先保存或放弃修改后再调整切段策略。"
+        ? "当前有未保存的手动编辑。为保证改写单元稳定，请先保存或放弃修改后再调整切段策略。"
         : "编辑模式下切段策略已锁定。请先返回工作台后再调整。"
     };
   }
@@ -38,7 +38,7 @@ function computeSegmentationPresetLockState(
     return {
       locked: true,
       reason:
-        "当前项目已有修改对记录，切段策略已锁定。若需调整，请先“重置记录”（会清空修改对/进度）。"
+        "当前项目已有建议记录，切段策略已锁定。若需调整，请先“重置记录”（会清空建议/进度）。"
     };
   }
 

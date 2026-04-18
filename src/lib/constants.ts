@@ -5,7 +5,6 @@ import type {
 } from "./types";
 
 export type NoticeTone = "info" | "success" | "warning" | "error";
-export type ReviewView = "diff" | "source" | "candidate";
 
 export interface NoticeState {
   tone: NoticeTone;
@@ -83,13 +82,4 @@ export const MODE_OPTIONS: ReadonlyArray<{
 }> = [
   { value: "manual", label: "人工把关", hint: "逐段生成，等待你审核" },
   { value: "auto", label: "自动批处理", hint: "后台连续生成，可按并发数提速" }
-];
-
-export const REVIEW_VIEW_OPTIONS: ReadonlyArray<{
-  key: ReviewView;
-  label: string;
-}> = [
-  { key: "diff", label: "Diff" },
-  { key: "source", label: "原文" },
-  { key: "candidate", label: "候选稿" }
 ];

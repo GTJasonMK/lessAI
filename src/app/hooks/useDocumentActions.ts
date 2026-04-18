@@ -34,7 +34,6 @@ export function useDocumentActions(options: {
   applySessionState: ApplySessionState;
   refreshSessionState: RefreshSessionState;
   setStage: React.Dispatch<React.SetStateAction<"workbench" | "editor">>;
-  setReviewView: React.Dispatch<React.SetStateAction<"diff" | "source" | "candidate">>;
   setEditorBaselineText: React.Dispatch<React.SetStateAction<string>>;
   setEditorText: React.Dispatch<React.SetStateAction<string>>;
   setEditorSlotOverrides: React.Dispatch<React.SetStateAction<Record<string, string>>>;
@@ -58,7 +57,6 @@ export function useDocumentActions(options: {
     applySessionState,
     refreshSessionState,
     setStage,
-    setReviewView,
     setEditorBaselineText,
     setEditorText,
     setEditorSlotOverrides,
@@ -104,7 +102,6 @@ export function useDocumentActions(options: {
 
       const opened = await withBusy("open-document", () => openDocument(path));
       applyUpdatedSessionState({ session: opened, applySessionState });
-      setReviewView("diff");
       setStage("workbench");
       setEditorBaselineText("");
       setEditorText("");
@@ -127,7 +124,6 @@ export function useDocumentActions(options: {
     setEditorBaselineText,
     setEditorSlotOverrides,
     setEditorText,
-    setReviewView,
     setStage,
     showNotice,
     stageRef,
@@ -306,7 +302,6 @@ export function useDocumentActions(options: {
           updatedSessionId: updated.id,
           preservedScrollTop: restoredScrollTop
         });
-        setReviewView("diff");
         setLiveProgress(null);
 
         startTransition(() => {
@@ -343,7 +338,6 @@ export function useDocumentActions(options: {
       setEditorSlotOverrides,
       setEditorText,
       setLiveProgress,
-      setReviewView,
       setStage,
       showNotice,
       stageRef,

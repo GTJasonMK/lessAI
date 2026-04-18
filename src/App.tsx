@@ -8,7 +8,6 @@ import {
 } from "react";
 import { loadSession, loadSettings } from "./lib/api";
 import { DEFAULT_SETTINGS } from "./lib/constants";
-import type { ReviewView } from "./lib/constants";
 import { applyEditorSlotOverride, buildEditorTextFromSession, type EditorSlotOverrides } from "./lib/editorSlots";
 import {
   canRewriteSession,
@@ -63,8 +62,8 @@ export default function App() {
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [activeRewriteUnitId, setActiveRewriteUnitId] = useState<string | null>(null);
   const [activeSuggestionId, setActiveSuggestionId] = useState<string | null>(null);
+  const [activeReviewNavigationRequestId, setActiveReviewNavigationRequestId] = useState(0);
   const [selectedRewriteUnitIds, setSelectedRewriteUnitIds] = useState<string[]>([]);
-  const [reviewView, setReviewView] = useState<ReviewView>("diff");
   const [providerStatus, setProviderStatus] =
     useState<ProviderCheckResult | null>(null);
   const [liveProgress, setLiveProgress] = useState<RewriteProgress | null>(null);
@@ -289,6 +288,10 @@ export default function App() {
     setSettingsOpen(false);
   }, []);
 
+  const requestRevealActiveRewriteUnit = useCallback(() => {
+    setActiveReviewNavigationRequestId((current) => current + 1);
+  }, []);
+
   useEffect(() => {
     if (
       currentSession &&
@@ -299,6 +302,16 @@ export default function App() {
       setLiveProgress(null);
     }
   }, [currentSession, liveProgress]);
+
+  useEffect(() => {
+    if (!currentSession) return;
+    logScrollRestore("app-active-review-target", {
+      sessionId: currentSession.id,
+      activeRewriteUnitId,
+      activeSuggestionId,
+      activeReviewNavigationRequestId
+    });
+  }, [activeRewriteUnitId, activeReviewNavigationRequestId, activeSuggestionId, currentSession]);
 
   useTauriEvents({
     onProgress: async (payload: RewriteProgress) => {
@@ -333,7 +346,6 @@ export default function App() {
           preferredRewriteUnitId: payload.rewriteUnitId,
           preferredSuggestionId: payload.suggestionId
         });
-        setReviewView("diff");
       }
     },
     onFinished: async (payload) => {
@@ -363,13 +375,10 @@ export default function App() {
           sessionId: payload.sessionId,
           error: payload.error
         });
-        const refreshed = await refreshSessionState(payload.sessionId, {
+        await refreshSessionState(payload.sessionId, {
           preserveRewriteUnit: true,
           preserveSuggestion: true
         });
-        if (refreshed.status === "failed") {
-          setReviewView("diff");
-        }
       }
     }
   });
@@ -466,7 +475,6 @@ export default function App() {
     applySessionState,
     refreshSessionState,
     setStage,
-    setReviewView,
     setEditorBaselineText,
     setEditorText,
     setEditorSlotOverrides,
@@ -500,7 +508,6 @@ export default function App() {
       setCurrentSession,
       setActiveRewriteUnitId,
       setActiveSuggestionId,
-      setReviewView,
       setLiveProgress,
       closeSettings,
       showNotice,
@@ -524,7 +531,6 @@ export default function App() {
     requestConfirm,
     applySessionState,
     refreshSessionState,
-    setReviewView,
     setLiveProgress,
     showNotice,
     withBusy
@@ -540,10 +546,10 @@ export default function App() {
     currentSessionRef,
     activeRewriteUnitIdRef,
     captureDocumentScrollPosition,
+    requestRevealActiveRewriteUnit,
     setActiveRewriteUnitId,
     setActiveSuggestionId,
     setSelectedRewriteUnitIds,
-    setReviewView,
     applySessionState,
     refreshSessionState,
     showNotice,
@@ -586,8 +592,8 @@ export default function App() {
               activeRewriteUnit={activeRewriteUnit}
               activeRewriteUnitId={activeRewriteUnitId}
               activeSuggestionId={activeSuggestionId}
+              activeReviewNavigationRequestId={activeReviewNavigationRequestId}
               selectedRewriteUnitIds={selectedRewriteUnitIds}
-              reviewView={reviewView}
               busyAction={busyAction}
               editorMode={stage === "editor"}
               editorText={editorText}
@@ -599,7 +605,6 @@ export default function App() {
               onOpenDocument={handleOpenDocument}
               onSelectRewriteUnit={handleSelectRewriteUnit}
               onSelectSuggestion={handleSelectSuggestion}
-              onSetReviewView={setReviewView}
               onStartRewrite={(mode) => void handleStartRewrite(mode)}
               onPause={() => void handlePause()}
               onResume={() => void handleResume()}

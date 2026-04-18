@@ -1,7 +1,6 @@
 import { memo } from "react";
 import type { DocumentSession, RewriteSuggestion, RewriteUnit } from "../../lib/types";
 import type { SessionStats } from "../../lib/helpers";
-import type { ReviewView } from "../../lib/constants";
 import { Panel } from "../../components/Panel";
 import { EditorReviewPane } from "./review/EditorReviewPane";
 import { ReviewActionBar } from "./review/ReviewActionBar";
@@ -21,13 +20,10 @@ interface ReviewPanelProps {
   editorMode: boolean;
   editorText: string;
   editorDirty: boolean;
-  reviewView: ReviewView;
   orderedSuggestions: RewriteSuggestion[];
-  onOpenDocument: () => void;
   onOpenSettings: () => void;
   onSelectRewriteUnit: (rewriteUnitId: string, options?: { multiSelect?: boolean }) => void;
-  onSelectSuggestion: (suggestionId: string) => void;
-  onSetReviewView: (view: ReviewView) => void;
+  onSelectSuggestion: (suggestionId: string, options?: { forceScroll?: boolean }) => void;
   onApplySuggestion: (suggestionId: string) => void;
   onDismissSuggestion: (suggestionId: string) => void;
   onDeleteSuggestion: (suggestionId: string) => void;
@@ -47,13 +43,10 @@ export const ReviewPanel = memo(function ReviewPanel({
   editorMode,
   editorText,
   editorDirty,
-  reviewView,
   orderedSuggestions,
-  onOpenDocument,
   onOpenSettings,
   onSelectRewriteUnit,
   onSelectSuggestion,
-  onSetReviewView,
   onApplySuggestion,
   onDismissSuggestion,
   onDeleteSuggestion,
@@ -65,26 +58,18 @@ export const ReviewPanel = memo(function ReviewPanel({
 
   return (
     <Panel
-      title="审阅"
-      subtitle="修改对时间线"
+      title="建议"
+      subtitle="建议列表"
       className="workbench-review-panel"
       bodyClassName="workbench-review-body"
       action={
         <ReviewActionBar
           editorMode={editorMode}
           settingsReady={settingsReady}
-          rewriteRunning={rewriteRunning ?? false}
-          rewritePaused={rewritePaused ?? false}
-          anyBusy={anyBusy}
-          busyAction={busyAction}
           currentSession={currentSession}
           activeRewriteUnit={activeRewriteUnit}
           activeRewriteUnitSuggestions={activeRewriteUnitSuggestions}
           activeSuggestion={activeSuggestion}
-          onRetry={onRetry}
-          onApplySuggestion={onApplySuggestion}
-          onDismissSuggestion={onDismissSuggestion}
-          onDeleteSuggestion={onDeleteSuggestion}
         />
       }
     >
@@ -98,25 +83,27 @@ export const ReviewPanel = memo(function ReviewPanel({
           />
         ) : (
           <SuggestionReviewPane
+            settingsReady={settingsReady}
             currentSession={currentSession}
             currentStats={currentStats}
             activeRewriteUnit={activeRewriteUnit}
             activeSuggestionId={activeSuggestionId}
-            activeSuggestion={activeSuggestion}
-            showMarkers={showMarkers}
-            reviewView={reviewView}
             orderedSuggestions={orderedSuggestions}
-            onSetReviewView={onSetReviewView}
+            anyBusy={anyBusy}
+            busyAction={busyAction}
+            rewriteRunning={rewriteRunning ?? false}
+            rewritePaused={rewritePaused ?? false}
             onSelectRewriteUnit={onSelectRewriteUnit}
             onSelectSuggestion={onSelectSuggestion}
+            onApplySuggestion={onApplySuggestion}
+            onDismissSuggestion={onDismissSuggestion}
+            onDeleteSuggestion={onDeleteSuggestion}
+            onRetry={onRetry}
           />
         )
       ) : (
         <ReviewEmptyState
-          busyAction={busyAction}
-          anyBusy={anyBusy}
           settingsReady={settingsReady}
-          onOpenDocument={onOpenDocument}
           onOpenSettings={onOpenSettings}
         />
       )}

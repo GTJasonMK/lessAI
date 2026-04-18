@@ -194,7 +194,7 @@ export function findRewriteUnit(
 export function formatSuggestionDecision(decision: RewriteSuggestion["decision"]) {
   switch (decision) {
     case "proposed":
-      return "待审阅";
+      return "待处理";
     case "applied":
       return "已应用";
     case "dismissed":
@@ -321,7 +321,7 @@ export function formatRewriteUnitStatus(
   }
 
   if (summary.proposed) {
-    return "待审阅";
+    return "待处理";
   }
 
   if (rewriteUnit.status === "done" && summary.total > 0) {
@@ -378,8 +378,11 @@ export function getSessionStats(session: DocumentSession): SessionStats {
     if (list.length === 0) continue;
     unitsTouched += 1;
     const summary = summarizeRewriteUnitSuggestions(list);
-    if (summary.applied) unitsApplied += 1;
-    if (summary.proposed) unitsProposed += 1;
+    if (summary.applied) {
+      unitsApplied += 1;
+    } else if (summary.proposed) {
+      unitsProposed += 1;
+    }
   }
 
   return {

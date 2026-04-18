@@ -21,7 +21,7 @@ function legendEditableLabel(rewriteEnabled: boolean) {
 
 function legendEditableTitle(rewriteEnabled: boolean, rewriteBlockedReason: string | null) {
   return rewriteEnabled
-    ? "可改写 rewrite unit（审阅最小单元）"
+    ? "可改写 rewrite unit（最小处理单元）"
     : rewriteBlockedReason ?? "当前文档整体不可改写";
 }
 
@@ -45,6 +45,8 @@ export const DocumentFlow = memo(function DocumentFlow({
   runningRewriteUnitIdSet,
   optimisticManualRunningRewriteUnitId,
   activeRewriteUnitId,
+  activeSuggestionId,
+  activeReviewNavigationRequestId,
   selectedRewriteUnitIds,
   onSelectRewriteUnit,
   onSelectSuggestion
@@ -106,6 +108,8 @@ export const DocumentFlow = memo(function DocumentFlow({
           runningRewriteUnitIdSet={runningRewriteUnitIdSet}
           optimisticManualRunningRewriteUnitId={optimisticManualRunningRewriteUnitId}
           activeRewriteUnitId={activeRewriteUnitId}
+          activeSuggestionId={activeSuggestionId}
+          activeReviewNavigationRequestId={activeReviewNavigationRequestId}
           selectedRewriteUnitIds={selectedRewriteUnitIds}
           onSelectRewriteUnit={onSelectRewriteUnit}
           onSelectSuggestion={onSelectSuggestion}

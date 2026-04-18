@@ -39,7 +39,6 @@ export function useDocumentFinalizeActions(options: {
   setCurrentSession: React.Dispatch<React.SetStateAction<DocumentSession | null>>;
   setActiveRewriteUnitId: React.Dispatch<React.SetStateAction<string | null>>;
   setActiveSuggestionId: React.Dispatch<React.SetStateAction<string | null>>;
-  setReviewView: React.Dispatch<React.SetStateAction<"diff" | "source" | "candidate">>;
   setLiveProgress: React.Dispatch<React.SetStateAction<RewriteProgress | null>>;
   closeSettings: () => void;
   showNotice: ShowNotice;
@@ -57,7 +56,6 @@ export function useDocumentFinalizeActions(options: {
     setCurrentSession,
     setActiveRewriteUnitId,
     setActiveSuggestionId,
-    setReviewView,
     setLiveProgress,
     closeSettings,
     showNotice,
@@ -135,7 +133,7 @@ export function useDocumentFinalizeActions(options: {
 
     const stats = getSessionStats(latestSession);
     const hints = [
-      "该操作会把【已应用】的修改覆盖写回原文件，并删除该文档的全部历史记录（修改对、进度）。",
+      "该操作会把【已应用】的修改覆盖写回原文件，并删除该文档的全部历史记录（建议、进度）。",
       "不可撤销，建议你先“导出”做一份备份。",
       "写回成功后会自动重新打开该文件（以全新会话展示）。",
       isDocxPath(latestSession.documentPath)
@@ -144,9 +142,9 @@ export function useDocumentFinalizeActions(options: {
       "",
       `文件：${formatDisplayPath(latestSession.documentPath)}`,
       `已应用：${stats.unitsApplied}/${stats.total}`,
-      stats.suggestionsProposed > 0
-        ? `注意：仍有 ${stats.suggestionsProposed} 条待审阅修改对，不会写入文件。`
-        : "待审阅：0（将完整写回已应用结果）",
+      stats.unitsProposed > 0
+        ? `注意：仍有 ${stats.unitsProposed} 段待处理，不会写入文件。`
+        : "待处理：0（将完整写回已应用结果）",
       stats.pendingGeneration > 0
         ? `注意：仍有 ${stats.pendingGeneration} 段未生成/失败，写回时会保留原文。`
         : "未生成：0"
@@ -186,7 +184,6 @@ export function useDocumentFinalizeActions(options: {
         preservedScrollTop,
         savedPath
       });
-      setReviewView("diff");
       setLiveProgress(null);
       closeSettings();
       showNotice("success", `已覆盖并清理，并重新打开：${savedPath ? formatDisplayPath(savedPath) : ""}`);
@@ -196,7 +193,6 @@ export function useDocumentFinalizeActions(options: {
           setCurrentSession(null);
           setActiveRewriteUnitId(null);
           setActiveSuggestionId(null);
-          setReviewView("diff");
           setLiveProgress(null);
         });
         showNotice("warning", `已覆盖并清理，但重新打开失败：${readableError(error)}`);
@@ -217,7 +213,6 @@ export function useDocumentFinalizeActions(options: {
           preservedScrollTop,
           preferredRewriteUnitId: activeRewriteUnitIdRef.current
         });
-        setReviewView("diff");
         setLiveProgress(null);
       } catch {
         // ignore secondary failure
@@ -237,7 +232,6 @@ export function useDocumentFinalizeActions(options: {
     setActiveSuggestionId,
     setCurrentSession,
     setLiveProgress,
-    setReviewView,
     showNotice,
     withBusy
   ]);
@@ -256,14 +250,14 @@ export function useDocumentFinalizeActions(options: {
 
     const stats = getSessionStats(session);
     const hints = [
-      "该操作会删除该文档的全部历史记录（修改对、进度），并从原文件重新创建会话。",
+      "该操作会删除该文档的全部历史记录（建议、进度），并从原文件重新创建会话。",
       "不会修改原文件内容。",
       "",
       `文件：${formatDisplayPath(session.documentPath)}`,
-      `当前记录：修改对 ${stats.suggestionsTotal}，已应用 ${stats.unitsApplied}/${stats.total}`,
-      stats.suggestionsProposed > 0
-        ? `待审阅：${stats.suggestionsProposed}（会一起删除）`
-        : "待审阅：0",
+      `当前记录：建议 ${stats.suggestionsTotal}，已应用 ${stats.unitsApplied}/${stats.total}`,
+      stats.unitsProposed > 0
+        ? `待处理：${stats.unitsProposed}（会一起删除）`
+        : "待处理：0",
       stats.pendingGeneration > 0
         ? `未生成：${stats.pendingGeneration}（会一起删除）`
         : "未生成：0"
@@ -294,7 +288,6 @@ export function useDocumentFinalizeActions(options: {
       return;
     }
 
-    setReviewView("diff");
     setLiveProgress(null);
     showNotice("success", "已重置记录，并重新从原文件创建会话。");
   }, [
@@ -304,7 +297,6 @@ export function useDocumentFinalizeActions(options: {
     currentSessionRef,
     requestConfirm,
     setLiveProgress,
-    setReviewView,
     showNotice,
     withBusy
   ]);

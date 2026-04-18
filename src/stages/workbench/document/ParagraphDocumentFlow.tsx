@@ -1,5 +1,8 @@
 import { memo, useEffect, useMemo, useRef } from "react";
-import { logScrollRestore } from "../../../app/hooks/documentScrollRestoreDebug";
+import {
+  logScrollRestore,
+  snapshotScrollNode
+} from "../../../app/hooks/documentScrollRestoreDebug";
 import {
   rewriteUnitHasEditableSlot,
   summarizeRewriteUnitSuggestions
@@ -7,6 +10,10 @@ import {
 import { isRewriteUnitSelected } from "../../../lib/rewriteUnitSelection";
 import type { SegmentationPreset } from "../../../lib/types";
 import type { DocumentFlowBodyProps } from "./documentFlowShared";
+import {
+  shouldScrollToActiveRewriteUnit,
+  type ActiveRewriteUnitTarget
+} from "./documentFlowNavigation";
 import {
   renderRewriteUnitContent,
   rewriteUnitTitle
@@ -44,6 +51,26 @@ function buildRewriteUnitClassNames(
     .join(" ");
 }
 
+function snapshotRewriteUnitNode(node: HTMLSpanElement | null) {
+  if (!node) {
+    return { present: false } as const;
+  }
+
+  const rect = node.getBoundingClientRect();
+  return {
+    present: true,
+    connected: node.isConnected,
+    top: rect.top,
+    bottom: rect.bottom,
+    height: rect.height
+  } as const;
+}
+
+function findScrollContainer(node: HTMLSpanElement | null) {
+  const container = node?.closest(".paper-content");
+  return container instanceof HTMLDivElement ? container : null;
+}
+
 export const ParagraphDocumentFlow = memo(function ParagraphDocumentFlow({
   sessionId,
   segmentationPreset,
@@ -58,33 +85,86 @@ export const ParagraphDocumentFlow = memo(function ParagraphDocumentFlow({
   runningRewriteUnitIdSet,
   optimisticManualRunningRewriteUnitId,
   activeRewriteUnitId,
+  activeSuggestionId,
+  activeReviewNavigationRequestId,
   selectedRewriteUnitIds,
   onSelectRewriteUnit,
   onSelectSuggestion
 }: ParagraphDocumentFlowProps) {
   const rewriteUnitNodesRef = useRef<Record<string, HTMLSpanElement | null>>({});
-  const previousActiveTargetRef = useRef<{ sessionId: string; activeRewriteUnitId: string | null } | null>(
-    null
-  );
+  const previousActiveTargetRef = useRef<ActiveRewriteUnitTarget | null>(null);
 
   useEffect(() => {
     const previous = previousActiveTargetRef.current;
-    previousActiveTargetRef.current = { sessionId, activeRewriteUnitId };
-    if (!previous) return;
-    if (previous.sessionId !== sessionId) return;
-    if (previous.activeRewriteUnitId === activeRewriteUnitId) return;
-    if (!activeRewriteUnitId) return;
+    const next = {
+      sessionId,
+      rewriteUnitId: activeRewriteUnitId,
+      suggestionId: activeSuggestionId,
+      navigationRequestId: activeReviewNavigationRequestId
+    };
+    previousActiveTargetRef.current = next;
+    if (!previous) {
+      logScrollRestore("paragraph-scroll-skip", {
+        reason: "no-previous-target",
+        next
+      });
+      return;
+    }
+    if (!shouldScrollToActiveRewriteUnit(previous, next)) {
+      logScrollRestore("paragraph-scroll-skip", {
+        reason: "target-unchanged",
+        previous,
+        next
+      });
+      return;
+    }
+    const targetRewriteUnitId = next.rewriteUnitId;
+    if (!targetRewriteUnitId) {
+      logScrollRestore("paragraph-scroll-skip", {
+        reason: "missing-target-rewrite-unit",
+        previous,
+        next
+      });
+      return;
+    }
+    const targetNode = rewriteUnitNodesRef.current[targetRewriteUnitId] ?? null;
+    const scrollContainer = findScrollContainer(targetNode);
 
     logScrollRestore("paragraph-scroll-into-view", {
       sessionId,
-      previousActiveRewriteUnitId: previous.activeRewriteUnitId,
-      activeRewriteUnitId
+      previousActiveRewriteUnitId: previous?.rewriteUnitId ?? null,
+      activeRewriteUnitId: targetRewriteUnitId,
+      previousActiveSuggestionId: previous?.suggestionId ?? null,
+      activeSuggestionId,
+      previousNavigationRequestId: previous?.navigationRequestId ?? null,
+      activeReviewNavigationRequestId,
+      targetNode: snapshotRewriteUnitNode(targetNode),
+      scrollContainer: snapshotScrollNode(scrollContainer)
     });
-    rewriteUnitNodesRef.current[activeRewriteUnitId]?.scrollIntoView({
+    if (!targetNode) {
+      logScrollRestore("paragraph-scroll-skip", {
+        reason: "target-node-missing",
+        targetRewriteUnitId,
+        knownNodeCount: Object.keys(rewriteUnitNodesRef.current).length,
+        knownNodeIds: Object.keys(rewriteUnitNodesRef.current).slice(0, 12)
+      });
+      return;
+    }
+    targetNode.scrollIntoView({
       block: "center",
       behavior: "smooth"
     });
-  }, [activeRewriteUnitId, sessionId]);
+    window.requestAnimationFrame(() => {
+      logScrollRestore("paragraph-scroll-after-frame", {
+        sessionId,
+        activeRewriteUnitId: targetRewriteUnitId,
+        activeSuggestionId,
+        activeReviewNavigationRequestId,
+        targetNode: snapshotRewriteUnitNode(targetNode),
+        scrollContainer: snapshotScrollNode(findScrollContainer(targetNode))
+      });
+    });
+  }, [activeRewriteUnitId, activeReviewNavigationRequestId, activeSuggestionId, sessionId]);
 
   const computed = useMemo(
     () =>

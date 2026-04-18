@@ -20,9 +20,11 @@ export interface DocumentFlowBodyProps {
   runningRewriteUnitIdSet: Set<string>;
   optimisticManualRunningRewriteUnitId: string | null;
   activeRewriteUnitId: string | null;
+  activeSuggestionId: string | null;
+  activeReviewNavigationRequestId: number;
   selectedRewriteUnitIds: string[];
   onSelectRewriteUnit: (rewriteUnitId: string, options?: { multiSelect?: boolean }) => void;
-  onSelectSuggestion: (suggestionId: string) => void;
+  onSelectSuggestion: (suggestionId: string, options?: { forceScroll?: boolean }) => void;
 }
 
 function slotPresentationClass(slot: WritebackSlot) {

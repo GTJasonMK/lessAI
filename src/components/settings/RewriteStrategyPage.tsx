@@ -62,7 +62,7 @@ export const RewriteStrategyPage = memo(function RewriteStrategyPage({
           <span className="workspace-hint">{segmentationPresetLockedReason}</span>
         ) : (
           <span className="workspace-hint">
-            提示：切段策略属于“项目级配置”。项目产生修改对/进度后会锁定；如需调整，请先重置记录或打开新文档。
+            提示：切段策略属于“项目级配置”。项目产生建议/进度后会锁定；如需调整，请先重置记录或打开新文档。
           </span>
         )}
       </div>

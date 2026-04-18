@@ -80,79 +80,83 @@ async function loadProtectedTextModule() {
   }
 }
 
-async function loadChunkSelectionModule() {
+async function loadReviewSuggestionRowModel() {
   const tempRoot = join(process.cwd(), ".tmp");
   mkdirSync(tempRoot, { recursive: true });
-  const dir = mkdtempSync(join(tempRoot, "lessai-chunk-selection-"));
-  const file = join(dir, "chunkSelection.mjs");
+  const dir = mkdtempSync(join(tempRoot, "lessai-review-row-model-"));
 
   try {
-    for (const [path, fileName] of [
-      ["src/lib/chunkSelection.ts", "chunkSelection.ts"],
-      ["src/lib/chunkGroups.ts", "chunkGroups.ts"]
-    ]) {
-      const source = read(path);
-      const transpiled = ts.transpileModule(source, {
-        compilerOptions: {
-          module: ts.ModuleKind.ES2022,
-          target: ts.ScriptTarget.ES2022
-        },
-        fileName
-      }).outputText;
-      const rewritten = rewriteRelativeImports(transpiled);
-      writeFileSync(join(dir, fileName.replace(/\.ts$/, ".mjs")), rewritten, "utf8");
-    }
-    const chunkSelection = await import(pathToFileURL(file).href);
-    const chunkGroups = await import(pathToFileURL(join(dir, "chunkGroups.mjs")).href);
-    return { ...chunkSelection, ...chunkGroups };
+    const source = read("src/stages/workbench/review/reviewSuggestionRowModel.ts");
+    const transpiled = ts.transpileModule(source, {
+      compilerOptions: {
+        module: ts.ModuleKind.ES2022,
+        target: ts.ScriptTarget.ES2022
+      },
+      fileName: "reviewSuggestionRowModel.ts"
+    }).outputText;
+    const rewritten = rewriteRelativeImports(transpiled);
+    writeFileSync(join(dir, "reviewSuggestionRowModel.mjs"), rewritten, "utf8");
+
+    return await import(pathToFileURL(join(dir, "reviewSuggestionRowModel.mjs")).href);
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }
 }
 
-async function loadDocumentFlowSharedModule() {
+async function loadDocumentFlowNavigationModule() {
   const tempRoot = join(process.cwd(), ".tmp");
   mkdirSync(tempRoot, { recursive: true });
-  const dir = mkdtempSync(join(tempRoot, "lessai-document-flow-shared-"));
+  const dir = mkdtempSync(join(tempRoot, "lessai-document-flow-navigation-"));
 
   try {
-    for (const path of [
-      "src/stages/workbench/document/documentFlowShared.tsx",
-      "src/lib/protectedText.tsx",
-      "src/lib/markdownProtectedSegments.ts",
-      "src/lib/protectedTextShared.ts",
-      "src/lib/texProtectedSegments.ts"
-    ]) {
-      const source = read(path);
-      const fileName = path.split("/").pop();
-      const transpiled = ts.transpileModule(source, {
-        compilerOptions: {
-          module: ts.ModuleKind.ES2022,
-          target: ts.ScriptTarget.ES2022,
-          jsx: ts.JsxEmit.ReactJSX
-        },
-        fileName
-      }).outputText;
-      const rewritten = rewriteRelativeImports(transpiled);
-      const outputPath = join(dir, path).replace(/\.(ts|tsx)$/, ".mjs");
-      mkdirSync(outputPath.slice(0, outputPath.lastIndexOf("/")), { recursive: true });
-      writeFileSync(outputPath, rewritten, "utf8");
-    }
-    return await import(
-      pathToFileURL(join(dir, "src/stages/workbench/document/documentFlowShared.mjs")).href
-    );
+    const source = read("src/stages/workbench/document/documentFlowNavigation.ts");
+    const transpiled = ts.transpileModule(source, {
+      compilerOptions: {
+        module: ts.ModuleKind.ES2022,
+        target: ts.ScriptTarget.ES2022
+      },
+      fileName: "documentFlowNavigation.ts"
+    }).outputText;
+    const rewritten = rewriteRelativeImports(transpiled);
+    writeFileSync(join(dir, "documentFlowNavigation.mjs"), rewritten, "utf8");
+
+    return await import(pathToFileURL(join(dir, "documentFlowNavigation.mjs")).href);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+}
+
+async function loadHelpersModule() {
+  const tempRoot = join(process.cwd(), ".tmp");
+  mkdirSync(tempRoot, { recursive: true });
+  const dir = mkdtempSync(join(tempRoot, "lessai-helpers-"));
+
+  try {
+    const source = read("src/lib/helpers.ts");
+    const transpiled = ts.transpileModule(source, {
+      compilerOptions: {
+        module: ts.ModuleKind.ES2022,
+        target: ts.ScriptTarget.ES2022
+      },
+      fileName: "helpers.ts"
+    }).outputText;
+    const rewritten = rewriteRelativeImports(transpiled);
+    writeFileSync(join(dir, "helpers.mjs"), rewritten, "utf8");
+
+    return await import(pathToFileURL(join(dir, "helpers.mjs")).href);
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }
 }
 
 const part02 = read("src/styles/part-02.css");
+const part03 = read("src/styles/part-03.css");
 const part04 = read("src/styles/part-04.css");
 const documentActionBar = read("src/stages/workbench/document/DocumentActionBar.tsx");
 const documentPanel = read("src/stages/workbench/DocumentPanel.tsx");
 const documentFlow = read("src/stages/workbench/document/DocumentFlow.tsx");
 const paragraphDocumentFlow = read("src/stages/workbench/document/ParagraphDocumentFlow.tsx");
-const docxChunkEditor = read("src/stages/workbench/document/DocxChunkEditor.tsx");
+const docxSlotEditor = read("src/stages/workbench/document/DocxSlotEditor.tsx");
 const workspaceBar = read("src/app/components/WorkspaceBar.tsx");
 const settingsTypes = read("src/lib/types.ts");
 const settingsConstants = read("src/lib/constants.ts");
@@ -162,22 +166,32 @@ const documentActions = read("src/app/hooks/useDocumentActions.ts");
 const documentFinalizeActions = read("src/app/hooks/useDocumentFinalizeActions.ts");
 const documentScrollRestore = read("src/app/hooks/useDocumentScrollRestore.ts");
 const appSource = read("src/App.tsx");
+const rewriteUnitSelection = read("src/lib/rewriteUnitSelection.ts");
+const workbenchStage = read("src/stages/WorkbenchStage.tsx");
+const reviewPanel = read("src/stages/workbench/ReviewPanel.tsx");
+const reviewActionBar = read("src/stages/workbench/review/ReviewActionBar.tsx");
+const reviewEmptyState = read("src/stages/workbench/review/ReviewEmptyState.tsx");
+const suggestionReviewPane = read("src/stages/workbench/review/SuggestionReviewPane.tsx");
+const reviewSuggestionRow = read("src/stages/workbench/review/ReviewSuggestionRow.tsx");
+const useRewriteActions = read("src/app/hooks/useRewriteActions.ts");
+const useSuggestionActions = read("src/app/hooks/useSuggestionActions.ts");
 const { renderInlineProtectedText } = await loadProtectedTextModule();
 const {
-  buildChunkGroups,
-  normalizeSelectedChunkIndices,
-  resolveOptimisticManualRunningIndex
-} = await loadChunkSelectionModule();
-const { fragmentClassNames } = await loadDocumentFlowSharedModule();
+  buildSuggestionRowActionState,
+  buildSuggestionRowPrimaryActionLabel,
+  buildSuggestionRowTitle
+} = await loadReviewSuggestionRowModel();
+const { shouldScrollToActiveRewriteUnit } = await loadDocumentFlowNavigationModule();
+const { getSessionStats, summarizeRewriteUnitSuggestions } = await loadHelpersModule();
 
 assertIncludes(workspaceBar, 'className="workspace-bar-status-row"');
 assertIncludes(workspaceBar, 'className="workspace-bar-path-line"');
 assertIncludes(workspaceBar, 'className="workspace-bar-path-text"');
-assertIncludes(settingsTypes, "chunksPerRequest: number;");
-assertIncludes(settingsConstants, "chunksPerRequest: 1");
-assertIncludes(rewriteStrategyPage, "单次请求处理块数");
-assertIncludes(rewriteStrategyPage, 'onUpdateNumberSetting("chunksPerRequest", event.target.value)');
-assertIncludes(settingsHandlers, '"chunksPerRequest"');
+assertIncludes(settingsTypes, "unitsPerBatch: number;");
+assertIncludes(settingsConstants, "unitsPerBatch: 1");
+assertIncludes(rewriteStrategyPage, "单批处理单元数");
+assertIncludes(rewriteStrategyPage, 'onUpdateNumberSetting("unitsPerBatch", event.target.value)');
+assertIncludes(settingsHandlers, '"unitsPerBatch"');
 assertNotIncludes(workspaceBar, 'className="workspace-bar-session"');
 assertNotIncludes(workspaceBar, "title={rawTitle}");
 assertNotIncludes(workspaceBar, 'className="workspace-bar-session-text"');
@@ -187,15 +201,17 @@ assertNotIncludes(workspaceBar, "formatTopbarPath");
 assertRule(part02, ".workspace-bar-status-row", "display", "flex");
 assertRule(part02, ".workspace-bar-path-line", "display", "flex");
 assertRule(part02, ".workspace-bar-path-text", "text-overflow", "ellipsis");
-assertRule(part04, ".docx-editor-chunk.is-editable.is-underline:focus", "text-decoration", "none");
-assertRule(part04, ".docx-editor-chunk.is-editable.is-link:focus", "text-decoration", "none");
+assertRule(part03, ".status-badge", "white-space", "nowrap");
+assertRule(part04, ".docx-editor-slot.is-editable.is-underline:focus", "text-decoration", "none");
+assertRule(part04, ".docx-editor-slot.is-editable.is-link:focus", "text-decoration", "none");
+assertRule(part04, ".review-suggestion-row-mainline .status-badge", "flex", "0 0 auto");
 assertNotIncludes(
   paragraphDocumentFlow,
   "[activeChunkIndex, groups, sessionId]",
   "写回刷新 session 时，不应因为 groups/sessionId 变化再次自动滚动到激活块"
 );
 assertNotIncludes(
-  docxChunkEditor,
+  docxSlotEditor,
   "chunkNodesRef.current[firstEditable.index]?.focus();\n    }, [session.chunks]);",
   "docx 编辑器写回后不应因为 chunks 变化重新聚焦首个可编辑块"
 );
@@ -206,230 +222,271 @@ assertNotIncludes(
 );
 assertIncludes(documentScrollRestore, "export function useDocumentScrollRestore()");
 assertIncludes(documentScrollRestore, "const documentScrollRef = useRef<HTMLDivElement | null>(null);");
-assertIncludes(documentScrollRestore, "const pendingScrollTopRef = useRef<number | null>(null);");
-assertIncludes(documentScrollRestore, "node.scrollTop = pending;");
+assertIncludes(
+  documentScrollRestore,
+  "const pendingRestoreRef = useRef<ScrollRestoreProgress | null>(null);"
+);
+assertIncludes(documentScrollRestore, "node.scrollTop = pending.targetScrollTop;");
 assertIncludes(documentPanel, "documentScrollRef: MutableRefObject<HTMLDivElement | null>;");
 assertIncludes(documentPanel, '<div ref={documentScrollRef} className="paper-content scroll-region">');
 assertIncludes(documentActions, "captureDocumentScrollPosition: () => number | null;");
-assertIncludes(documentActions, "restoreDocumentScrollPosition: (scrollTop: number | null) => void;");
 assertIncludes(documentActions, "const preservedScrollTop = captureDocumentScrollPosition();");
-assertIncludes(documentActions, "restoreDocumentScrollPosition(preservedScrollTop);");
+assertIncludes(documentActions, "runSessionActionWithScroll({");
 assertIncludes(documentFinalizeActions, "captureDocumentScrollPosition: () => number | null;");
-assertIncludes(documentFinalizeActions, "restoreDocumentScrollPosition: (scrollTop: number | null) => void;");
 assertIncludes(documentFinalizeActions, "const preservedScrollTop = captureDocumentScrollPosition();");
-assertIncludes(documentFinalizeActions, "restoreDocumentScrollPosition(preservedScrollTop);");
+assertIncludes(documentFinalizeActions, "restoreLoadedSessionWithScroll({");
 assertIncludes(appSource, 'import { useDocumentScrollRestore } from "./app/hooks/useDocumentScrollRestore";');
 assertIncludes(appSource, "const { documentScrollRef, captureDocumentScrollPosition, restoreDocumentScrollPosition } =");
+assertIncludes(reviewPanel, 'title="建议"');
+assertIncludes(reviewPanel, 'subtitle="建议列表"');
+assertNotIncludes(reviewPanel, 'title="审阅"');
+assertIncludes(suggestionReviewPane, 'className="review-summary-strip"');
+assertNotIncludes(suggestionReviewPane, '当前 #{');
+assertIncludes(suggestionReviewPane, "待处理：{currentStats.unitsProposed}");
+assertNotIncludes(suggestionReviewPane, "待审阅：{currentStats.unitsProposed}");
+assertNotIncludes(suggestionReviewPane, "待审阅：{currentStats.suggestionsProposed}");
+assertIncludes(suggestionReviewPane, "<ReviewSuggestionRow");
+assertNotIncludes(reviewSuggestionRow, "StatusBadge");
+assertIncludes(reviewSuggestionRow, "buildSuggestionRowPrimaryActionLabel(suggestion.decision)");
+assertIncludes(reviewSuggestionRow, '`is-${suggestion.decision}`');
+assertIncludes(reviewSuggestionRow, 'className="review-suggestion-row-state-dot"');
+assertIncludes(reviewSuggestionRow, '<span>删除</span>');
+assertIncludes(reviewSuggestionRow, '<span>···</span>');
+assertRule(part04, ".review-suggestion-row.is-proposed", "border-color", "rgba(239, 193, 34, 0.28)");
+assertRule(part04, ".review-suggestion-row.is-applied", "border-color", "rgba(31, 122, 60, 0.24)");
+assertRule(part04, ".review-suggestion-row.is-dismissed", "border-color", "rgba(20, 20, 20, 0.12)");
+assertRule(part04, ".review-suggestion-row-state-dot", "width", "8px");
+assertNotIncludes(suggestionReviewPane, 'className="diff-view"');
+assertNotIncludes(workbenchStage, "reviewView");
+assertNotIncludes(reviewPanel, "reviewView");
+assertNotIncludes(reviewActionBar, "reviewView");
+assertNotIncludes(appSource, "reviewView");
+assertNotIncludes(useRewriteActions, "setReviewView");
+assertNotIncludes(useSuggestionActions, "setReviewView");
+assertNotIncludes(useRewriteActions, "修改对");
+assertNotIncludes(reviewEmptyState, 'label="打开文件"');
+assertNotIncludes(reviewEmptyState, "审阅区会展示");
+assertIncludes(reviewEmptyState, "这里会展示建议与候选稿");
+assertIncludes(rewriteUnitSelection, "normalizeSelectedRewriteUnitIds");
+assertIncludes(rewriteUnitSelection, "resolveOptimisticManualRunningRewriteUnitId");
+assertIncludes(documentFinalizeActions, "stats.unitsProposed > 0");
+assertIncludes(documentFinalizeActions, "仍有 ${stats.unitsProposed} 段待处理");
+assertIncludes(documentFinalizeActions, "待处理：${stats.unitsProposed}（会一起删除）");
+assertIncludes(documentFinalizeActions, "待处理：0");
+assertNotIncludes(documentFinalizeActions, "stats.suggestionsProposed > 0");
+assertNotIncludes(documentFinalizeActions, "待审阅");
+assertNotIncludes(documentPanel, "右侧审阅");
+assertNotIncludes(useRewriteActions, "请在右侧审阅");
+assertNotIncludes(documentFlow, "审阅最小单元");
+assertNotIncludes(settingsHandlers, "审阅");
 
-const paragraphChunks = [
+const sampleSuggestion = {
+  id: "sg-1",
+  sequence: 12,
+  rewriteUnitId: "unit-1",
+  beforeText: "手工统计问卷结果",
+  afterText: "自动汇总问卷结果，压缩后半句长度",
+  diffSpans: [],
+  decision: "applied",
+  slotUpdates: [],
+  createdAt: "2026-04-18T10:42:00.000Z",
+  updatedAt: "2026-04-18T10:42:00.000Z"
+};
+
+assert.equal(
+  buildSuggestionRowTitle(sampleSuggestion, 40),
+  "#12 自动汇总问卷结果，压缩后半句长度"
+);
+
+assert.equal(buildSuggestionRowPrimaryActionLabel("proposed"), "应用");
+assert.equal(buildSuggestionRowPrimaryActionLabel("applied"), "忽略");
+assert.equal(buildSuggestionRowPrimaryActionLabel("dismissed"), "应用");
+assertIncludes(
+  reviewSuggestionRow,
+  'const showMenu = actionState.retryVisible;'
+);
+assertIncludes(reviewSuggestionRow, 'suggestion.decision === "applied"');
+assertIncludes(reviewSuggestionRow, "onClick: onApply");
+
+assert.deepEqual(
+  buildSuggestionRowActionState({
+    suggestionId: "sg-1",
+    decision: "applied",
+    busyAction: null,
+    anyBusy: false,
+    editorMode: false,
+    rewriteRunning: false,
+    rewritePaused: false,
+    settingsReady: true,
+    rewriteUnitFailed: true
+  }),
   {
-    index: 0,
-    sourceText: "【填写说明：重点介绍本作品的主题创意来源，产生背景，作品的用户群体、主要功能与特色、应用价值、推广前景等。",
-    separatorAfter: "",
-    skipRewrite: false,
-    presentation: null,
-    status: "idle",
-    errorMessage: null
+    applyBusy: false,
+    applyDisabled: true,
+    deleteBusy: false,
+    deleteDisabled: false,
+    dismissBusy: false,
+    dismissDisabled: false,
+    retryBusy: false,
+    retryDisabled: false,
+    retryVisible: true
+  }
+);
+
+const mixedUnitSuggestions = [
+  {
+    id: "sg-applied",
+    sequence: 1,
+    rewriteUnitId: "unit-1",
+    beforeText: "原文一",
+    afterText: "已应用版本",
+    diffSpans: [],
+    decision: "applied",
+    slotUpdates: [],
+    createdAt: "2026-04-18T10:40:00.000Z",
+    updatedAt: "2026-04-18T10:40:00.000Z"
   },
   {
-    index: 1,
-    sourceText: "建议不超过1页",
-    separatorAfter: "",
-    skipRewrite: false,
-    presentation: { bold: false, italic: false, underline: false, href: null, writebackKey: "r:red" },
-    status: "idle",
-    errorMessage: null
-  },
-  {
-    index: 2,
-    sourceText: "】",
-    separatorAfter: "\n\n",
-    skipRewrite: false,
-    presentation: null,
-    status: "idle",
-    errorMessage: null
-  },
-  {
-    index: 3,
-    sourceText: "下一段正文。",
-    separatorAfter: "",
-    skipRewrite: false,
-    presentation: null,
-    status: "idle",
-    errorMessage: null
+    id: "sg-proposed-after-applied",
+    sequence: 2,
+    rewriteUnitId: "unit-1",
+    beforeText: "原文一",
+    afterText: "新的待审阅版本",
+    diffSpans: [],
+    decision: "proposed",
+    slotUpdates: [],
+    createdAt: "2026-04-18T10:41:00.000Z",
+    updatedAt: "2026-04-18T10:41:00.000Z"
   }
 ];
 
-assert.deepEqual(
-  normalizeSelectedChunkIndices(paragraphChunks, [1], "paragraph"),
-  [0, 1, 2],
-  "段落级模式下，选中段内任一可改写子片段时，应扩展为整段的可改写子片段"
-);
+const mixedSummary = summarizeRewriteUnitSuggestions(mixedUnitSuggestions);
+assert.equal(Boolean(mixedSummary.applied), true);
+assert.equal(Boolean(mixedSummary.proposed), true);
 
-assert.deepEqual(
-  normalizeSelectedChunkIndices(paragraphChunks, [1, 3], "paragraph"),
-  [0, 1, 2, 3],
-  "段落级模式下，应按段落单元归一化多选范围"
-);
-
-const clauseChunks = [
-  {
-    index: 0,
-    sourceText: "硬件部署",
-    separatorAfter: "",
-    skipRewrite: false,
-    presentation: null,
-    status: "idle",
-    errorMessage: null
-  },
-  {
-    index: 1,
-    sourceText: "：",
-    separatorAfter: "",
-    skipRewrite: false,
-    presentation: { bold: true, italic: false, underline: false, href: null, writebackKey: "r:bold" },
-    status: "idle",
-    errorMessage: null
-  },
-  {
-    index: 2,
-    sourceText: "认知节点部署于 Dell PowerEdge R750xa，",
-    separatorAfter: "",
-    skipRewrite: false,
-    presentation: null,
-    status: "idle",
-    errorMessage: null
-  },
-  {
-    index: 3,
-    sourceText: "运行 Neo4j + ChromaDB；",
-    separatorAfter: "",
-    skipRewrite: false,
-    presentation: null,
-    status: "idle",
-    errorMessage: null
-  },
-  {
-    index: 4,
-    sourceText: "验证节点部署于 Lenovo ThinkStation P3。",
-    separatorAfter: "\n\n",
-    skipRewrite: false,
-    presentation: null,
-    status: "idle",
-    errorMessage: null
-  }
-];
-
-assert.deepEqual(
-  buildChunkGroups(clauseChunks, "clause").map((group) => group.chunkIndices),
-  [
-    [0, 1, 2],
-    [3],
-    [4]
-  ],
-  "小句模式下，应把同一语义小句内的样式碎块归并成一个可见单元"
-);
-
-assertNotIncludes(
-  fragmentClassNames(
+const sessionStats = getSessionStats({
+  id: "session-1",
+  title: "demo",
+  documentPath: "demo.docx",
+  sourceText: "原文一原文二",
+  sourceSnapshot: null,
+  normalizedText: "原文一原文二",
+  writeBackSupported: true,
+  writeBackBlockReason: null,
+  plainTextEditorSafe: true,
+  plainTextEditorBlockReason: null,
+  segmentationPreset: "paragraph",
+  rewriteHeadings: false,
+  writebackSlots: [],
+  rewriteUnits: [
     {
-      index: 0,
-      sourceText: "已选中的片段",
-      separatorAfter: "",
-      skipRewrite: false,
-      presentation: null,
-      status: "idle",
+      id: "unit-1",
+      order: 0,
+      slotIds: [],
+      displayText: "原文一",
+      segmentationPreset: "paragraph",
+      status: "done",
       errorMessage: null
     },
-    false,
-    true,
-    true
-  ),
-  "is-fragment-active"
-);
-
-assertNotIncludes(
-  fragmentClassNames(
     {
-      index: 0,
-      sourceText: "当前激活片段",
-      separatorAfter: "",
-      skipRewrite: false,
-      presentation: null,
-      status: "idle",
+      id: "unit-2",
+      order: 1,
+      slotIds: [],
+      displayText: "原文二",
+      segmentationPreset: "paragraph",
+      status: "done",
       errorMessage: null
-    },
-    false,
-    true,
-    false
-  ),
-  "is-fragment-active"
-);
-
-assert.deepEqual(
-  normalizeSelectedChunkIndices(clauseChunks, [1], "clause"),
-  [0, 1, 2],
-  "小句模式下，选中冒号等样式碎块时，应扩展为整句对应的小句单元"
-);
-
-const sentenceChunks = [
-  {
-    index: 0,
-    sourceText: "前文 ",
-    separatorAfter: "",
-    skipRewrite: false,
-    presentation: null,
-    status: "idle",
-    errorMessage: null
-  },
-  {
-    index: 1,
-    sourceText: "[公式]",
-    separatorAfter: "",
-    skipRewrite: true,
-    presentation: null,
-    status: "idle",
-    errorMessage: null
-  },
-  {
-    index: 2,
-    sourceText: " 后文。",
-    separatorAfter: "",
-    skipRewrite: false,
-    presentation: null,
-    status: "idle",
-    errorMessage: null
-  },
-  {
-    index: 3,
-    sourceText: "下一句。",
-    separatorAfter: "",
-    skipRewrite: false,
-    presentation: null,
-    status: "idle",
-    errorMessage: null
-  }
-];
-
-assert.deepEqual(
-  buildChunkGroups(sentenceChunks, "sentence").map((group) => group.chunkIndices),
-  [
-    [0, 1, 2],
-    [3]
+    }
   ],
-  "整句模式下，应保留句内保护区，但把整句作为一个可见单元"
+  suggestions: [
+    ...mixedUnitSuggestions,
+    {
+      id: "sg-proposed",
+      sequence: 3,
+      rewriteUnitId: "unit-2",
+      beforeText: "原文二",
+      afterText: "待审阅版本",
+      diffSpans: [],
+      decision: "proposed",
+      slotUpdates: [],
+      createdAt: "2026-04-18T10:42:00.000Z",
+      updatedAt: "2026-04-18T10:42:00.000Z"
+    }
+  ],
+  nextSuggestionSequence: 4,
+  status: "idle",
+  createdAt: "2026-04-18T10:39:00.000Z",
+  updatedAt: "2026-04-18T10:42:00.000Z"
+});
+
+assert.equal(sessionStats.unitsApplied, 1);
+assert.equal(
+  sessionStats.unitsProposed,
+  1,
+  "存在已应用 suggestion 的块，不应再同时计入待审阅块"
 );
 
 assert.deepEqual(
-  normalizeSelectedChunkIndices(sentenceChunks, [2], "sentence"),
-  [0, 2],
-  "整句模式下，选中句内任一可编辑碎块时，应扩展为整句内全部可编辑碎块"
+  buildSuggestionRowActionState({
+    suggestionId: "sg-1",
+    decision: "dismissed",
+    busyAction: null,
+    anyBusy: false,
+    editorMode: false,
+    rewriteRunning: false,
+    rewritePaused: false,
+    settingsReady: true,
+    rewriteUnitFailed: false
+  }),
+  {
+    applyBusy: false,
+    applyDisabled: false,
+    deleteBusy: false,
+    deleteDisabled: false,
+    dismissBusy: false,
+    dismissDisabled: true,
+    retryBusy: false,
+    retryDisabled: true,
+    retryVisible: false
+  }
 );
 
 assert.equal(
-  resolveOptimisticManualRunningIndex(sentenceChunks, [3]),
-  3,
-  "手动模式下，乐观中的“正在改写”必须落在所选片段内，而不是全文第一个可改写片段"
+  shouldScrollToActiveRewriteUnit(
+    {
+      sessionId: "session-1",
+      rewriteUnitId: "unit-1",
+      suggestionId: "suggestion-1",
+      navigationRequestId: 1
+    },
+    {
+      sessionId: "session-1",
+      rewriteUnitId: "unit-1",
+      suggestionId: "suggestion-2",
+      navigationRequestId: 2
+    }
+  ),
+  true,
+  "同一 rewrite unit 下切换 suggestion 时，也应重新定位到左侧正文位置"
+);
+
+assert.equal(
+  shouldScrollToActiveRewriteUnit(
+    {
+      sessionId: "session-1",
+      rewriteUnitId: "unit-1",
+      suggestionId: "suggestion-2",
+      navigationRequestId: 2
+    },
+    {
+      sessionId: "session-1",
+      rewriteUnitId: "unit-1",
+      suggestionId: "suggestion-2",
+      navigationRequestId: 3
+    }
+  ),
+  true,
+  "即使目标未变化，只要用户再次显式点击定位，也应重新滚动到正文位置"
 );
 
 function renderTexMarkup(text) {

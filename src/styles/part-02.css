@@ -360,11 +360,9 @@
 
 .workbench-review-panel .workbench-review-actionbar.workbench-action-row {
   max-width: 100%;
-  display: grid;
-  grid-template-columns: 1fr auto;
+  display: flex;
   align-items: center;
-  gap: 10px;
-  justify-content: stretch;
+  justify-content: flex-end;
 }
 
 .workbench-review-panel .workbench-review-actionbar-status {
@@ -372,15 +370,8 @@
   display: flex;
   align-items: center;
   gap: 8px;
-  flex-wrap: nowrap;
-  justify-self: start;
-}
-
-.workbench-review-panel .workbench-review-actionbar-buttons {
-  justify-self: end;
-  overflow: visible;
-  padding-bottom: 4px;
-  padding-right: 4px;
+  flex-wrap: wrap;
+  justify-content: flex-end;
 }
 
 .workbench-doc-actionbar-left,
@@ -587,11 +578,11 @@
   flex-wrap: nowrap;
 }
 
-.workbench-review-actionbar-buttons {
+.review-summary-strip {
   display: flex;
-  align-items: center;
+  flex-wrap: wrap;
   gap: 8px;
-  flex-wrap: nowrap;
+  flex-shrink: 0;
 }
 
 .workbench-review-body .diff-view,
@@ -605,7 +596,10 @@
   flex: 1;
   min-height: 0;
   overflow: auto;
-  padding-bottom: 2px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding-bottom: 6px;
 }
 
 .workspace-hint {

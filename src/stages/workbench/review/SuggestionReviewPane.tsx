@@ -1,192 +1,157 @@
-import { memo, useMemo } from "react";
-import { AlertCircle } from "lucide-react";
+import { memo, useMemo, useState } from "react";
+import { AlertCircle, RotateCcw } from "lucide-react";
+import { logScrollRestore } from "../../../app/hooks/documentScrollRestoreDebug";
 import type { DocumentSession, RewriteSuggestion, RewriteUnit } from "../../../lib/types";
 import type { SessionStats } from "../../../lib/helpers";
-import type { ReviewView } from "../../../lib/constants";
-import { REVIEW_VIEW_OPTIONS } from "../../../lib/constants";
-import { guessClientDocumentFormat, renderInlineProtectedText } from "../../../lib/protectedText";
-import {
-  countCharacters,
-  formatDate,
-  formatSuggestionDecision,
-  getLatestSuggestion,
-  suggestionTone
-} from "../../../lib/helpers";
-import { StatusBadge } from "../../../components/StatusBadge";
+import { ReviewSuggestionRow } from "./ReviewSuggestionRow";
+import { buildSuggestionRowActionState } from "./reviewSuggestionRowModel";
 
 interface SuggestionReviewPaneProps {
+  settingsReady: boolean;
   currentSession: DocumentSession;
   currentStats: SessionStats;
   activeRewriteUnit: RewriteUnit | null;
   activeSuggestionId: string | null;
-  activeSuggestion: RewriteSuggestion | null;
-  showMarkers: boolean;
-  reviewView: ReviewView;
   orderedSuggestions: RewriteSuggestion[];
-  onSetReviewView: (view: ReviewView) => void;
+  anyBusy: boolean;
+  busyAction: string | null;
+  rewriteRunning: boolean;
+  rewritePaused: boolean;
   onSelectRewriteUnit: (rewriteUnitId: string, options?: { multiSelect?: boolean }) => void;
-  onSelectSuggestion: (suggestionId: string) => void;
+  onSelectSuggestion: (suggestionId: string, options?: { forceScroll?: boolean }) => void;
+  onApplySuggestion: (suggestionId: string) => void;
+  onDismissSuggestion: (suggestionId: string) => void;
+  onDeleteSuggestion: (suggestionId: string) => void;
+  onRetry: () => void;
 }
 
 export const SuggestionReviewPane = memo(function SuggestionReviewPane({
+  settingsReady,
   currentSession,
   currentStats,
   activeRewriteUnit,
   activeSuggestionId,
-  activeSuggestion,
-  showMarkers,
-  reviewView,
   orderedSuggestions,
-  onSetReviewView,
+  anyBusy,
+  busyAction,
+  rewriteRunning,
+  rewritePaused,
   onSelectRewriteUnit,
-  onSelectSuggestion
+  onSelectSuggestion,
+  onApplySuggestion,
+  onDismissSuggestion,
+  onDeleteSuggestion,
+  onRetry
 }: SuggestionReviewPaneProps) {
-  const documentFormat = useMemo(
-    () => guessClientDocumentFormat(currentSession.documentPath),
-    [currentSession.documentPath]
+  const [openMenuSuggestionId, setOpenMenuSuggestionId] = useState<string | null>(null);
+  const failedRewriteUnitIds = useMemo(
+    () =>
+      new Set(
+        currentSession.rewriteUnits
+          .filter((rewriteUnit) => rewriteUnit.status === "failed")
+          .map((rewriteUnit) => rewriteUnit.id)
+      ),
+    [currentSession.rewriteUnits]
   );
-  const latestSuggestion = useMemo(() => getLatestSuggestion(currentSession), [currentSession]);
-  const activeCandidateCharacters = activeSuggestion?.afterText
-    ? countCharacters(activeSuggestion.afterText)
-    : 0;
-
-  const renderText = (value: string, key: string) => {
-    if (!showMarkers) return value;
-    return renderInlineProtectedText(value, documentFormat, key);
-  };
 
   return (
     <>
-      <div className="context-group">
-        <span className="context-chip">修改对：{currentStats.suggestionsTotal}</span>
-        <span className="context-chip">待审阅：{currentStats.suggestionsProposed}</span>
+      <div className="review-summary-strip">
+        <span className="context-chip">建议：{currentStats.suggestionsTotal}</span>
+        <span className="context-chip">待处理：{currentStats.unitsProposed}</span>
         <span className="context-chip">
           已应用：{currentStats.unitsApplied}/{currentStats.total}
         </span>
-        <span className="context-chip">候选稿：{activeCandidateCharacters} 字</span>
-        <span className="context-chip">
-          {activeSuggestion
-            ? `当前 #${activeSuggestion.sequence}`
-            : latestSuggestion
-              ? `最新 #${latestSuggestion.sequence}`
-              : "暂无修改对"}
-        </span>
       </div>
 
-      {activeSuggestion ? (
-        <div className="review-switches">
-          {REVIEW_VIEW_OPTIONS.map((item) => (
-            <button
-              key={item.key}
-              type="button"
-              className={`switch-chip ${reviewView === item.key ? "is-active" : ""}`}
-              onClick={() => onSetReviewView(item.key)}
-            >
-              {item.label}
-            </button>
-          ))}
-        </div>
-      ) : null}
-
-      {activeRewriteUnit?.status === "failed" ? (
+      {activeRewriteUnit?.status === "failed" && !activeSuggestionId ? (
         <div className="error-card">
           <AlertCircle />
           <div>
             <strong>该片段生成失败</strong>
             <span>{activeRewriteUnit.errorMessage ?? "请点击重试重新生成。"}</span>
           </div>
+          <button
+            type="button"
+            className="icon-button icon-button-sm"
+            onClick={onRetry}
+            disabled={
+              !settingsReady ||
+              rewriteRunning ||
+              rewritePaused ||
+              busyAction === "retry-rewrite-unit" ||
+              (anyBusy && busyAction !== "retry-rewrite-unit")
+            }
+          >
+            {busyAction === "retry-rewrite-unit" ? (
+              <RotateCcw className="spin" />
+            ) : (
+              <RotateCcw />
+            )}
+          </button>
         </div>
       ) : null}
 
-      {activeSuggestion ? (
-        <div className="diff-view">
-          {reviewView === "diff" ? (
-            activeSuggestion.diffSpans.length > 0 ? (
-              <p>
-                {activeSuggestion.diffSpans.map((span, index) => (
-                  <span
-                    key={`${span.type}-${index}-${span.text.length}`}
-                    className={`diff-span is-${span.type}`}
-                  >
-                    {renderText(
-                      span.text,
-                      `suggestion-${activeSuggestion.id}-diff-${span.type}-${index}`
-                    )}
-                  </span>
-                ))}
-              </p>
-            ) : (
-              <div className="empty-inline">
-                <span>该修改对没有可展示的 diff。</span>
-              </div>
-            )
-          ) : null}
-
-          {reviewView === "source" ? (
-            <p>
-              {renderText(
-                activeSuggestion.beforeText,
-                `suggestion-${activeSuggestion.id}-source`
-              )}
-            </p>
-          ) : null}
-
-          {reviewView === "candidate" ? (
-            <p>
-              {renderText(
-                activeSuggestion.afterText,
-                `suggestion-${activeSuggestion.id}-candidate`
-              )}
-            </p>
-          ) : null}
+      {orderedSuggestions.length === 0 ? (
+        <div className="empty-inline">
+          <span>还没有建议。点击左侧「文档」右上角的“开始优化”生成一段。</span>
         </div>
       ) : (
-        <div className="empty-inline">
-          <span>点击下方任意修改对查看细节。</span>
+        <div className="suggestion-list scroll-region">
+          {orderedSuggestions.map((suggestion) => (
+            <ReviewSuggestionRow
+              key={suggestion.id}
+              suggestion={suggestion}
+              active={suggestion.id === activeSuggestionId}
+              menuOpen={openMenuSuggestionId === suggestion.id}
+              actionState={buildSuggestionRowActionState({
+                suggestionId: suggestion.id,
+                decision: suggestion.decision,
+                busyAction,
+                anyBusy,
+                editorMode: false,
+                rewriteRunning,
+                rewritePaused,
+                settingsReady,
+                rewriteUnitFailed: failedRewriteUnitIds.has(suggestion.rewriteUnitId)
+              })}
+              onSelect={() => {
+                logScrollRestore("review-row-select", {
+                  sessionId: currentSession.id,
+                  clickedSuggestionId: suggestion.id,
+                  clickedRewriteUnitId: suggestion.rewriteUnitId,
+                  currentActiveSuggestionId: activeSuggestionId,
+                  currentActiveRewriteUnitId: activeRewriteUnit?.id ?? null
+                });
+                setOpenMenuSuggestionId(null);
+                onSelectRewriteUnit(suggestion.rewriteUnitId);
+                onSelectSuggestion(suggestion.id, { forceScroll: true });
+              }}
+              onApply={() => {
+                setOpenMenuSuggestionId(null);
+                onApplySuggestion(suggestion.id);
+              }}
+              onDelete={() => {
+                setOpenMenuSuggestionId(null);
+                onDeleteSuggestion(suggestion.id);
+              }}
+              onDismiss={() => {
+                setOpenMenuSuggestionId(null);
+                onDismissSuggestion(suggestion.id);
+              }}
+              onRetry={() => {
+                setOpenMenuSuggestionId(null);
+                onRetry();
+              }}
+              onToggleMenu={() =>
+                setOpenMenuSuggestionId((current) =>
+                  current === suggestion.id ? null : suggestion.id
+                )
+              }
+            />
+          ))}
         </div>
       )}
-
-      <div className="suggestion-list scroll-region">
-        {orderedSuggestions.length === 0 ? (
-          <div className="empty-inline">
-            <span>还没有修改对。点击左侧「文档」右上角的“开始优化”生成一段。</span>
-          </div>
-        ) : (
-          orderedSuggestions.map((suggestion) => {
-            const compact = (value: string) => value.replace(/\s+/g, " ").trim();
-            const before = compact(suggestion.beforeText);
-            const after = compact(suggestion.afterText);
-            const preferred = before || after || "（空片段）";
-            const preview = preferred.slice(0, 200);
-            const more = preferred.length > 200 ? "…" : "";
-            const meta = `${formatDate(suggestion.createdAt)} · ${countCharacters(suggestion.afterText)} 字`;
-
-            return (
-              <button
-                key={suggestion.id}
-                type="button"
-                className={`suggestion-row ${suggestion.id === activeSuggestionId ? "is-active" : ""}`}
-                onClick={() => {
-                  onSelectRewriteUnit(suggestion.rewriteUnitId);
-                  onSelectSuggestion(suggestion.id);
-                }}
-                title={meta}
-              >
-                <div className="suggestion-row-line">
-                  <span className="suggestion-row-title">
-                    #{suggestion.sequence} · {preview}
-                    {more}
-                  </span>
-                  <span className="suggestion-row-meta-inline">{meta}</span>
-                  <StatusBadge tone={suggestionTone(suggestion.decision)}>
-                    {formatSuggestionDecision(suggestion.decision)}
-                  </StatusBadge>
-                </div>
-              </button>
-            );
-          })
-        )}
-      </div>
     </>
   );
 });

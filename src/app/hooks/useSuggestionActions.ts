@@ -20,15 +20,16 @@ import {
   type ShowNotice,
   type WithBusy
 } from "./sessionActionShared";
+import { logScrollRestore } from "./documentScrollRestoreDebug";
 
 export function useSuggestionActions(options: {
   currentSessionRef: React.MutableRefObject<DocumentSession | null>;
   activeRewriteUnitIdRef: React.MutableRefObject<string | null>;
   captureDocumentScrollPosition: () => number | null;
+  requestRevealActiveRewriteUnit: () => void;
   setActiveRewriteUnitId: React.Dispatch<React.SetStateAction<string | null>>;
   setActiveSuggestionId: React.Dispatch<React.SetStateAction<string | null>>;
   setSelectedRewriteUnitIds: React.Dispatch<React.SetStateAction<string[]>>;
-  setReviewView: React.Dispatch<React.SetStateAction<"diff" | "source" | "candidate">>;
   applySessionState: ApplySessionState;
   refreshSessionState: RefreshSessionState;
   showNotice: ShowNotice;
@@ -38,10 +39,10 @@ export function useSuggestionActions(options: {
     currentSessionRef,
     activeRewriteUnitIdRef,
     captureDocumentScrollPosition,
+    requestRevealActiveRewriteUnit,
     setActiveRewriteUnitId,
     setActiveSuggestionId,
     setSelectedRewriteUnitIds,
-    setReviewView,
     applySessionState,
     refreshSessionState,
     showNotice,
@@ -51,6 +52,20 @@ export function useSuggestionActions(options: {
   const handleSelectRewriteUnit = useCallback(
     (rewriteUnitId: string, options?: { multiSelect?: boolean }) => {
       const session = currentSessionRef.current;
+      const latestForRewriteUnit = session
+        ? session.suggestions
+            .filter((suggestion) => suggestion.rewriteUnitId === rewriteUnitId)
+            .sort((left, right) => right.sequence - left.sequence)[0] ?? null
+        : null;
+
+      logScrollRestore("suggestion-select-rewrite-unit", {
+        sessionId: session?.id ?? null,
+        rewriteUnitId,
+        multiSelect: Boolean(options?.multiSelect),
+        previousActiveRewriteUnitId: activeRewriteUnitIdRef.current,
+        inferredSuggestionId: latestForRewriteUnit?.id ?? null
+      });
+
       setActiveRewriteUnitId(rewriteUnitId);
 
       if (!session) {
@@ -70,10 +85,6 @@ export function useSuggestionActions(options: {
         setSelectedRewriteUnitIds([]);
       }
 
-      const latestForRewriteUnit = session.suggestions
-        .filter((suggestion) => suggestion.rewriteUnitId === rewriteUnitId)
-        .sort((left, right) => right.sequence - left.sequence)[0];
-
       setActiveSuggestionId(latestForRewriteUnit?.id ?? null);
     },
     [
@@ -85,11 +96,21 @@ export function useSuggestionActions(options: {
   );
 
   const handleSelectSuggestion = useCallback(
-    (suggestionId: string) => {
+    (suggestionId: string, options?: { forceScroll?: boolean }) => {
+      const session = currentSessionRef.current;
+      const suggestion = session?.suggestions.find((item) => item.id === suggestionId) ?? null;
+      logScrollRestore("suggestion-select", {
+        sessionId: session?.id ?? null,
+        suggestionId,
+        rewriteUnitId: suggestion?.rewriteUnitId ?? null,
+        forceScroll: Boolean(options?.forceScroll)
+      });
+      if (options?.forceScroll) {
+        requestRevealActiveRewriteUnit();
+      }
       setActiveSuggestionId(suggestionId);
-      setReviewView("diff");
     },
-    [setActiveSuggestionId, setReviewView]
+    [currentSessionRef, requestRevealActiveRewriteUnit, setActiveSuggestionId]
   );
 
   const handleApplySuggestion = useCallback(
@@ -151,7 +172,7 @@ export function useSuggestionActions(options: {
         getLatestSuggestion(result.session);
       showNotice(
         "success",
-        suggestion ? `已应用修改对 #${suggestion.sequence}。` : "已应用修改对。"
+        suggestion ? `已应用建议 #${suggestion.sequence}。` : "已应用建议。"
       );
     },
     [
@@ -195,7 +216,7 @@ export function useSuggestionActions(options: {
         return;
       }
 
-      showNotice("warning", "已取消应用 / 忽略该修改对。");
+      showNotice("warning", "已取消应用 / 忽略该建议。");
     },
     [
       activeRewriteUnitIdRef,
@@ -233,7 +254,7 @@ export function useSuggestionActions(options: {
         return;
       }
 
-      showNotice("warning", "已删除该修改对。");
+      showNotice("warning", "已删除该建议。");
     },
     [
       activeRewriteUnitIdRef,

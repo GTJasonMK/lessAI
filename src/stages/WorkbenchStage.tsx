@@ -9,7 +9,6 @@ import type {
   RewriteUnit
 } from "../lib/types";
 import type { SessionStats } from "../lib/helpers";
-import type { ReviewView } from "../lib/constants";
 import {
   buildRunningRewriteUnitIdSet,
   findRewriteUnit,
@@ -30,8 +29,8 @@ interface WorkbenchStageProps {
   activeRewriteUnit: RewriteUnit | null;
   activeRewriteUnitId: string | null;
   activeSuggestionId: string | null;
+  activeReviewNavigationRequestId: number;
   selectedRewriteUnitIds: string[];
-  reviewView: ReviewView;
   busyAction: string | null;
   editorMode: boolean;
   editorText: string;
@@ -42,8 +41,7 @@ interface WorkbenchStageProps {
   documentScrollRef: MutableRefObject<HTMLDivElement | null>;
   onOpenDocument: () => void;
   onSelectRewriteUnit: (rewriteUnitId: string, options?: { multiSelect?: boolean }) => void;
-  onSelectSuggestion: (suggestionId: string) => void;
-  onSetReviewView: (view: ReviewView) => void;
+  onSelectSuggestion: (suggestionId: string, options?: { forceScroll?: boolean }) => void;
   onStartRewrite: (mode: RewriteMode) => void;
   onPause: () => void;
   onResume: () => void;
@@ -74,8 +72,8 @@ export const WorkbenchStage = memo(function WorkbenchStage({
   activeRewriteUnit,
   activeRewriteUnitId,
   activeSuggestionId,
+  activeReviewNavigationRequestId,
   selectedRewriteUnitIds,
-  reviewView,
   busyAction,
   editorMode,
   editorText,
@@ -87,7 +85,6 @@ export const WorkbenchStage = memo(function WorkbenchStage({
   onOpenDocument,
   onSelectRewriteUnit,
   onSelectSuggestion,
-  onSetReviewView,
   onStartRewrite,
   onPause,
   onResume,
@@ -175,6 +172,8 @@ export const WorkbenchStage = memo(function WorkbenchStage({
             runningRewriteUnitIdSet={runningRewriteUnitIdSet}
             optimisticManualRunningRewriteUnitId={optimisticManualRunningRewriteUnitId}
             activeRewriteUnitId={activeRewriteUnitId}
+            activeSuggestionId={activeSuggestionId}
+            activeReviewNavigationRequestId={activeReviewNavigationRequestId}
             selectedRewriteUnitIds={selectedRewriteUnitIds}
             busyAction={busyAction}
             editorMode={editorMode}
@@ -221,13 +220,10 @@ export const WorkbenchStage = memo(function WorkbenchStage({
             editorMode={editorMode}
             editorText={editorText}
             editorDirty={editorDirty}
-            reviewView={reviewView}
             orderedSuggestions={orderedSuggestions}
-            onOpenDocument={onOpenDocument}
             onOpenSettings={onOpenSettings}
             onSelectRewriteUnit={onSelectRewriteUnit}
             onSelectSuggestion={onSelectSuggestion}
-            onSetReviewView={onSetReviewView}
             onApplySuggestion={onApplySuggestion}
             onDismissSuggestion={onDismissSuggestion}
             onDeleteSuggestion={onDeleteSuggestion}

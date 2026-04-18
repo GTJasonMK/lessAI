@@ -171,7 +171,7 @@ export const DocumentActionBar = memo(function DocumentActionBar({
                 title={
                   showMarkers
                     ? "隐藏分块边界/保护区/运行态等辅助高亮（更适合通读）"
-                    : "显示分块边界/保护区/运行态等辅助高亮（更适合审阅）"
+                    : "显示分块边界/保护区/运行态等辅助高亮（更适合处理建议）"
                 }
                 disabled={editorMode}
               >

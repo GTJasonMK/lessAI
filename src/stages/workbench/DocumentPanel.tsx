@@ -37,6 +37,8 @@ interface DocumentPanelProps {
   runningRewriteUnitIdSet: Set<string>;
   optimisticManualRunningRewriteUnitId: string | null;
   activeRewriteUnitId: string | null;
+  activeSuggestionId: string | null;
+  activeReviewNavigationRequestId: number;
   selectedRewriteUnitIds: string[];
   busyAction: string | null;
   editorMode: boolean;
@@ -49,7 +51,7 @@ interface DocumentPanelProps {
   onOpenDocument: () => void;
   onOpenSettings: () => void;
   onSelectRewriteUnit: (rewriteUnitId: string, options?: { multiSelect?: boolean }) => void;
-  onSelectSuggestion: (suggestionId: string) => void;
+  onSelectSuggestion: (suggestionId: string, options?: { forceScroll?: boolean }) => void;
   onStartRewrite: (mode: AppSettings["rewriteMode"]) => void;
   onPause: () => void;
   onResume: () => void;
@@ -78,6 +80,8 @@ export const DocumentPanel = memo(function DocumentPanel({
   runningRewriteUnitIdSet,
   optimisticManualRunningRewriteUnitId,
   activeRewriteUnitId,
+  activeSuggestionId,
+  activeReviewNavigationRequestId,
   selectedRewriteUnitIds,
   busyAction,
   editorMode,
@@ -178,13 +182,13 @@ export const DocumentPanel = memo(function DocumentPanel({
     if (!settingsReady) return "请先在设置里配置 Base URL / Key / Model";
     if (rewriteBlockReason) return rewriteBlockReason;
     if (settings.rewriteMode === "manual" && !nextManualTargetRewriteUnit) {
-      return hasRewriteUnitSelection ? "所选片段已处理完成" : "全部片段已生成，可在右侧审阅并导出";
+      return hasRewriteUnitSelection ? "所选片段已处理完成" : "全部片段已生成，可在右侧处理后导出";
     }
     if (settings.rewriteMode === "auto" && autoPendingTargetRewriteUnits.length === 0) {
-      return hasRewriteUnitSelection ? "所选片段已处理完成" : "全部片段已生成，可在右侧审阅并导出";
+      return hasRewriteUnitSelection ? "所选片段已处理完成" : "全部片段已生成，可在右侧处理后导出";
     }
     if (hasRewriteUnitSelection) return `处理所选 ${selectedDisplayCount} 段`;
-    return settings.rewriteMode === "auto" ? "自动批处理生成并应用" : "生成下一条修改对";
+    return settings.rewriteMode === "auto" ? "自动批处理生成并应用" : "生成下一条建议";
   }, [
     autoPendingTargetRewriteUnits.length,
     currentSession,
@@ -429,6 +433,8 @@ export const DocumentPanel = memo(function DocumentPanel({
                 runningRewriteUnitIdSet={runningRewriteUnitIdSet}
                 optimisticManualRunningRewriteUnitId={optimisticManualRunningRewriteUnitId}
                 activeRewriteUnitId={activeRewriteUnitId}
+                activeSuggestionId={activeSuggestionId}
+                activeReviewNavigationRequestId={activeReviewNavigationRequestId}
                 selectedRewriteUnitIds={selectedRewriteUnitIds}
                 onSelectRewriteUnit={onSelectRewriteUnit}
                 onSelectSuggestion={onSelectSuggestion}

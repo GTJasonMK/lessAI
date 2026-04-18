@@ -1,5 +1,4 @@
 import { memo } from "react";
-import { Check, LoaderCircle, RotateCcw, Trash2, X } from "lucide-react";
 import type { DocumentSession, RewriteSuggestion, RewriteUnit } from "../../../lib/types";
 import {
   formatRewriteUnitStatus,
@@ -12,35 +11,19 @@ import { StatusBadge } from "../../../components/StatusBadge";
 interface ReviewActionBarProps {
   editorMode: boolean;
   settingsReady: boolean;
-  rewriteRunning: boolean;
-  rewritePaused: boolean;
-  anyBusy: boolean;
-  busyAction: string | null;
   currentSession: DocumentSession | null;
   activeRewriteUnit: RewriteUnit | null;
   activeRewriteUnitSuggestions: RewriteSuggestion[];
   activeSuggestion: RewriteSuggestion | null;
-  onRetry: () => void;
-  onApplySuggestion: (suggestionId: string) => void;
-  onDismissSuggestion: (suggestionId: string) => void;
-  onDeleteSuggestion: (suggestionId: string) => void;
 }
 
 export const ReviewActionBar = memo(function ReviewActionBar({
   editorMode,
   settingsReady,
-  rewriteRunning,
-  rewritePaused,
-  anyBusy,
-  busyAction,
   currentSession,
   activeRewriteUnit,
   activeRewriteUnitSuggestions,
-  activeSuggestion,
-  onRetry,
-  onApplySuggestion,
-  onDismissSuggestion,
-  onDeleteSuggestion
+  activeSuggestion
 }: ReviewActionBarProps) {
   return (
     <div className={`workbench-action-reel ${editorMode ? "is-editor" : ""}`}>
@@ -74,103 +57,6 @@ export const ReviewActionBar = memo(function ReviewActionBar({
               </StatusBadge>
             )}
           </div>
-
-          <div className="workbench-review-actionbar-buttons">
-            {activeRewriteUnit?.status === "failed" ? (
-              <button
-                type="button"
-                className="icon-button icon-button-sm"
-                onClick={onRetry}
-                aria-label="重试生成当前位置"
-                title="重试生成当前位置"
-                disabled={
-                  editorMode ||
-                  !settingsReady ||
-                  rewriteRunning ||
-                  rewritePaused ||
-                  busyAction === "retry-rewrite-unit" ||
-                  (anyBusy && busyAction !== "retry-rewrite-unit")
-                }
-              >
-                {busyAction === "retry-rewrite-unit" ? (
-                  <LoaderCircle className="spin" />
-                ) : (
-                  <RotateCcw />
-                )}
-              </button>
-            ) : null}
-
-            {activeSuggestion ? (
-              <>
-                <button
-                  type="button"
-                  className="icon-button icon-button-sm"
-                  onClick={() => onApplySuggestion(activeSuggestion.id)}
-                  aria-label="应用该修改对"
-                  title="应用"
-                  disabled={
-                    editorMode ||
-                    rewriteRunning ||
-                    rewritePaused ||
-                    activeSuggestion.decision === "applied" ||
-                    busyAction === `apply-suggestion:${activeSuggestion.id}` ||
-                    (anyBusy && busyAction !== `apply-suggestion:${activeSuggestion.id}`)
-                  }
-                >
-                  {busyAction === `apply-suggestion:${activeSuggestion.id}` ? (
-                    <LoaderCircle className="spin" />
-                  ) : (
-                    <Check />
-                  )}
-                </button>
-                <button
-                  type="button"
-                  className="icon-button icon-button-sm"
-                  onClick={() => onDismissSuggestion(activeSuggestion.id)}
-                  aria-label={
-                    activeSuggestion.decision === "applied" ? "取消应用该修改对" : "忽略该修改对"
-                  }
-                  title={activeSuggestion.decision === "applied" ? "取消应用" : "忽略"}
-                  disabled={
-                    editorMode ||
-                    rewriteRunning ||
-                    rewritePaused ||
-                    activeSuggestion.decision === "dismissed" ||
-                    busyAction === `dismiss-suggestion:${activeSuggestion.id}` ||
-                    (anyBusy && busyAction !== `dismiss-suggestion:${activeSuggestion.id}`)
-                  }
-                >
-                  {busyAction === `dismiss-suggestion:${activeSuggestion.id}` ? (
-                    <LoaderCircle className="spin" />
-                  ) : activeSuggestion.decision === "applied" ? (
-                    <RotateCcw />
-                  ) : (
-                    <X />
-                  )}
-                </button>
-                <button
-                  type="button"
-                  className="icon-button icon-button-sm"
-                  onClick={() => onDeleteSuggestion(activeSuggestion.id)}
-                  aria-label="删除该修改对"
-                  title="删除"
-                  disabled={
-                    editorMode ||
-                    rewriteRunning ||
-                    rewritePaused ||
-                    busyAction === `delete-suggestion:${activeSuggestion.id}` ||
-                    (anyBusy && busyAction !== `delete-suggestion:${activeSuggestion.id}`)
-                  }
-                >
-                  {busyAction === `delete-suggestion:${activeSuggestion.id}` ? (
-                    <LoaderCircle className="spin" />
-                  ) : (
-                    <Trash2 />
-                  )}
-                </button>
-              </>
-            ) : null}
-          </div>
         </div>
 
         <div
@@ -179,9 +65,6 @@ export const ReviewActionBar = memo(function ReviewActionBar({
         >
           <div className="workbench-review-actionbar-status">
             <StatusBadge tone="info">编辑模式</StatusBadge>
-          </div>
-          <div className="workbench-review-actionbar-buttons">
-            <StatusBadge tone="info">审阅只读</StatusBadge>
           </div>
         </div>
       </div>
