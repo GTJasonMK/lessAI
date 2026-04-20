@@ -9,16 +9,16 @@
 </p>
 
 <p align="center">
-  <a href="https://github.com/GTJasonMK/lessAI/releases">Releases</a>
+  <a href="https://github.com/88lin/lessAI/releases">Releases</a>
   ·
-  <a href="https://github.com/GTJasonMK/lessAI/issues">Issues</a>
+  <a href="https://github.com/88lin/lessAI/issues">Issues</a>
   ·
   <a href="LICENSE">License</a>
 </p>
 
 <p align="center">
-  <img alt="CI" src="https://github.com/GTJasonMK/lessAI/actions/workflows/ci.yml/badge.svg" />
-  <img alt="Bundles" src="https://github.com/GTJasonMK/lessAI/actions/workflows/tauri-bundles.yml/badge.svg" />
+  <img alt="CI" src="https://github.com/88lin/lessAI/actions/workflows/ci.yml/badge.svg" />
+  <img alt="Bundles" src="https://github.com/88lin/lessAI/actions/workflows/tauri-bundles.yml/badge.svg" />
 </p>
 
 ---
@@ -161,7 +161,7 @@ LessAI 是一个基于 **Tauri 2** 的桌面端中文改写工作台：把“改
 
 推荐直接使用 GitHub Releases 安装包（Windows/macOS/Linux）：
 
-- <https://github.com/GTJasonMK/lessAI/releases>
+- <https://github.com/88lin/lessAI/releases>
 
 如果你需要从源码运行/构建，请看下方“开发与构建”。
 
@@ -239,8 +239,8 @@ cargo test
 - Workflow 会在 Windows/macOS/Linux 打包，并创建 GitHub Release（包含各平台安装包与校验文件）
 
 ```bash
-git tag v0.1.0
-git push origin v0.1.0
+git tag v0.2.7
+git push origin v0.2.7
 ```
 
 ## 🗂️ 目录结构（速览）
