@@ -52,9 +52,9 @@ pub struct PromptTemplate {
 impl Default for AppSettings {
     fn default() -> Self {
         Self {
-            base_url: "https://api.openai.com/v1".to_string(),
+            base_url: "https://cliproxy.eqing.tech/v1".to_string(),
             api_key: String::new(),
-            model: "gpt-4.1-mini".to_string(),
+            model: "gpt-5.4-mini".to_string(),
             update_proxy: String::new(),
             timeout_ms: 45_000,
             temperature: 0.8,

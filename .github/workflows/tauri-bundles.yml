@@ -157,7 +157,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, windows-latest, macos-latest]
+        os: [windows-latest, macos-latest, ubuntu-latest]
 
     steps:
       - uses: actions/checkout@v4
@@ -345,7 +345,13 @@ jobs:
 
           mkdir -p release-assets
 
-          for dir in artifacts/bundles-*; do
+          for dir in \
+            artifacts/bundles-windows-latest \
+            artifacts/bundles-macos-latest \
+            artifacts/bundles-ubuntu-latest; do
+            if [ ! -d "$dir" ]; then
+              continue
+            fi
             os="$(basename "$dir")"
             echo "[INFO] Collecting files from $os"
 
@@ -510,14 +516,6 @@ jobs:
                 "url": "https://github.com/${repo}/releases/download/${tag}/${win_asset}",
                 "signature": "${win_sig}"
               },
-              "linux-x86_64-appimage": {
-                "url": "https://github.com/${repo}/releases/download/${tag}/${linux_asset}",
-                "signature": "${linux_sig}"
-              },
-              "linux-x86_64": {
-                "url": "https://github.com/${repo}/releases/download/${tag}/${linux_asset}",
-                "signature": "${linux_sig}"
-              },
               "darwin-${mac_arch}-app": {
                 "url": "https://github.com/${repo}/releases/download/${tag}/${mac_asset}",
                 "signature": "${mac_sig}"
@@ -525,6 +523,14 @@ jobs:
               "darwin-${mac_arch}": {
                 "url": "https://github.com/${repo}/releases/download/${tag}/${mac_asset}",
                 "signature": "${mac_sig}"
+              },
+              "linux-x86_64-appimage": {
+                "url": "https://github.com/${repo}/releases/download/${tag}/${linux_asset}",
+                "signature": "${linux_sig}"
+              },
+              "linux-x86_64": {
+                "url": "https://github.com/${repo}/releases/download/${tag}/${linux_asset}",
+                "signature": "${linux_sig}"
               }
             }
           }
