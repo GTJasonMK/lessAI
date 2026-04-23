@@ -1,11 +1,14 @@
 import { open } from "@tauri-apps/plugin-dialog";
 import { startTransition, useCallback } from "react";
 import { openDocument, runDocumentWriteback } from "../../lib/api";
+import {
+  documentEditorMode,
+  editorEntryBlockedReason,
+  sessionSupportsEditorEntry
+} from "../../lib/documentCapabilities";
 import { buildEditorSlotEdits, buildEditorTextFromSession } from "../../lib/editorSlots";
 import type { DocumentSession, DocumentSnapshot, RewriteProgress } from "../../lib/types";
 import {
-  isDocxPath,
-  isPdfPath,
   normalizeNewlines,
   readableError
 } from "../../lib/helpers";
@@ -147,18 +150,11 @@ export function useDocumentActions(options: {
       showNotice,
       errorPrefix: "进入编辑模式失败",
       formatError: readableError,
-      allowed: (current) => current.plainTextEditorSafe,
-      blockedMessage: (current) => current.plainTextEditorBlockReason,
+      allowed: sessionSupportsEditorEntry,
+      blockedMessage: editorEntryBlockedReason,
       defaultBlockedMessage: "当前文档暂不支持进入编辑模式。"
     });
     if (!latestSession) {
-      return;
-    }
-    if (isPdfPath(latestSession.documentPath)) {
-      showNotice(
-        "warning",
-        "pdf 目前仅支持导入/改写/导出，暂不支持终稿编辑或写回覆盖。"
-      );
       return;
     }
 
@@ -172,24 +168,9 @@ export function useDocumentActions(options: {
       return;
     }
 
-    const cleanSession =
-      latestSession.status === "idle" &&
-      latestSession.suggestions.length === 0 &&
-      latestSession.rewriteUnits.every(
-        (rewriteUnit) => rewriteUnit.status === "idle" || rewriteUnit.status === "done"
-      );
-
-    if (!cleanSession) {
-      showNotice(
-        "warning",
-        "该文档存在修订记录或进度，为避免冲突，请先“覆写并清理记录”或“重置记录”后再编辑。"
-      );
-      return;
-    }
-
     startTransition(() => {
       setStage("editor");
-      const baseline = isDocxPath(latestSession.documentPath)
+      const baseline = documentEditorMode(latestSession) === "slotBased"
         ? buildEditorTextFromSession(latestSession, {})
         : normalizeNewlines(latestSession.sourceText);
       setEditorSlotOverrides({});
@@ -199,10 +180,10 @@ export function useDocumentActions(options: {
       setSettingsOpen(false);
     });
     editorBaseSnapshotRef.current = latestSession.sourceSnapshot ?? null;
-    if (isDocxPath(latestSession.documentPath)) {
+    if (documentEditorMode(latestSession) === "slotBased") {
       showNotice(
         "info",
-        "docx 编辑模式已按可写回槽位开放：锁定内容保持只读，可编辑范围与 AI 改写和写回范围一致。"
+        "结构化编辑模式已按可写回槽位开放：锁定内容保持只读，可编辑范围与 AI 改写和写回范围一致。"
       );
     }
   }, [
@@ -285,7 +266,7 @@ export function useDocumentActions(options: {
           preservedScrollTop,
           run: () =>
             withBusy(actionKey, () => {
-              if (!isDocxPath(session.documentPath)) {
+              if (documentEditorMode(session) !== "slotBased") {
                 return runDocumentWriteback(session.id, "write", { kind: "text", content }, editorBaseSnapshotRef.current);
               }
 
@@ -305,7 +286,7 @@ export function useDocumentActions(options: {
         setLiveProgress(null);
 
         startTransition(() => {
-          const baseline = isDocxPath(updated.documentPath)
+          const baseline = documentEditorMode(updated) === "slotBased"
             ? buildEditorTextFromSession(updated, {})
             : normalizeNewlines(updated.sourceText);
           setEditorSlotOverrides({});

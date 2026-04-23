@@ -3,9 +3,10 @@ use std::path::Path;
 use chrono::{DateTime, Utc};
 
 use crate::{
-    documents::LoadedDocumentSource,
+    documents::{hydrate_session_capabilities, LoadedDocumentSource},
     models::{DocumentSession, DocumentSnapshot, RunningState, SegmentationPreset},
     rewrite_unit::build_rewrite_units,
+    session_capability_models::DocumentSessionCapabilities,
 };
 
 pub(crate) struct CleanSessionBuildInput<'a> {
@@ -27,16 +28,13 @@ pub(crate) fn build_clean_session(input: CleanSessionBuildInput<'_>) -> Document
         slot_structure_signature,
         template_snapshot,
         writeback_slots,
-        write_back_supported,
-        write_back_block_reason,
-        plain_text_editor_safe,
-        plain_text_editor_block_reason,
+        capability_policy,
     } = input.loaded;
     let normalized_text = crate::rewrite::normalize_text(&source_text);
     let rewrite_units = build_rewrite_units(&writeback_slots, input.segmentation_preset);
     let now = Utc::now();
 
-    DocumentSession {
+    let mut session = DocumentSession {
         id: input.session_id,
         title: session_title(input.canonical_path),
         document_path: input.document_path,
@@ -47,10 +45,11 @@ pub(crate) fn build_clean_session(input: CleanSessionBuildInput<'_>) -> Document
         slot_structure_signature,
         template_snapshot,
         normalized_text,
-        write_back_supported,
-        write_back_block_reason,
-        plain_text_editor_safe,
-        plain_text_editor_block_reason,
+        capabilities: DocumentSessionCapabilities {
+            source_writeback: capability_policy.source_writeback,
+            editor_writeback: capability_policy.editor_writeback,
+            ..Default::default()
+        },
         segmentation_preset: Some(input.segmentation_preset),
         rewrite_headings: Some(input.rewrite_headings),
         writeback_slots,
@@ -60,7 +59,9 @@ pub(crate) fn build_clean_session(input: CleanSessionBuildInput<'_>) -> Document
         status: RunningState::Idle,
         created_at: input.created_at,
         updated_at: now,
-    }
+    };
+    hydrate_session_capabilities(&mut session);
+    session
 }
 
 fn session_title(path: &Path) -> String {
@@ -94,10 +95,10 @@ mod tests {
                 WritebackSlot::locked("slot-1", 1, "[公式]"),
                 WritebackSlot::editable("slot-2", 2, "后文"),
             ],
-            write_back_supported: false,
-            write_back_block_reason: Some("blocked".to_string()),
-            plain_text_editor_safe: false,
-            plain_text_editor_block_reason: Some("editor blocked".to_string()),
+            capability_policy: crate::documents::DocumentCapabilityPolicy::new(
+                crate::documents::capability_gate(false, Some("blocked")),
+                crate::documents::capability_gate(false, Some("editor blocked")),
+            ),
         };
 
         let session = super::build_clean_session(super::CleanSessionBuildInput {
@@ -133,11 +134,18 @@ mod tests {
             session.rewrite_units[0].slot_ids,
             vec!["slot-0", "slot-1", "slot-2"]
         );
-        assert!(!session.write_back_supported);
-        assert_eq!(session.write_back_block_reason.as_deref(), Some("blocked"));
-        assert!(!session.plain_text_editor_safe);
+        assert!(!session.capabilities.source_writeback.allowed);
         assert_eq!(
-            session.plain_text_editor_block_reason.as_deref(),
+            session.capabilities.source_writeback.block_reason.as_deref(),
+            Some("blocked")
+        );
+        assert!(!session.capabilities.editor_writeback.allowed);
+        assert_eq!(
+            session
+                .capabilities
+                .editor_writeback
+                .block_reason
+                .as_deref(),
             Some("editor blocked")
         );
         assert_eq!(session.created_at, created_at);
@@ -158,10 +166,10 @@ mod tests {
                 WritebackSlot::editable("slot-1", 0, "甲"),
                 WritebackSlot::editable("slot-2", 1, "乙"),
             ],
-            write_back_supported: true,
-            write_back_block_reason: None,
-            plain_text_editor_safe: true,
-            plain_text_editor_block_reason: None,
+            capability_policy: crate::documents::DocumentCapabilityPolicy::new(
+                crate::documents::capability_gate(true, None),
+                crate::documents::capability_gate(true, None),
+            ),
         };
 
         let session = super::build_clean_session(super::CleanSessionBuildInput {
@@ -195,10 +203,10 @@ mod tests {
             slot_structure_signature: Some(built.slot_structure_signature.clone()),
             template_snapshot: Some(template.clone()),
             writeback_slots: built.slots,
-            write_back_supported: true,
-            write_back_block_reason: None,
-            plain_text_editor_safe: true,
-            plain_text_editor_block_reason: None,
+            capability_policy: crate::documents::DocumentCapabilityPolicy::new(
+                crate::documents::capability_gate(true, None),
+                crate::documents::capability_gate(true, None),
+            ),
         };
 
         let session = super::build_clean_session(super::CleanSessionBuildInput {

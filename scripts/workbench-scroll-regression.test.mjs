@@ -1,13 +1,4 @@
-import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
-
-function read(path) {
-  return readFileSync(new URL(`../${path}`, import.meta.url), "utf8");
-}
-
-function assertIncludes(text, snippet) {
-  assert.ok(text.includes(snippet), `期望内容包含：${snippet}`);
-}
+import { assertIncludes, read } from "./test-helpers.mjs";
 
 const appSource = read("src/App.tsx");
 const sessionActionShared = read("src/app/hooks/sessionActionShared.ts");
@@ -21,11 +12,11 @@ assertIncludes(appSource, "options?.preserveScroll === false ? undefined : captu
 assertIncludes(appSource, "options.preservedScrollTop ?? null");
 
 assertIncludes(rewriteActions, "captureDocumentScrollPosition: () => number | null;");
-assertIncludes(rewriteActions, "const preservedScrollTop = captureDocumentScrollPosition();");
-assertIncludes(rewriteActions, "preservedScrollTop");
+assertIncludes(rewriteActions, "runSessionActionOrNotify({");
+assertIncludes(rewriteActions, "captureDocumentScrollPosition,");
 
 assertIncludes(suggestionActions, "captureDocumentScrollPosition: () => number | null;");
-assertIncludes(suggestionActions, "const preservedScrollTop = captureDocumentScrollPosition();");
-assertIncludes(suggestionActions, "preservedScrollTop");
+assertIncludes(suggestionActions, "runSessionActionOrNotify({");
+assertIncludes(suggestionActions, "captureDocumentScrollPosition,");
 
 console.log("[workbench-scroll-regression] OK");

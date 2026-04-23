@@ -5,7 +5,7 @@ use tauri::{AppHandle, State};
 use crate::{
     documents::{document_format, ensure_document_source_matches_session},
     editor_session::{ensure_editor_base_snapshot_matches_path, ACTIVE_EDITOR_SESSION_ERROR},
-    editor_writeback::ensure_session_can_use_plain_text_editor,
+    editor_writeback::ensure_session_can_use_editor_writeback,
     models::{DocumentSession, DocumentSnapshot},
     rewrite,
     session_access::{access_current_session, CurrentSessionRequest},
@@ -14,7 +14,7 @@ use crate::{
 };
 
 fn ensure_session_can_rewrite_snippet(session: &DocumentSession) -> Result<(), String> {
-    ensure_session_can_use_plain_text_editor(session)?;
+    ensure_session_can_use_editor_writeback(session)?;
     ensure_document_source_matches_session(
         Path::new(&session.document_path),
         session.source_snapshot.as_ref(),
@@ -94,8 +94,11 @@ mod tests {
     #[test]
     fn rejects_snippet_rewrite_for_non_editor_safe_session() {
         let mut session = sample_session();
-        session.plain_text_editor_safe = false;
-        session.plain_text_editor_block_reason = Some("当前文档暂不支持进入编辑模式。".to_string());
+        session.capabilities.editor_writeback =
+            crate::session_capability_models::CapabilityGate::blocked(
+                "当前文档暂不支持进入编辑模式。",
+            );
+        crate::documents::hydrate_session_capabilities(&mut session);
 
         let error = ensure_session_can_rewrite_snippet(&session)
             .expect_err("expected snippet rewrite to be blocked");
@@ -121,6 +124,7 @@ mod tests {
             SuggestionDecision::Proposed,
             vec![SlotUpdate::new("slot-0", "改写正文")],
         ));
+        crate::documents::hydrate_session_capabilities(&mut session);
 
         let error = ensure_session_can_rewrite_snippet(&session)
             .expect_err("expected dirty editor session to be blocked");

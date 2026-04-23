@@ -42,7 +42,7 @@ pub(crate) fn apply_preview_suggestion(
             rewrite_unit_id: rewrite_unit_id.to_string(),
             before_text: before_text.clone(),
             after_text: after_text.clone(),
-            diff_spans: rewrite::build_diff(&before_text, &after_text),
+            diff: rewrite::build_diff_result(&before_text, &after_text),
             decision: SuggestionDecision::Applied,
             slot_updates,
             created_at: now,

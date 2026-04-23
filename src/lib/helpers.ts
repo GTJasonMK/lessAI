@@ -9,6 +9,8 @@ import type {
   WritebackSlot,
 } from "./types";
 import type { NoticeTone } from "./constants";
+import { sessionSupportsAiRewrite } from "./documentCapabilities";
+import { fileExtensionLower } from "./path";
 
 export function readableError(error: unknown): string {
   if (error instanceof Error) {
@@ -456,31 +458,11 @@ export function formatDisplayPath(path: string) {
   return value;
 }
 
-export function fileExtensionLower(path: string) {
-  const value = path.trim();
-  if (!value) return "";
-
-  const lastSlash = Math.max(value.lastIndexOf("/"), value.lastIndexOf("\\"));
-  const base = lastSlash >= 0 ? value.slice(lastSlash + 1) : value;
-  const dot = base.lastIndexOf(".");
-  if (dot <= 0) return "";
-  return base.slice(dot + 1).toLowerCase();
-}
-
-export function isDocxPath(path: string) {
-  return fileExtensionLower(path) === "docx";
-}
-
-export function isPdfPath(path: string) {
-  return fileExtensionLower(path) === "pdf";
-}
-
 export function rewriteBlockedReason(session: DocumentSession | null) {
   if (!session) return null;
-  if (isPdfPath(session.documentPath)) return null;
-  if (session.writeBackSupported) return null;
+  if (sessionSupportsAiRewrite(session)) return null;
   return (
-    session.writeBackBlockReason ??
+    session.capabilities.aiRewrite.blockReason ??
     "当前文档暂不支持安全写回覆盖，因此不允许继续 AI 改写。"
   );
 }
@@ -515,10 +497,6 @@ export function isRewriteUnitDone(rewriteUnit: RewriteUnit) {
 
 export function isRewriteUnitPending(rewriteUnit: RewriteUnit) {
   return rewriteUnit.status === "idle" || rewriteUnit.status === "failed";
-}
-
-export function hasEditableRewriteUnits(session: DocumentSession) {
-  return session.rewriteUnits.some((rewriteUnit) => rewriteUnit.status !== "done");
 }
 
 export function buildRunningRewriteUnitIdSet(

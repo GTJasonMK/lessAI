@@ -67,6 +67,7 @@ impl SessionRefreshDraft {
 
     pub(super) fn finish(mut self) -> RefreshedSession {
         if self.changed {
+            crate::documents::hydrate_session_capabilities(&mut self.session);
             self.session.updated_at = Utc::now();
         }
         RefreshedSession {

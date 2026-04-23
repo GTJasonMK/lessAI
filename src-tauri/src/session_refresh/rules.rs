@@ -1,6 +1,6 @@
 use crate::{
     models::{
-        DocumentSession, DocumentSnapshot, RewriteUnitStatus, RunningState, SegmentationPreset,
+        DocumentSession, DocumentSnapshot, SegmentationPreset,
     },
     rewrite_unit::{RewriteUnit, WritebackSlot},
 };
@@ -20,14 +20,7 @@ pub(super) fn source_snapshot_changed(
 }
 
 pub(super) fn session_can_rebuild_cleanly(session: &DocumentSession) -> bool {
-    session.status == RunningState::Idle
-        && session.suggestions.is_empty()
-        && session.rewrite_units.iter().all(|unit| {
-            matches!(
-                unit.status,
-                RewriteUnitStatus::Idle | RewriteUnitStatus::Done
-            )
-        })
+    session.capabilities.clean_session
 }
 
 pub(super) fn decide_segmentation_refresh(

@@ -15,8 +15,7 @@ pub(crate) fn ensure_session_can_rewrite(session: &DocumentSession) -> Result<()
     ensure_document_can_ai_rewrite_safely(
         Path::new(&session.document_path),
         session.source_snapshot.as_ref(),
-        session.write_back_supported,
-        session.write_back_block_reason.as_deref(),
+        &session.capabilities.ai_rewrite,
     )
 }
 

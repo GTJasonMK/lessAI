@@ -115,10 +115,10 @@ mod tests {
             slot_structure_signature: None,
             template_snapshot: None,
             writeback_slots: vec![WritebackSlot::editable("slot-0", 0, source_text)],
-            write_back_supported: true,
-            write_back_block_reason: None,
-            plain_text_editor_safe: true,
-            plain_text_editor_block_reason: None,
+            capability_policy: crate::documents::DocumentCapabilityPolicy::new(
+                crate::documents::capability_gate(true, None),
+                crate::documents::capability_gate(true, None),
+            ),
         }
     }
 
@@ -177,10 +177,11 @@ mod tests {
             slot_structure_signature: None,
             template_snapshot: None,
             normalized_text: "正文".to_string(),
-            write_back_supported: true,
-            write_back_block_reason: None,
-            plain_text_editor_safe: true,
-            plain_text_editor_block_reason: None,
+            capabilities: crate::session_capability_models::DocumentSessionCapabilities {
+                source_writeback: crate::session_capability_models::CapabilityGate::allowed(),
+                editor_writeback: crate::session_capability_models::CapabilityGate::allowed(),
+                ..Default::default()
+            },
             segmentation_preset: Some(SegmentationPreset::Paragraph),
             rewrite_headings: Some(false),
             writeback_slots: Vec::new(),

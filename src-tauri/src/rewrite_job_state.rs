@@ -1,6 +1,7 @@
 use tauri::AppHandle;
 
 use crate::{
+    documents::hydrated_session_clone,
     models::{DocumentSession, RewriteUnitStatus, RunningState},
     rewrite_permissions::REWRITE_UNIT_NOT_FOUND_ERROR,
     session_access::{mutate_current_session, CurrentSessionRequest},
@@ -119,7 +120,7 @@ where
 {
     mutate_stored_session_now(app, state, session_id, |session| {
         transition(session);
-        Ok(session.clone())
+        Ok(hydrated_session_clone(session))
     })
 }
 

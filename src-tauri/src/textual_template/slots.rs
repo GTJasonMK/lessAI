@@ -7,7 +7,7 @@ use crate::{
 };
 
 use super::{
-    models::{TextTemplate, TextTemplateRegion},
+    models::{TextRegionSplitMode, TextTemplate, TextTemplateRegion},
     signature::compute_slot_structure_signature,
 };
 
@@ -56,10 +56,13 @@ fn split_region_chunks(region: &TextTemplateRegion) -> Vec<String> {
         return Vec::new();
     }
 
-    let chunks = if region.editable {
-        split_text_chunks_for_rewrite_slots(&combined)
-    } else {
+    let chunks = if !region.editable {
         split_text_chunks_by_paragraph_separator(&combined)
+    } else {
+        match region.split_mode {
+            TextRegionSplitMode::BoundaryAware => split_text_chunks_for_rewrite_slots(&combined),
+            TextRegionSplitMode::Atomic => vec![combined.as_str()],
+        }
     };
     chunks.into_iter().map(|chunk| chunk.to_string()).collect()
 }
@@ -98,9 +101,9 @@ fn slot_role(
         return WritebackSlotRole::ParagraphBreak;
     }
     if editable {
-        return WritebackSlotRole::EditableText;
+        return region.role.clone();
     }
-    if whitespace_only || region.role == WritebackSlotRole::EditableText {
+    if whitespace_only && region.role == WritebackSlotRole::EditableText {
         return WritebackSlotRole::LockedText;
     }
     region.role.clone()

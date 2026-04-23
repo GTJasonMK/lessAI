@@ -1,8 +1,9 @@
 use chrono::{DateTime, Utc};
-use serde::{Deserialize, Serialize};
+use serde::{Deserialize, Deserializer, Serialize};
 
 use crate::models::{
-    DiffSpan, RewriteUnitStatus, SegmentationPreset, SuggestionDecision, TextPresentation,
+    DiffResult, DiffSpan, RewriteUnitStatus, SegmentationPreset, SuggestionDecision,
+    TextPresentation,
 };
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -90,7 +91,7 @@ impl SlotUpdate {
     }
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct RewriteSuggestion {
     pub id: String,
@@ -98,9 +99,62 @@ pub struct RewriteSuggestion {
     pub rewrite_unit_id: String,
     pub before_text: String,
     pub after_text: String,
-    pub diff_spans: Vec<DiffSpan>,
+    pub diff: DiffResult,
     pub decision: SuggestionDecision,
     pub slot_updates: Vec<SlotUpdate>,
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct RewriteSuggestionWire {
+    id: String,
+    sequence: u64,
+    rewrite_unit_id: String,
+    before_text: String,
+    after_text: String,
+    #[serde(default)]
+    diff: Option<DiffResult>,
+    #[serde(default)]
+    diff_spans: Vec<DiffSpan>,
+    decision: SuggestionDecision,
+    #[serde(default)]
+    slot_updates: Vec<SlotUpdate>,
+    created_at: DateTime<Utc>,
+    updated_at: DateTime<Utc>,
+}
+
+impl RewriteSuggestionWire {
+    fn into_suggestion(self) -> RewriteSuggestion {
+        let diff = self.diff.unwrap_or_else(|| DiffResult {
+            degraded_reason: self
+                .diff_spans
+                .iter()
+                .find_map(|span| span.degraded_reason.clone()),
+            spans: self.diff_spans,
+        });
+
+        RewriteSuggestion {
+            id: self.id,
+            sequence: self.sequence,
+            rewrite_unit_id: self.rewrite_unit_id,
+            before_text: self.before_text,
+            after_text: self.after_text,
+            diff,
+            decision: self.decision,
+            slot_updates: self.slot_updates,
+            created_at: self.created_at,
+            updated_at: self.updated_at,
+        }
+    }
+}
+
+impl<'de> Deserialize<'de> for RewriteSuggestion {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        RewriteSuggestionWire::deserialize(deserializer).map(RewriteSuggestionWire::into_suggestion)
+    }
 }

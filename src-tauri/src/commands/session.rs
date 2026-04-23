@@ -9,6 +9,7 @@ use crate::{
     session_access::open_session_for_path,
     session_access::{access_current_session, CurrentSessionRequest},
     session_loader::load_clean_session_from_existing,
+    session_messages::ACTIVE_JOB_RESET_SESSION_ERROR,
     state::{with_session_lock, AppState},
     storage,
 };
@@ -38,7 +39,7 @@ pub fn reset_session(
 ) -> Result<DocumentSession, String> {
     access_current_session(
         CurrentSessionRequest::stored(&app, state.inner(), &session_id)
-            .with_active_job_error("当前文档正在执行自动任务，请先暂停并取消后再重置。"),
+            .with_active_job_error(ACTIVE_JOB_RESET_SESSION_ERROR),
         |existing| {
             // 重置是“清空会话记录并重建切块”，不修改原文件。
             let session = load_clean_session_from_existing(&app, &existing, Utc::now(), true)?;

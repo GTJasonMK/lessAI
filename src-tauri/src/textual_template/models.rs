@@ -2,6 +2,14 @@ use serde::{Deserialize, Serialize};
 
 use crate::{models::TextPresentation, rewrite_unit::WritebackSlotRole};
 
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Default)]
+#[serde(rename_all = "camelCase")]
+pub enum TextRegionSplitMode {
+    #[default]
+    BoundaryAware,
+    Atomic,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub struct TextTemplate {
@@ -34,6 +42,7 @@ impl TextTemplate {
                     editable: true,
                     role: WritebackSlotRole::EditableText,
                     presentation: None,
+                    split_mode: TextRegionSplitMode::BoundaryAware,
                     separator_after,
                 }],
             }],
@@ -57,6 +66,8 @@ pub struct TextTemplateRegion {
     pub editable: bool,
     pub role: WritebackSlotRole,
     pub presentation: Option<TextPresentation>,
+    #[serde(default)]
+    pub split_mode: TextRegionSplitMode,
     #[serde(default)]
     pub separator_after: String,
 }

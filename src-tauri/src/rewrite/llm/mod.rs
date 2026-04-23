@@ -13,10 +13,27 @@ pub(in crate::rewrite) mod transport;
 mod validate;
 
 pub fn build_client(settings: &AppSettings) -> Result<reqwest::Client, String> {
-    reqwest::Client::builder()
-        .timeout(Duration::from_millis(settings.timeout_ms))
-        .build()
-        .map_err(|error| error.to_string())
+    let mut builder = reqwest::Client::builder().timeout(Duration::from_millis(settings.timeout_ms));
+
+    if let Some(proxy_url) = normalize_proxy_url(&settings.update_proxy) {
+        let proxy = reqwest::Proxy::all(&proxy_url)
+            .map_err(|error| format!("代理地址无效（{proxy_url}）：{error}"))?;
+        builder = builder.no_proxy().proxy(proxy);
+    }
+
+    builder.build().map_err(|error| error.to_string())
+}
+
+fn normalize_proxy_url(raw_proxy: &str) -> Option<String> {
+    let trimmed = raw_proxy.trim();
+    if trimmed.is_empty() {
+        return None;
+    }
+    if trimmed.contains("://") {
+        Some(trimmed.to_string())
+    } else {
+        Some(format!("http://{trimmed}"))
+    }
 }
 
 pub async fn test_provider(settings: &AppSettings) -> Result<ProviderCheckResult, String> {
@@ -129,7 +146,7 @@ fn validate_settings(settings: &AppSettings) -> Result<(), String> {
 
 #[cfg(test)]
 mod tests {
-    use super::validate_settings;
+    use super::{build_client, normalize_proxy_url, validate_settings};
     use crate::models::AppSettings;
 
     #[test]
@@ -150,6 +167,30 @@ mod tests {
         let error = validate_settings(&settings).expect_err("expected invalid max concurrency");
 
         assert_eq!(error, "自动并发数必须在 1 到 8 之间。");
+    }
+
+    #[test]
+    fn normalize_proxy_url_adds_http_scheme_for_host_port() {
+        let normalized = normalize_proxy_url("127.0.0.1:7890");
+
+        assert_eq!(normalized.as_deref(), Some("http://127.0.0.1:7890"));
+    }
+
+    #[test]
+    fn normalize_proxy_url_keeps_existing_scheme() {
+        let normalized = normalize_proxy_url("socks5h://127.0.0.1:7891");
+
+        assert_eq!(normalized.as_deref(), Some("socks5h://127.0.0.1:7891"));
+    }
+
+    #[test]
+    fn build_client_rejects_invalid_proxy() {
+        let mut settings = valid_settings();
+        settings.update_proxy = "://bad".to_string();
+
+        let error = build_client(&settings).expect_err("expected invalid proxy url");
+
+        assert!(error.contains("代理地址无效"), "unexpected error: {error}");
     }
 
     fn valid_settings() -> AppSettings {

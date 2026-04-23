@@ -1,13 +1,4 @@
-import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
-
-function read(path) {
-  return readFileSync(new URL(`../${path}`, import.meta.url), "utf8");
-}
-
-function assertIncludes(text, snippet) {
-  assert.ok(text.includes(snippet), `期望内容包含：${snippet}`);
-}
+import { assertIncludes, read } from "./test-helpers.mjs";
 
 const mainRs = read("src-tauri/src/main.rs");
 const debugLogger = read("src/app/hooks/documentScrollRestoreDebug.ts");

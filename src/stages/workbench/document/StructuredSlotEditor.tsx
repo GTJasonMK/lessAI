@@ -17,38 +17,25 @@ import { normalizeNewlines } from "../../../lib/helpers";
 import type {
   DocumentEditorHandle,
   DocumentEditorProps,
-  DocumentEditorSelectionSnapshot,
   DocumentEditorPreviewResult,
+  DocumentEditorSelectionSnapshot,
   SlotSelectionSnapshot
 } from "./documentEditorTypes";
-import { DocxEditorUnit } from "./DocxEditorUnit";
-
-function selectionPointOffset(node: HTMLElement, container: Node, offset: number) {
-  const range = document.createRange();
-  range.selectNodeContents(node);
-  range.setEnd(container, offset);
-  return normalizeNewlines(range.toString()).length;
-}
+import { buildSelectionSnapshotBase } from "./editorSelectionShared";
+import { StructuredEditorUnit } from "./StructuredEditorUnit";
 
 function buildSlotSelectionSnapshot(
   node: HTMLElement,
   slotId: string,
   range: Range
 ): SlotSelectionSnapshot | null {
-  if (range.collapsed) return null;
-  if (!node.contains(range.startContainer) || !node.contains(range.endContainer)) {
-    return null;
-  }
-
-  const text = normalizeNewlines(range.toString());
-  if (text.trim().length === 0) return null;
+  const base = buildSelectionSnapshotBase(node, range);
+  if (!base) return null;
 
   return {
     kind: "slot",
     slotId,
-    text,
-    startOffset: selectionPointOffset(node, range.startContainer, range.startOffset),
-    endOffset: selectionPointOffset(node, range.endContainer, range.endOffset)
+    ...base
   };
 }
 
@@ -75,8 +62,8 @@ function replaceSelectionText(
   } as const;
 }
 
-export const DocxSlotEditor = memo(
-  forwardRef<DocumentEditorHandle, DocumentEditorProps>(function DocxSlotEditor(
+export const StructuredSlotEditor = memo(
+  forwardRef<DocumentEditorHandle, DocumentEditorProps>(function StructuredSlotEditor(
     {
       session,
       slotOverrides,
@@ -223,10 +210,10 @@ export const DocxSlotEditor = memo(
     );
 
     return (
-      <div className="workbench-editor-editable docx-editor-flow" aria-label="编辑终稿">
+      <div className="workbench-editor-editable structured-editor-flow" aria-label="编辑终稿">
         {session.rewriteUnits.map((rewriteUnit) => {
           return (
-            <DocxEditorUnit
+            <StructuredEditorUnit
               key={rewriteUnit.id}
               session={session}
               rewriteUnit={rewriteUnit}

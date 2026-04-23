@@ -4,7 +4,7 @@ use crate::{
         split_text_and_trailing_separator, split_text_chunks_by_paragraph_separator,
     },
     textual_template::{
-        models::{TextTemplateBlock, TextTemplateRegion},
+        models::{TextRegionSplitMode, TextTemplateBlock, TextTemplateRegion},
         TextTemplate,
     },
 };
@@ -40,6 +40,7 @@ fn build_paragraph_block(paragraph_index: usize, chunk: &str) -> TextTemplateBlo
             editable: true,
             role: WritebackSlotRole::EditableText,
             presentation: None,
+            split_mode: TextRegionSplitMode::BoundaryAware,
             separator_after,
         }],
     }

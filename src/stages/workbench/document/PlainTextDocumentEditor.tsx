@@ -8,35 +8,18 @@ import type {
   DocumentEditorSelectionSnapshot,
   DocumentEditorPreviewResult,
 } from "./documentEditorTypes";
-
-function selectionPointOffset(
-  node: HTMLDivElement,
-  container: Node,
-  offset: number
-) {
-  const range = document.createRange();
-  range.selectNodeContents(node);
-  range.setEnd(container, offset);
-  return normalizeNewlines(range.toString()).length;
-}
+import { buildSelectionSnapshotBase } from "./editorSelectionShared";
 
 function buildSelectionSnapshot(
   node: HTMLDivElement,
   range: Range
 ): DocumentEditorSelectionSnapshot | null {
-  if (range.collapsed) return null;
-  if (!node.contains(range.startContainer) || !node.contains(range.endContainer)) {
-    return null;
-  }
-
-  const text = normalizeNewlines(range.toString());
-  if (text.trim().length === 0) return null;
+  const base = buildSelectionSnapshotBase(node, range);
+  if (!base) return null;
 
   return {
     kind: "text",
-    text,
-    startOffset: selectionPointOffset(node, range.startContainer, range.startOffset),
-    endOffset: selectionPointOffset(node, range.endContainer, range.endOffset)
+    ...base
   };
 }
 

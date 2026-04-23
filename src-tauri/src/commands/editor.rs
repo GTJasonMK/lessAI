@@ -5,7 +5,8 @@ use crate::{
     documents::WritebackMode,
     editor_session::{ensure_editor_base_snapshot_matches_path, ACTIVE_EDITOR_SESSION_ERROR},
     editor_writeback::{
-        build_plain_text_editor_writeback, build_slot_editor_writeback, execute_editor_writeback,
+        build_full_text_editor_writeback, build_slot_editor_writeback,
+        execute_editor_writeback,
         EditorWritebackPayload,
     },
     models::{DocumentSession, DocumentSnapshot, EditorSlotEdit},
@@ -26,7 +27,7 @@ pub enum EditorWritebackInput {
 impl EditorWritebackInput {
     fn build(self, session: &DocumentSession) -> Result<EditorWritebackPayload, String> {
         match self {
-            Self::Text { content } => build_plain_text_editor_writeback(session, &content),
+            Self::Text { content } => build_full_text_editor_writeback(session, &content),
             Self::SlotEdits { edits } => build_slot_editor_writeback(session, &edits),
         }
     }

@@ -21,7 +21,7 @@ fn sample_plain_text_session(path: &std::path::Path) -> crate::models::DocumentS
     );
     let slot_id = built.slots[0].id.clone();
 
-    crate::models::DocumentSession {
+    let mut session = crate::models::DocumentSession {
         id: "session-text".to_string(),
         title: "示例".to_string(),
         document_path: path.to_string_lossy().to_string(),
@@ -32,10 +32,11 @@ fn sample_plain_text_session(path: &std::path::Path) -> crate::models::DocumentS
         slot_structure_signature: Some(built.slot_structure_signature.clone()),
         template_snapshot: Some(template),
         normalized_text: "原文\r\n下一行\r\n".to_string(),
-        write_back_supported: true,
-        write_back_block_reason: None,
-        plain_text_editor_safe: true,
-        plain_text_editor_block_reason: None,
+        capabilities: crate::session_capability_models::DocumentSessionCapabilities {
+            source_writeback: crate::session_capability_models::CapabilityGate::allowed(),
+            editor_writeback: crate::session_capability_models::CapabilityGate::allowed(),
+            ..Default::default()
+        },
         segmentation_preset: Some(crate::models::SegmentationPreset::Paragraph),
         rewrite_headings: Some(false),
         writeback_slots: built.slots,
@@ -53,12 +54,14 @@ fn sample_plain_text_session(path: &std::path::Path) -> crate::models::DocumentS
         status: crate::models::RunningState::Idle,
         created_at: now,
         updated_at: now,
-    }
+    };
+    crate::documents::hydrate_session_capabilities(&mut session);
+    session
 }
 
 fn sample_docx_session(path: &std::path::Path) -> crate::models::DocumentSession {
     let now = Utc::now();
-    crate::models::DocumentSession {
+    let mut session = crate::models::DocumentSession {
         id: "session-docx".to_string(),
         title: "示例".to_string(),
         document_path: path.to_string_lossy().to_string(),
@@ -69,10 +72,13 @@ fn sample_docx_session(path: &std::path::Path) -> crate::models::DocumentSession
         slot_structure_signature: None,
         template_snapshot: None,
         normalized_text: "前文[公式]后文".to_string(),
-        write_back_supported: true,
-        write_back_block_reason: None,
-        plain_text_editor_safe: false,
-        plain_text_editor_block_reason: Some("docx 仅支持槽位编辑".to_string()),
+        capabilities: crate::session_capability_models::DocumentSessionCapabilities {
+            source_writeback: crate::session_capability_models::CapabilityGate::allowed(),
+            editor_writeback: crate::session_capability_models::CapabilityGate::blocked(
+                "docx 仅支持槽位编辑",
+            ),
+            ..Default::default()
+        },
         segmentation_preset: Some(crate::models::SegmentationPreset::Paragraph),
         rewrite_headings: Some(false),
         writeback_slots: vec![
@@ -92,7 +98,9 @@ fn sample_docx_session(path: &std::path::Path) -> crate::models::DocumentSession
         status: crate::models::RunningState::Idle,
         created_at: now,
         updated_at: now,
-    }
+    };
+    crate::documents::hydrate_session_capabilities(&mut session);
+    session
 }
 
 #[test]
@@ -199,8 +207,8 @@ fn execute_session_writeback_returns_block_error_before_loading_source() {
     let bytes = build_minimal_docx(xml);
     let (root, target) = write_temp_file("blocked-session", "docx", &bytes);
     let mut session = sample_docx_session(&target);
-    session.write_back_supported = false;
-    session.write_back_block_reason = Some("blocked".to_string());
+    session.capabilities.source_writeback =
+        crate::session_capability_models::CapabilityGate::blocked("blocked");
     session.suggestions.push(rewrite_suggestion(
         "suggestion-1",
         1,
@@ -210,6 +218,7 @@ fn execute_session_writeback_returns_block_error_before_loading_source() {
         crate::models::SuggestionDecision::Applied,
         vec![SlotUpdate::new("slot-0", "改写后")],
     ));
+    crate::documents::hydrate_session_capabilities(&mut session);
 
     let error = super::execute_session_writeback(&session, WritebackMode::Validate)
         .expect_err("blocked session should short-circuit");

@@ -210,12 +210,25 @@ Windows 也可以直接双击：
 
 - `start-lessai.bat`
 
+Linux 也可使用仓库内脚本（会自动检查/修复依赖）：
+
+```bash
+chmod +x start-lessai.sh build-lessai.sh scripts/lessai-linux-common.sh
+./start-lessai.sh
+```
+
 ### 常用命令
 
 ```bash
 pnpm run typecheck
 pnpm run build
 pnpm run tauri:build
+```
+
+Linux 打包（脚本封装）：
+
+```bash
+./build-lessai.sh
 ```
 
 Rust 单测：

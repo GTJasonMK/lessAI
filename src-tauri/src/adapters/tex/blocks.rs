@@ -1,7 +1,7 @@
 use super::block_support::{
-    classify_text_block_kind, collect_blank_lines, find_locked_block_end, is_heading_command_line,
-    is_item_line, is_list_environment_begin, is_list_environment_end, slice_text,
-    split_lines_with_offsets,
+    classify_text_block_kind, collect_blank_lines, find_locked_block_end,
+    heading_command_block_end, is_heading_command_line, is_item_line, is_list_environment_begin,
+    is_list_environment_end, slice_text, split_lines_with_offsets,
 };
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -61,8 +61,9 @@ pub(super) fn scan_blocks(text: &str) -> Vec<TexBlock> {
 
         if is_heading_command_line(line) {
             let mut block_text = std::mem::take(&mut pending_prefix);
-            block_text.push_str(&slice_text(text, &lines, index, index + 1));
-            let blank = collect_blank_lines(text, &lines, index + 1);
+            let command_end = heading_command_block_end(text, &lines, index).unwrap_or(index + 1);
+            block_text.push_str(&slice_text(text, &lines, index, command_end));
+            let blank = collect_blank_lines(text, &lines, command_end);
             block_text.push_str(&blank.text);
             blocks.push(TexBlock {
                 kind: "command_block",

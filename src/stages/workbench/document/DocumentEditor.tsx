@@ -1,8 +1,8 @@
 import { forwardRef, memo } from "react";
 
-import { isDocxPath } from "../../../lib/helpers";
-import { DocxSlotEditor } from "./DocxSlotEditor";
+import { documentEditorMode } from "../../../lib/documentCapabilities";
 import { PlainTextDocumentEditor } from "./PlainTextDocumentEditor";
+import { StructuredSlotEditor } from "./StructuredSlotEditor";
 import type { DocumentEditorHandle, DocumentEditorProps } from "./documentEditorTypes";
 
 export type {
@@ -14,8 +14,8 @@ export type {
 
 export const DocumentEditor = memo(
   forwardRef<DocumentEditorHandle, DocumentEditorProps>(function DocumentEditor(props, ref) {
-    if (isDocxPath(props.session.documentPath)) {
-      return <DocxSlotEditor ref={ref} {...props} />;
+    if (documentEditorMode(props.session) === "slotBased") {
+      return <StructuredSlotEditor ref={ref} {...props} />;
     }
 
     return <PlainTextDocumentEditor ref={ref} {...props} />;

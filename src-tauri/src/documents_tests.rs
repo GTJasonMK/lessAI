@@ -1,4 +1,4 @@
-use std::{fs, path::Path};
+use std::fs;
 
 use super::{
     ensure_document_can_write_back, ensure_document_source_matches_session,
@@ -54,20 +54,20 @@ fn pdf_is_not_allowed_to_write_back() {
 
 #[test]
 fn pdf_is_allowed_to_continue_ai_rewrite_without_writeback() {
-    let path = Path::new("/tmp/demo.pdf");
     assert!(
-        super::writeback::ensure_document_can_ai_rewrite(path, false, Some("pdf 不支持写回"))
-            .is_ok()
+        super::writeback::ensure_document_can_ai_rewrite(
+            &crate::session_capability_models::CapabilityGate::allowed(),
+        )
+        .is_ok()
     );
 }
 
 #[test]
 fn docx_without_writeback_support_is_not_allowed_to_continue_ai_rewrite() {
-    let path = Path::new("/tmp/demo.docx");
     let error = super::writeback::ensure_document_can_ai_rewrite(
-        path,
-        false,
-        Some("当前 docx 暂不支持安全写回覆盖。"),
+        &crate::session_capability_models::CapabilityGate::blocked(
+            "当前 docx 暂不支持安全写回覆盖。",
+        ),
     )
     .expect_err("expected rewrite guard");
 
@@ -334,6 +334,8 @@ fn load_docx_source_preserves_writeback_slot_boundaries() {
         .writeback_slots
         .iter()
         .any(|slot| slot.text.contains("正文")));
+    assert!(loaded.template_signature.is_some());
+    assert!(loaded.slot_structure_signature.is_some());
 
     cleanup_dir(&root);
 }

@@ -7,9 +7,11 @@ use crate::{
     document_snapshot::ensure_document_snapshot_matches, models, rewrite,
     rewrite_unit::WritebackSlot, textual_template,
 };
+use crate::session_capability_models::{CapabilityGate, DocumentBackendKind};
 
 use super::{
-    source::{is_docx_path, is_pdf_path, PDF_WRITE_BACK_UNSUPPORTED},
+    capabilities::{document_backend_kind, ensure_capability_allowed},
+    source::PDF_WRITE_BACK_UNSUPPORTED,
     textual::load_textual_template_source,
 };
 
@@ -50,14 +52,14 @@ impl<'a> DocumentWritebackContext<'a> {
     }
 
     pub(crate) fn from_session(session: &'a models::DocumentSession) -> Self {
-        Self::new(&session.source_text, session.source_snapshot.as_ref()).with_textual_template(
+        Self::new(&session.source_text, session.source_snapshot.as_ref()).with_structure_signatures(
             session.template_signature.as_deref(),
             session.slot_structure_signature.as_deref(),
             session.rewrite_headings.unwrap_or(false),
         )
     }
 
-    pub(crate) fn with_textual_template(
+    pub(crate) fn with_structure_signatures(
         mut self,
         expected_template_signature: Option<&'a str>,
         expected_slot_structure_signature: Option<&'a str>,
@@ -85,34 +87,26 @@ impl OwnedDocumentWriteback {
     }
 }
 
+#[cfg(test)]
 pub(crate) fn ensure_document_can_write_back(path: &str) -> Result<(), String> {
-    if is_pdf_path(Path::new(path)) {
+    if document_backend_kind(Path::new(path)) == DocumentBackendKind::Pdf {
         return Err(PDF_WRITE_BACK_UNSUPPORTED.to_string());
     }
     Ok(())
 }
 
-pub(crate) fn ensure_document_can_ai_rewrite(
-    path: &Path,
-    write_back_supported: bool,
-    write_back_block_reason: Option<&str>,
-) -> Result<(), String> {
-    if is_pdf_path(path) {
-        return Ok(());
-    }
-    if write_back_supported {
-        return Ok(());
-    }
-    Err(write_back_block_reason
-        .unwrap_or("当前文档暂不支持安全写回覆盖，因此不允许继续 AI 改写。")
-        .to_string())
+pub(crate) fn ensure_document_can_ai_rewrite(ai_rewrite: &CapabilityGate) -> Result<(), String> {
+    ensure_capability_allowed(
+        ai_rewrite,
+        "当前文档暂不支持安全写回覆盖，因此不允许继续 AI 改写。",
+    )
 }
 
 pub(crate) fn ensure_document_source_matches_session(
     path: &Path,
     expected_source_snapshot: Option<&models::DocumentSnapshot>,
 ) -> Result<(), String> {
-    if is_pdf_path(path) {
+    if document_backend_kind(path) == DocumentBackendKind::Pdf {
         return Ok(());
     }
     load_verified_writeback_source(path, expected_source_snapshot, false).map(|_| ())
@@ -121,10 +115,9 @@ pub(crate) fn ensure_document_source_matches_session(
 pub(crate) fn ensure_document_can_ai_rewrite_safely(
     path: &Path,
     expected_source_snapshot: Option<&models::DocumentSnapshot>,
-    write_back_supported: bool,
-    write_back_block_reason: Option<&str>,
+    ai_rewrite: &CapabilityGate,
 ) -> Result<(), String> {
-    ensure_document_can_ai_rewrite(path, write_back_supported, write_back_block_reason)?;
+    ensure_document_can_ai_rewrite(ai_rewrite)?;
     ensure_document_source_matches_session(path, expected_source_snapshot)
 }
 
@@ -134,6 +127,13 @@ pub(crate) fn execute_document_writeback(
     writeback: DocumentWriteback<'_>,
     mode: WritebackMode,
 ) -> Result<(), String> {
+    if document_backend_kind(path) == DocumentBackendKind::Pdf {
+        return match (mode, writeback) {
+            (WritebackMode::Validate, DocumentWriteback::Text(_)) => Ok(()),
+            _ => Err(PDF_WRITE_BACK_UNSUPPORTED.to_string()),
+        };
+    }
+
     let source = load_verified_writeback_source(
         path,
         context.expected_source_snapshot,
@@ -152,7 +152,11 @@ pub(crate) fn execute_document_writeback(
 
 enum VerifiedWritebackSource {
     Textual(textual_template::TextTemplate),
-    Docx(Vec<u8>),
+    Docx {
+        bytes: Vec<u8>,
+        source: adapters::docx::LoadedDocxWritebackSource,
+        model: adapters::docx::DocxWritebackModel,
+    },
 }
 
 fn load_verified_writeback_source(
@@ -161,12 +165,24 @@ fn load_verified_writeback_source(
     rewrite_headings: bool,
 ) -> Result<VerifiedWritebackSource, String> {
     let source_bytes = ensure_document_snapshot_matches(path, expected_source_snapshot)?;
-    if !is_docx_path(path) {
-        let (_, template) = load_textual_template_source(path, &source_bytes, rewrite_headings)?;
-        return Ok(VerifiedWritebackSource::Textual(template));
+    match document_backend_kind(path) {
+        DocumentBackendKind::Textual => {
+            let (_, template) =
+                load_textual_template_source(path, &source_bytes, rewrite_headings)?;
+            Ok(VerifiedWritebackSource::Textual(template))
+        }
+        DocumentBackendKind::Docx => {
+            let source = adapters::docx::DocxAdapter::load_writeback_source(&source_bytes)?;
+            let model =
+                adapters::docx::DocxAdapter::extract_writeback_model_from_source(&source, rewrite_headings);
+            Ok(VerifiedWritebackSource::Docx {
+                bytes: source_bytes,
+                source,
+                model,
+            })
+        }
+        DocumentBackendKind::Pdf => Err(PDF_WRITE_BACK_UNSUPPORTED.to_string()),
     }
-
-    Ok(VerifiedWritebackSource::Docx(source_bytes))
 }
 
 fn build_text_writeback_bytes(
@@ -180,13 +196,16 @@ fn build_text_writeback_bytes(
             updated_text,
         )
         .into_bytes()),
-        VerifiedWritebackSource::Docx(current_bytes) => {
-            adapters::docx::DocxAdapter::write_updated_text(
+        VerifiedWritebackSource::Docx {
+            bytes: current_bytes,
+            source,
+            ..
+        } => adapters::docx::DocxAdapter::write_updated_text_with_source(
                 current_bytes,
+                source,
                 expected_source_text,
                 updated_text,
-            )
-        }
+            ),
     }
 }
 
@@ -223,9 +242,30 @@ fn build_slot_writeback_bytes(
                     .into_bytes(),
             )
         }
-        VerifiedWritebackSource::Docx(current_bytes) => {
-            adapters::docx::DocxAdapter::write_updated_slots(
+        VerifiedWritebackSource::Docx {
+            bytes: current_bytes,
+            source,
+            model,
+        } => {
+            textual_template::validate::ensure_signature_matches(
+                context.expected_template_signature,
+                &model.template_signature,
+                "当前会话缺少 docx 模板签名，无法校验结构一致性。",
+                "当前 docx 模板结构与会话记录不一致，无法安全继续。",
+            )?;
+            textual_template::validate::ensure_signature_matches(
+                context.expected_slot_structure_signature,
+                &model.slot_structure_signature,
+                "当前会话缺少 docx 槽位结构签名，无法校验写回边界。",
+                "当前 docx 槽位结构与会话记录不一致，无法安全继续。",
+            )?;
+            textual_template::validate::ensure_slot_structure_signature(
+                context.expected_slot_structure_signature,
+                updated_slots,
+            )?;
+            adapters::docx::DocxAdapter::write_updated_slots_with_source(
                 current_bytes,
+                source,
                 context.expected_source_text,
                 updated_slots,
             )

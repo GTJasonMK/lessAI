@@ -191,7 +191,7 @@ fn create_committed_suggestion(
         rewrite_unit_id: response.rewrite_unit_id.clone(),
         before_text: before_text.clone(),
         after_text: after_text.clone(),
-        diff_spans: rewrite::build_diff(&before_text, &after_text),
+        diff: rewrite::build_diff_result(&before_text, &after_text),
         decision: SuggestionDecision::Applied,
         slot_updates: response.updates.clone(),
         created_at: now,

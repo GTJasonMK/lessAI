@@ -33,7 +33,7 @@ fn push_region_slot_part(
         slots.len(),
         text,
         separator_after,
-        region.skip_rewrite,
+        region,
         region.presentation.clone(),
     ));
 }
@@ -42,19 +42,19 @@ fn build_writeback_slot(
     index: usize,
     text: String,
     separator_after: String,
-    skip_rewrite: bool,
+    region: &adapters::TextRegion,
     presentation: Option<models::TextPresentation>,
 ) -> WritebackSlot {
     let text_empty = text.is_empty();
     let whitespace_only = !text.is_empty() && text.chars().all(|ch| ch.is_whitespace());
-    let editable = !skip_rewrite && !whitespace_only && !text_empty;
+    let editable = !region.skip_rewrite && !whitespace_only && !text_empty;
 
     WritebackSlot {
         id: format!("slot-{index}"),
         order: index,
         text,
         editable,
-        role: slot_role(text_empty, skip_rewrite, whitespace_only, &separator_after),
+        role: slot_role(region, text_empty, editable, whitespace_only, &separator_after),
         presentation,
         anchor: None,
         separator_after,
@@ -62,23 +62,32 @@ fn build_writeback_slot(
 }
 
 fn slot_role(
+    region: &adapters::TextRegion,
     text_empty: bool,
-    skip_rewrite: bool,
+    editable: bool,
     whitespace_only: bool,
     separator_after: &str,
 ) -> WritebackSlotRole {
     if text_empty && contains_paragraph_separator(separator_after) {
         return WritebackSlotRole::ParagraphBreak;
     }
-    if skip_rewrite || whitespace_only {
+    if editable {
+        return region.role.clone();
+    }
+    if whitespace_only && region.role == WritebackSlotRole::EditableText {
         return WritebackSlotRole::LockedText;
     }
-    WritebackSlotRole::EditableText
+    region.role.clone()
 }
 
 fn split_region_slot_chunks<'a>(region: &'a adapters::TextRegion) -> Vec<&'a str> {
     if region.skip_rewrite {
         return split_text_chunks_by_paragraph_separator(&region.body);
     }
-    split_text_chunks_for_rewrite_slots(&region.body)
+    match region.split_mode {
+        crate::textual_template::models::TextRegionSplitMode::BoundaryAware => {
+            split_text_chunks_for_rewrite_slots(&region.body)
+        }
+        crate::textual_template::models::TextRegionSplitMode::Atomic => vec![region.body.as_str()],
+    }
 }

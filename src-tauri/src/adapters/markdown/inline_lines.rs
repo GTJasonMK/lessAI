@@ -2,20 +2,13 @@ use crate::adapters::TextRegion;
 
 use super::inline_emphasis::{find_matching_emphasis, parse_emphasis_delimiter_run};
 use super::inline_spans::find_markdown_protected_spans;
-use super::syntax::{
-    detect_fence_marker, is_atx_heading_line, is_html_like_line, is_horizontal_rule_line,
-    is_markdown_table_delimiter, is_math_block_delimiter_line, is_reference_definition_line,
-    is_setext_underline_line, is_yaml_front_matter_close, is_yaml_front_matter_open,
-    markdown_line_prefix_len,
-};
+use super::syntax::markdown_line_prefix_len;
 
 #[derive(Debug, Clone, Copy)]
 pub(super) struct LineSlice<'a> {
     pub line: &'a str,
     pub full: &'a str,
 }
-
-const MAX_FRONT_MATTER_LINES: usize = 200;
 
 pub(super) fn split_lines_with_endings(text: &str) -> Vec<LineSlice<'_>> {
     let bytes = text.as_bytes();
@@ -62,54 +55,6 @@ pub(super) fn split_lines_with_endings(text: &str) -> Vec<LineSlice<'_>> {
     lines
 }
 
-pub(super) fn block_must_stay_locked(
-    lines: &[LineSlice<'_>],
-    rewrite_headings: bool,
-) -> bool {
-    let Some(first_non_blank) = lines.iter().position(|slice| !slice.line.trim().is_empty()) else {
-        return true;
-    };
-
-    if let Some((start, end)) = find_yaml_front_matter_range(lines) {
-        if start == first_non_blank
-            && lines
-                .iter()
-                .skip(end + 1)
-                .all(|slice| slice.line.trim().is_empty())
-        {
-            return true;
-        }
-    }
-
-    let first_line = lines[first_non_blank].line;
-    let trailing_blank_only = lines
-        .iter()
-        .skip(first_non_blank + 1)
-        .all(|slice| slice.line.trim().is_empty());
-
-    if detect_fence_marker(first_line).is_some() || is_math_block_delimiter_line(first_line) {
-        return true;
-    }
-    if first_non_blank + 1 < lines.len()
-        && !first_line.trim().is_empty()
-        && first_line.contains('|')
-        && is_markdown_table_delimiter(lines[first_non_blank + 1].line)
-    {
-        return true;
-    }
-    if !rewrite_headings
-        && (is_atx_heading_line(first_line)
-            || (first_non_blank + 1 < lines.len()
-                && is_setext_underline_line(lines[first_non_blank + 1].line)))
-    {
-        return true;
-    }
-    trailing_blank_only
-        && (is_reference_definition_line(first_line)
-            || is_html_like_line(first_line)
-            || is_horizontal_rule_line(first_line))
-}
-
 pub(super) fn process_markdown_line(out: &mut Vec<TextRegion>, line: &str, ending: &str) {
     let prefix_len = markdown_line_prefix_len(line);
     let (prefix, core) = if prefix_len > 0 && prefix_len <= line.len() {
@@ -119,14 +64,7 @@ pub(super) fn process_markdown_line(out: &mut Vec<TextRegion>, line: &str, endin
     };
 
     if !prefix.is_empty() {
-        push_text_region(
-            out,
-            TextRegion {
-                body: prefix.to_string(),
-                skip_rewrite: true,
-                presentation: None,
-            },
-        );
+        push_text_region(out, TextRegion::syntax_token(prefix));
     }
 
     let spans = find_markdown_protected_spans(core);
@@ -141,14 +79,7 @@ pub(super) fn process_markdown_line(out: &mut Vec<TextRegion>, line: &str, endin
         if start > cursor {
             push_rewriteable_markdown_text(out, &core[cursor..start]);
         }
-        push_text_region(
-            out,
-            TextRegion {
-                body: core[start..end].to_string(),
-                skip_rewrite: true,
-                presentation: None,
-            },
-        );
+        push_text_region(out, protected_markdown_region(&core[start..end]));
         cursor = end;
     }
     if cursor < core.len() {
@@ -164,34 +95,17 @@ pub(super) fn push_text_region(regions: &mut Vec<TextRegion>, region: TextRegion
     }
 
     if let Some(last) = regions.last_mut() {
-        if last.skip_rewrite == region.skip_rewrite {
+        if last.skip_rewrite == region.skip_rewrite
+            && last.role == region.role
+            && last.split_mode == region.split_mode
+            && last.presentation == region.presentation
+        {
             last.body.push_str(&region.body);
             return;
         }
     }
 
     regions.push(region);
-}
-
-fn find_yaml_front_matter_range(lines: &[LineSlice<'_>]) -> Option<(usize, usize)> {
-    let mut index = 0usize;
-    while index < lines.len() && lines[index].line.trim().is_empty() {
-        index += 1;
-    }
-    if index >= lines.len() || !is_yaml_front_matter_open(lines[index].line) {
-        return None;
-    }
-
-    let start = index;
-    let end_limit = (start + MAX_FRONT_MATTER_LINES).min(lines.len().saturating_sub(1));
-    index += 1;
-    while index <= end_limit {
-        if is_yaml_front_matter_close(lines[index].line) {
-            return Some((start, index));
-        }
-        index += 1;
-    }
-    None
 }
 
 fn append_line_ending(out: &mut Vec<TextRegion>, ending: &str) {
@@ -201,11 +115,7 @@ fn append_line_ending(out: &mut Vec<TextRegion>, ending: &str) {
     if let Some(last) = out.last_mut() {
         last.body.push_str(ending);
     } else {
-        out.push(TextRegion {
-            body: ending.to_string(),
-            skip_rewrite: true,
-            presentation: None,
-        });
+        out.push(TextRegion::syntax_token(ending));
     }
 }
 
@@ -257,21 +167,36 @@ fn push_rewriteable_markdown_text(out: &mut Vec<TextRegion>, text: &str) {
 fn push_editable_markdown_text(out: &mut Vec<TextRegion>, text: &str) {
     push_text_region(
         out,
-        TextRegion {
-            body: text.to_string(),
-            skip_rewrite: false,
-            presentation: None,
-        },
+        TextRegion::editable(text),
     );
 }
 
 fn push_locked_markdown_text(out: &mut Vec<TextRegion>, text: &str) {
-    push_text_region(
-        out,
-        TextRegion {
-            body: text.to_string(),
-            skip_rewrite: true,
-            presentation: None,
-        },
-    );
+    push_text_region(out, TextRegion::syntax_token(text));
+}
+
+fn protected_markdown_region(text: &str) -> TextRegion {
+    if text.starts_with('<') {
+        if text.starts_with("<!--")
+            || text[1..].starts_with("http://")
+            || text[1..].starts_with("https://")
+            || text[1..].starts_with("mailto:")
+        {
+            return TextRegion::inline_object(text);
+        }
+        return TextRegion::syntax_token(text);
+    }
+
+    if text.starts_with('`')
+        || text.starts_with('$')
+        || text.starts_with("![")
+        || text.starts_with('[')
+        || text.starts_with("http://")
+        || text.starts_with("https://")
+        || text.starts_with("www.")
+    {
+        return TextRegion::inline_object(text);
+    }
+
+    TextRegion::locked_text(text)
 }

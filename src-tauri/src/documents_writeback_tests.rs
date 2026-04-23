@@ -3,13 +3,13 @@ use super::{
     WritebackMode,
 };
 use crate::test_support::{build_minimal_docx, cleanup_dir, write_temp_file};
-use crate::{adapters::docx::DocxAdapter, document_snapshot::capture_document_snapshot};
+use crate::document_snapshot::capture_document_snapshot;
 
 fn textual_writeback_context<'a>(
     loaded: &'a super::LoadedDocumentSource,
     snapshot: &'a crate::models::DocumentSnapshot,
 ) -> DocumentWritebackContext<'a> {
-    DocumentWritebackContext::new(&loaded.source_text, Some(snapshot)).with_textual_template(
+    DocumentWritebackContext::new(&loaded.source_text, Some(snapshot)).with_structure_signatures(
         loaded.template_signature.as_deref(),
         loaded.slot_structure_signature.as_deref(),
         false,
@@ -150,14 +150,15 @@ fn validate_document_writeback_allows_docx_regions_with_adjacent_styles() {
 </w:document>"#;
     let bytes = build_minimal_docx(document_xml);
     let (root, target) = write_temp_file("adjacent-styled-region-pass", "docx", &bytes);
+    let loaded = load_document_source(&target, false).expect("load docx");
     let snapshot = capture_document_snapshot(&target).expect("capture snapshot");
-    let mut slots = DocxAdapter::extract_writeback_slots(&bytes, false).expect("extract slots");
+    let mut slots = loaded.writeback_slots.clone();
     slots[0].text = "新前文".to_string();
     slots[1].text = "新后文".to_string();
 
     execute_document_writeback(
         &target,
-        DocumentWritebackContext::new("前文后文", Some(&snapshot)),
+        textual_writeback_context(&loaded, &snapshot),
         DocumentWriteback::Slots(&slots),
         WritebackMode::Validate,
     )
@@ -271,6 +272,21 @@ fn validate_document_writeback_allows_tex_slot_text_updates() {
         WritebackMode::Validate,
     )
     .expect("tex slot text update should validate");
+
+    cleanup_dir(&root);
+}
+
+#[test]
+fn validate_document_writeback_allows_pdf_text_projection_without_source_reload() {
+    let (root, target) = write_temp_file("pdf-validate", "pdf", b"%PDF-1.4\n");
+
+    execute_document_writeback(
+        &target,
+        DocumentWritebackContext::new("原文", None),
+        DocumentWriteback::Text("改写后"),
+        WritebackMode::Validate,
+    )
+    .expect("pdf validate should allow export-style text projection");
 
     cleanup_dir(&root);
 }

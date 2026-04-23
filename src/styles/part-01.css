@@ -25,6 +25,12 @@
   --delete-bg: #ffdada;
   --focus: 0 0 0 3px rgba(23, 68, 207, 0.22);
   --transition: 180ms ease;
+  --app-bg:
+    radial-gradient(circle at 14% 18%, rgba(239, 193, 34, 0.3), transparent 18%),
+    radial-gradient(circle at 86% 12%, rgba(23, 68, 207, 0.22), transparent 18%),
+    linear-gradient(90deg, rgba(20, 20, 20, 0.05) 1px, transparent 1px),
+    linear-gradient(rgba(20, 20, 20, 0.05) 1px, transparent 1px),
+    var(--paper);
 }
 
 * {
@@ -41,13 +47,11 @@ body,
 body {
   margin: 0;
   color: var(--ink);
-  background:
-    radial-gradient(circle at 14% 18%, rgba(239, 193, 34, 0.3), transparent 18%),
-    radial-gradient(circle at 86% 12%, rgba(23, 68, 207, 0.22), transparent 18%),
-    linear-gradient(90deg, rgba(20, 20, 20, 0.05) 1px, transparent 1px),
-    linear-gradient(rgba(20, 20, 20, 0.05) 1px, transparent 1px),
-    var(--paper);
-  background-size: auto, auto, 28px 28px, 28px 28px, auto;
+  background: transparent;
+}
+
+#root {
+  background: transparent;
 }
 
 button,
@@ -149,7 +153,14 @@ p {
   height: 100vh;
   display: flex;
   flex-direction: column;
+  border-radius: 16px;
+  background: var(--app-bg);
+  background-size: auto, auto, 28px 28px, 28px 28px, auto;
   overflow: hidden;
+}
+
+.app-shell.is-maximized {
+  border-radius: 0;
 }
 
 .topbar {
@@ -617,4 +628,3 @@ p {
   gap: 2px;
   line-height: 1.1;
 }
-

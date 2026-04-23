@@ -1,6 +1,7 @@
 use super::environments::{
     begin_environment_name, end_environment_name, is_math_environment_name, is_raw_environment_name,
 };
+use super::scan::find_command_span_end;
 
 #[derive(Clone, Copy)]
 pub(super) struct IndexedLine<'a> {
@@ -92,6 +93,21 @@ pub(super) fn is_heading_command_line(line: &str) -> bool {
     HEADING_COMMANDS
         .iter()
         .any(|command| matches_tex_command(trimmed, command))
+}
+
+pub(super) fn heading_command_block_end(
+    text: &str,
+    lines: &[IndexedLine<'_>],
+    start: usize,
+) -> Option<usize> {
+    let line = lines.get(start)?.line;
+    if !is_heading_command_line(line) {
+        return None;
+    }
+
+    let command_start = lines[start].start + line.len().saturating_sub(line.trim_start().len());
+    let span_end = find_command_span_end(text, command_start)?;
+    Some(line_index_after_offset(lines, span_end))
 }
 
 pub(super) fn is_item_line(line: &str) -> bool {
@@ -209,6 +225,15 @@ fn find_math_delimiter_end(lines: &[IndexedLine<'_>], start: usize, delimiter: &
             return end + 1;
         }
         end += 1;
+    }
+    lines.len()
+}
+
+fn line_index_after_offset(lines: &[IndexedLine<'_>], offset: usize) -> usize {
+    for (index, line) in lines.iter().enumerate() {
+        if offset <= line.end {
+            return index + 1;
+        }
     }
     lines.len()
 }

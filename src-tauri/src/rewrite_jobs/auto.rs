@@ -5,6 +5,7 @@ use log::{error, info};
 use tauri::{AppHandle, Emitter, Manager, State};
 
 use crate::{
+    documents::hydrated_session_clone,
     models::{DocumentSession, RewriteFailedEvent, RunningState},
     rewrite_targets,
     session_access::access_current_session,
@@ -143,7 +144,7 @@ where
     let job = reserve(&session.id)?;
     session.status = RunningState::Running;
     session.updated_at = updated_at;
-    let saved_session = session.clone();
+    let saved_session = hydrated_session_clone(session);
     if let Err(error) = save(&saved_session) {
         let _ = rollback(&session.id);
         return Err(error);

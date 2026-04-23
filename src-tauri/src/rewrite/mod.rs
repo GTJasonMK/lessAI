@@ -2,7 +2,7 @@ mod diff;
 mod llm;
 mod text;
 
-pub use diff::build_diff;
+pub use diff::{build_diff, build_diff_result};
 pub use llm::{
     build_client, rewrite_batch, rewrite_batch_with_client, rewrite_selection_text, test_provider,
 };

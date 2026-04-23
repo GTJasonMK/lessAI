@@ -50,7 +50,7 @@ fn build_slot_writeback_bytes_rejects_reordered_plain_text_slots() {
 
     let error = super::build_slot_writeback_bytes(
         &plain_text_source("第一段\n\n第二段"),
-        super::DocumentWritebackContext::new("第一段\n\n第二段", None).with_textual_template(
+        super::DocumentWritebackContext::new("第一段\n\n第二段", None).with_structure_signatures(
             Some(&template.template_signature),
             Some(&built.slot_structure_signature),
             false,

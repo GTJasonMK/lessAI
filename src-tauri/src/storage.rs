@@ -6,6 +6,7 @@ use std::{
 use tauri::{AppHandle, Manager};
 
 use crate::{
+    documents::hydrated_session_clone,
     atomic_write::write_bytes_atomically,
     models::{AppSettings, DocumentSession},
     settings_validation::validate_numeric_settings,
@@ -101,7 +102,7 @@ pub fn save_settings(app: &AppHandle, settings: &AppSettings) -> Result<AppSetti
 
 pub fn save_session(app: &AppHandle, session: &DocumentSession) -> Result<(), String> {
     let path = session_path(app, &session.id)?;
-    write_json(&path, session)
+    write_json(&path, &hydrated_session_clone(session))
 }
 
 pub fn load_session(app: &AppHandle, session_id: &str) -> Result<DocumentSession, String> {
@@ -110,7 +111,9 @@ pub fn load_session(app: &AppHandle, session_id: &str) -> Result<DocumentSession
         return Err(format!("未找到会话：{session_id}"));
     }
 
-    read_json(&path)
+    let mut session = read_json(&path)?;
+    crate::documents::hydrate_session_capabilities(&mut session);
+    Ok(session)
 }
 
 pub fn load_session_optional(
@@ -122,7 +125,8 @@ pub fn load_session_optional(
         return Ok(None);
     }
 
-    let session = read_json(&path)?;
+    let mut session = read_json(&path)?;
+    crate::documents::hydrate_session_capabilities(&mut session);
     Ok(Some(session))
 }
 

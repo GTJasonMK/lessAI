@@ -3,15 +3,17 @@ use chrono::Utc;
 use crate::{
     documents::LoadedDocumentSource,
     models::{
-        DocumentSession, DocumentSnapshot, RewriteUnitStatus, RunningState, SegmentationPreset,
+        DiffResult, DocumentSession, DocumentSnapshot, RewriteUnitStatus, RunningState,
+        SegmentationPreset,
         SuggestionDecision,
     },
     rewrite_unit::{RewriteSuggestion, RewriteUnit, SlotUpdate, WritebackSlot},
+    session_capability_models::{CapabilityGate, DocumentSessionCapabilities},
 };
 
 pub(super) fn sample_session() -> DocumentSession {
     let now = Utc::now();
-    DocumentSession {
+    let mut session = DocumentSession {
         id: "session-1".to_string(),
         title: "示例".to_string(),
         document_path: "/tmp/example.docx".to_string(),
@@ -22,13 +24,13 @@ pub(super) fn sample_session() -> DocumentSession {
         slot_structure_signature: None,
         template_snapshot: None,
         normalized_text: "前文E=mc^2后文".to_string(),
-        write_back_supported: true,
-        write_back_block_reason: None,
-        plain_text_editor_safe: false,
-        plain_text_editor_block_reason: Some(
-            "当前文档包含行内锁定内容（如公式、分页符或占位符），暂不支持在纯文本编辑器中直接写回。"
-                .to_string(),
-        ),
+        capabilities: DocumentSessionCapabilities {
+            source_writeback: CapabilityGate::allowed(),
+            editor_writeback: CapabilityGate::blocked(
+                "当前文档包含行内锁定内容（如公式、分页符或占位符），暂不支持在纯文本编辑器中直接写回。",
+            ),
+            ..Default::default()
+        },
         segmentation_preset: Some(SegmentationPreset::Paragraph),
         rewrite_headings: Some(false),
         writeback_slots: vec![
@@ -54,7 +56,9 @@ pub(super) fn sample_session() -> DocumentSession {
         status: RunningState::Idle,
         created_at: now,
         updated_at: now,
-    }
+    };
+    crate::documents::hydrate_session_capabilities(&mut session);
+    session
 }
 
 pub(super) fn dirty_session_with_applied_suggestion() -> DocumentSession {
@@ -69,7 +73,7 @@ pub(super) fn dirty_session_with_applied_suggestion() -> DocumentSession {
         rewrite_unit_id: "unit-0".to_string(),
         before_text: "前文E=mc^2后文".to_string(),
         after_text: "改写后正文".to_string(),
-        diff_spans: Vec::new(),
+        diff: DiffResult::default(),
         decision: SuggestionDecision::Applied,
         slot_updates: vec![
             SlotUpdate::new("slot-0", "改写后"),
@@ -79,6 +83,7 @@ pub(super) fn dirty_session_with_applied_suggestion() -> DocumentSession {
         updated_at: now,
     });
     session.status = RunningState::Completed;
+    crate::documents::hydrate_session_capabilities(&mut session);
     session
 }
 
@@ -94,9 +99,9 @@ pub(super) fn loaded_docx() -> LoadedDocumentSource {
             WritebackSlot::locked("slot-1", 1, "E=mc^2"),
             WritebackSlot::editable("slot-2", 2, "后文"),
         ],
-        write_back_supported: true,
-        write_back_block_reason: None,
-        plain_text_editor_safe: true,
-        plain_text_editor_block_reason: None,
+        capability_policy: crate::documents::DocumentCapabilityPolicy::new(
+            crate::documents::capability_gate(true, None),
+            crate::documents::capability_gate(true, None),
+        ),
     }
 }

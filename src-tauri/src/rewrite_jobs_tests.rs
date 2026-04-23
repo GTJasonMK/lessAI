@@ -13,7 +13,7 @@ fn session_with_slots_and_units(slots: Vec<WritebackSlot>) -> DocumentSession {
         .iter()
         .map(|slot| format!("{}{}", slot.text, slot.separator_after))
         .collect::<String>();
-    DocumentSession {
+    let mut session = DocumentSession {
         id: "session-1".to_string(),
         title: "示例".to_string(),
         document_path: "/tmp/example.txt".to_string(),
@@ -24,10 +24,11 @@ fn session_with_slots_and_units(slots: Vec<WritebackSlot>) -> DocumentSession {
         slot_structure_signature: None,
         template_snapshot: None,
         normalized_text: source_text,
-        write_back_supported: true,
-        write_back_block_reason: None,
-        plain_text_editor_safe: true,
-        plain_text_editor_block_reason: None,
+        capabilities: crate::session_capability_models::DocumentSessionCapabilities {
+            source_writeback: crate::session_capability_models::CapabilityGate::allowed(),
+            editor_writeback: crate::session_capability_models::CapabilityGate::allowed(),
+            ..Default::default()
+        },
         segmentation_preset: Some(SegmentationPreset::Paragraph),
         rewrite_headings: Some(false),
         rewrite_units: build_rewrite_units(&slots, SegmentationPreset::Paragraph),
@@ -37,7 +38,9 @@ fn session_with_slots_and_units(slots: Vec<WritebackSlot>) -> DocumentSession {
         status: RunningState::Idle,
         created_at: now,
         updated_at: now,
-    }
+    };
+    crate::documents::hydrate_session_capabilities(&mut session);
+    session
 }
 
 fn session_with_unit_statuses(statuses: &[RewriteUnitStatus]) -> DocumentSession {

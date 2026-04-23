@@ -1,4 +1,8 @@
 use super::TexAdapter;
+use crate::{
+    rewrite_unit::WritebackSlotRole,
+    textual_template::{models::TextRegionSplitMode, slots::build_slots},
+};
 
 #[test]
 fn preserves_text_when_splitting_tex_regions() {
@@ -71,12 +75,16 @@ fn allows_rewriting_text_inside_emphasis_commands() {
 fn marks_href_as_skip_rewrite() {
     let text = "见 \\href{https://example.com/docs}{https://example.com/docs}。";
     let regions = TexAdapter::parse_regions(text, false);
+    assert!(regions
+        .iter()
+        .any(|region| region.role == WritebackSlotRole::SyntaxToken && region.body.contains("\\href{")));
     assert!(regions.iter().any(|region| {
-        region.skip_rewrite
-            && region
-                .body
-                .contains("\\href{https://example.com/docs}{https://example.com/docs}")
+        region.role == WritebackSlotRole::InlineObject
+            && region.body.contains("https://example.com/docs")
     }));
+    assert!(regions
+        .iter()
+        .any(|region| !region.skip_rewrite && region.body.contains("https://example.com/docs")));
     let rebuilt = regions
         .iter()
         .map(|region| region.body.as_str())
@@ -152,12 +160,34 @@ fn build_template_keeps_tex_command_shell_locked_and_argument_editable() {
         template.blocks[0]
             .regions
             .iter()
-            .map(|region| (region.anchor.as_str(), region.editable))
+            .map(|region| {
+                (
+                    region.anchor.as_str(),
+                    region.editable,
+                    region.role.clone(),
+                    region.split_mode,
+                )
+            })
             .collect::<Vec<_>>(),
         vec![
-            ("tex:b0:r0", false),
-            ("tex:b0:r1", true),
-            ("tex:b0:r2", false),
+            (
+                "tex:b0:r0",
+                false,
+                WritebackSlotRole::SyntaxToken,
+                TextRegionSplitMode::Atomic,
+            ),
+            (
+                "tex:b0:r1",
+                true,
+                WritebackSlotRole::EditableText,
+                TextRegionSplitMode::Atomic,
+            ),
+            (
+                "tex:b0:r2",
+                false,
+                WritebackSlotRole::SyntaxToken,
+                TextRegionSplitMode::Atomic,
+            ),
         ]
     );
 }
@@ -169,4 +199,43 @@ fn build_template_locks_verbatim_environment_as_single_locked_block() {
     assert_eq!(template.blocks.len(), 1);
     assert_eq!(template.blocks[0].kind, "locked_block");
     assert!(template.blocks[0].regions.iter().all(|region| !region.editable));
+}
+
+#[test]
+fn build_template_keeps_href_url_opaque_and_label_atomic() {
+    let template = TexAdapter::build_template("\\href{https://example.com}{第一句，第二句}", false);
+    let built = build_slots(&template);
+    let editable_slots = built
+        .slots
+        .iter()
+        .filter(|slot| slot.editable)
+        .collect::<Vec<_>>();
+
+    assert_eq!(editable_slots.len(), 1);
+    assert_eq!(editable_slots[0].text, "第一句，第二句");
+    assert!(built
+        .slots
+        .iter()
+        .any(|slot| slot.role == WritebackSlotRole::InlineObject && slot.text.contains("https://example.com")));
+}
+
+#[test]
+fn keeps_multiline_section_argument_in_single_command_block() {
+    let template = TexAdapter::build_template("\\section{跨行\n标题}\n正文。", true);
+    let block_texts = template
+        .blocks
+        .iter()
+        .map(|block| {
+            block
+                .regions
+                .iter()
+                .map(|region| format!("{}{}", region.text, region.separator_after))
+                .collect::<String>()
+        })
+        .collect::<Vec<_>>();
+
+    assert_eq!(template.blocks.len(), 2);
+    assert_eq!(template.blocks[0].kind, "command_block");
+    assert_eq!(block_texts[0], "\\section{跨行\n标题}\n");
+    assert_eq!(template.blocks[1].kind, "paragraph");
 }

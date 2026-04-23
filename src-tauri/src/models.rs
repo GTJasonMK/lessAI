@@ -1,6 +1,9 @@
 use chrono::{DateTime, Utc};
-use serde::{Deserialize, Serialize};
+use serde::{Deserialize, Deserializer, Serialize};
 
+use crate::session_capability_models::{
+    CapabilityGate, DocumentSessionCapabilities,
+};
 use crate::rewrite_unit::{RewriteSuggestion, RewriteUnit, WritebackSlot};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -31,14 +34,6 @@ fn default_units_per_batch() -> usize {
 
 fn default_prompt_preset_id() -> String {
     "humanizer_zh".to_string()
-}
-
-fn default_write_back_supported() -> bool {
-    true
-}
-
-fn default_plain_text_editor_safe() -> bool {
-    true
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -139,6 +134,17 @@ impl RunningState {
 pub struct DiffSpan {
     pub r#type: DiffType,
     pub text: String,
+    #[serde(default)]
+    pub degraded_reason: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct DiffResult {
+    #[serde(default)]
+    pub spans: Vec<DiffSpan>,
+    #[serde(default)]
+    pub degraded_reason: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -171,7 +177,7 @@ pub struct EditorSlotEdit {
     pub text: String,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct DocumentSession {
     pub id: String,
@@ -189,14 +195,8 @@ pub struct DocumentSession {
     #[serde(default)]
     pub template_snapshot: Option<crate::textual_template::TextTemplate>,
     pub normalized_text: String,
-    #[serde(default = "default_write_back_supported")]
-    pub write_back_supported: bool,
     #[serde(default)]
-    pub write_back_block_reason: Option<String>,
-    #[serde(default = "default_plain_text_editor_safe")]
-    pub plain_text_editor_safe: bool,
-    #[serde(default)]
-    pub plain_text_editor_block_reason: Option<String>,
+    pub capabilities: DocumentSessionCapabilities,
     #[serde(default)]
     pub segmentation_preset: Option<SegmentationPreset>,
     #[serde(default)]
@@ -210,6 +210,135 @@ pub struct DocumentSession {
     pub status: RunningState,
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct DocumentSessionWire {
+    id: String,
+    title: String,
+    document_path: String,
+    source_text: String,
+    #[serde(default)]
+    source_snapshot: Option<DocumentSnapshot>,
+    #[serde(default)]
+    template_kind: Option<String>,
+    #[serde(default)]
+    template_signature: Option<String>,
+    #[serde(default)]
+    slot_structure_signature: Option<String>,
+    #[serde(default)]
+    template_snapshot: Option<crate::textual_template::TextTemplate>,
+    normalized_text: String,
+    #[serde(default)]
+    capabilities: DocumentSessionCapabilities,
+    #[serde(default)]
+    write_back_supported: Option<bool>,
+    #[serde(default)]
+    write_back_block_reason: Option<String>,
+    #[serde(default)]
+    #[serde(alias = "plainTextEditorSafe")]
+    editor_writeback_safe: Option<bool>,
+    #[serde(default)]
+    #[serde(alias = "plainTextEditorBlockReason")]
+    editor_writeback_block_reason: Option<String>,
+    #[serde(default)]
+    segmentation_preset: Option<SegmentationPreset>,
+    #[serde(default)]
+    rewrite_headings: Option<bool>,
+    #[serde(default)]
+    writeback_slots: Vec<WritebackSlot>,
+    #[serde(default)]
+    rewrite_units: Vec<RewriteUnit>,
+    suggestions: Vec<RewriteSuggestion>,
+    next_suggestion_sequence: u64,
+    status: RunningState,
+    created_at: DateTime<Utc>,
+    updated_at: DateTime<Utc>,
+}
+
+impl DocumentSessionWire {
+    fn into_session(self) -> DocumentSession {
+        let capabilities = migrate_session_capabilities(
+            self.capabilities,
+            self.write_back_supported,
+            self.write_back_block_reason,
+            self.editor_writeback_safe,
+            self.editor_writeback_block_reason,
+        );
+
+        DocumentSession {
+            id: self.id,
+            title: self.title,
+            document_path: self.document_path,
+            source_text: self.source_text,
+            source_snapshot: self.source_snapshot,
+            template_kind: self.template_kind,
+            template_signature: self.template_signature,
+            slot_structure_signature: self.slot_structure_signature,
+            template_snapshot: self.template_snapshot,
+            normalized_text: self.normalized_text,
+            capabilities,
+            segmentation_preset: self.segmentation_preset,
+            rewrite_headings: self.rewrite_headings,
+            writeback_slots: self.writeback_slots,
+            rewrite_units: self.rewrite_units,
+            suggestions: self.suggestions,
+            next_suggestion_sequence: self.next_suggestion_sequence,
+            status: self.status,
+            created_at: self.created_at,
+            updated_at: self.updated_at,
+        }
+    }
+}
+
+impl<'de> Deserialize<'de> for DocumentSession {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        DocumentSessionWire::deserialize(deserializer).map(DocumentSessionWire::into_session)
+    }
+}
+
+fn migrate_session_capabilities(
+    mut capabilities: DocumentSessionCapabilities,
+    write_back_supported: Option<bool>,
+    write_back_block_reason: Option<String>,
+    editor_writeback_safe: Option<bool>,
+    editor_writeback_block_reason: Option<String>,
+) -> DocumentSessionCapabilities {
+    capabilities.source_writeback = merge_legacy_capability_gate(
+        capabilities.source_writeback,
+        write_back_supported,
+        write_back_block_reason,
+        true,
+    );
+    capabilities.editor_writeback = merge_legacy_capability_gate(
+        capabilities.editor_writeback,
+        editor_writeback_safe,
+        editor_writeback_block_reason,
+        true,
+    );
+    capabilities
+}
+
+fn merge_legacy_capability_gate(
+    current: CapabilityGate,
+    legacy_allowed: Option<bool>,
+    legacy_block_reason: Option<String>,
+    default_allowed: bool,
+) -> CapabilityGate {
+    if current.allowed || current.block_reason.is_some() {
+        return current;
+    }
+
+    match legacy_allowed.unwrap_or(default_allowed) {
+        true => CapabilityGate::allowed(),
+        false => CapabilityGate::blocked(
+            legacy_block_reason.unwrap_or_else(|| "当前文档能力状态不一致，缺少阻断原因。".to_string()),
+        ),
+    }
 }
 
 impl DocumentSession {

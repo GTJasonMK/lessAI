@@ -110,6 +110,7 @@ pub(crate) fn build_rewrite_unit_request_from_slots(
         .map(|slot| RewriteUnitSlot {
             slot_id: slot.id.clone(),
             text: slot.text.clone(),
+            separator_after: slot.separator_after.clone(),
             editable: slot.editable,
             role: slot.role.clone(),
         })

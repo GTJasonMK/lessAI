@@ -4,9 +4,9 @@ import type { EditorSlotOverrides } from "../../../lib/editorSlots";
 import { resolveEditorSlotText } from "../../../lib/editorSlots";
 import { resolveRewriteUnitSlots } from "../../../lib/helpers";
 import type { DocumentSession, RewriteUnit } from "../../../lib/types";
-import { EditableSlotSpan, slotPresentationClass } from "./docxEditorShared";
+import { EditableSlotSpan, slotPresentationClass } from "./structuredEditorShared";
 
-interface DocxEditorUnitProps {
+interface StructuredEditorUnitProps {
   session: DocumentSession;
   rewriteUnit: RewriteUnit;
   slotOverrides: EditorSlotOverrides;
@@ -16,22 +16,19 @@ interface DocxEditorUnitProps {
 }
 
 function buildUnitClassName(hasEditableSlot: boolean) {
-  return [
-    "docx-editor-unit",
-    hasEditableSlot ? "" : "is-protected"
-  ]
+  return ["structured-editor-unit", hasEditableSlot ? "" : "is-protected"]
     .filter(Boolean)
     .join(" ");
 }
 
-export const DocxEditorUnit = memo(function DocxEditorUnit({
+export const StructuredEditorUnit = memo(function StructuredEditorUnit({
   session,
   rewriteUnit,
   slotOverrides,
   busy,
   registerNode,
   onChangeSlotText
-}: DocxEditorUnitProps) {
+}: StructuredEditorUnitProps) {
   const slots = resolveRewriteUnitSlots(session, rewriteUnit);
   if (slots.length === 0) {
     return null;
@@ -42,10 +39,7 @@ export const DocxEditorUnit = memo(function DocxEditorUnit({
 
   return (
     <Fragment>
-      <span
-        className={buildUnitClassName(hasEditableSlot)}
-        data-rewrite-unit-id={rewriteUnit.id}
-      >
+      <span className={buildUnitClassName(hasEditableSlot)} data-rewrite-unit-id={rewriteUnit.id}>
         {slots.map((slot, index) => {
           const text = resolveEditorSlotText(slot, slotOverrides);
           const intraUnitSeparator = index < slots.length - 1 ? slot.separatorAfter : "";

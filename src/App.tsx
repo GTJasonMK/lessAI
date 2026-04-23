@@ -9,13 +9,13 @@ import {
 import { loadSession, loadSettings } from "./lib/api";
 import { DEFAULT_SETTINGS } from "./lib/constants";
 import { applyEditorSlotOverride, buildEditorTextFromSession, type EditorSlotOverrides } from "./lib/editorSlots";
+import { documentEditorMode } from "./lib/documentCapabilities";
 import {
   canRewriteSession,
   findRewriteUnit,
   formatDisplayPath,
   getLatestSuggestion,
   getSessionStats,
-  isDocxPath,
   isSettingsReady,
   normalizeNewlines,
   readableError
@@ -121,7 +121,7 @@ export default function App() {
 
   const handleChangeEditorSlotText = useCallback((slotId: string, value: string) => {
     const session = currentSessionRef.current;
-    if (!session || !isDocxPath(session.documentPath)) return;
+    if (!session || documentEditorMode(session) !== "slotBased") return;
     const slot = session.writebackSlots.find((item) => item.id === slotId);
     if (!slot || !slot.editable) return;
 
@@ -561,7 +561,7 @@ export default function App() {
   }
 
   return (
-    <div className="app-shell">
+    <div className={`app-shell${windowMaximized ? " is-maximized" : ""}`}>
       <div className="body-shell">
         <main className="workspace">
           <WorkspaceBar

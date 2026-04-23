@@ -23,11 +23,7 @@ fn unique_block_anchors(loaded: &crate::documents::source::LoadedDocumentSource)
 
 #[test]
 fn writeback_slots_split_preserved_block_separator_from_region_body() {
-    let slots = writeback_slots_from_regions(&[TextRegion {
-        body: "第一段\n\n".to_string(),
-        skip_rewrite: false,
-        presentation: None,
-    }]);
+    let slots = writeback_slots_from_regions(&[TextRegion::editable("第一段\n\n")]);
 
     assert_eq!(slots.len(), 1);
     assert_eq!(slots[0].text, "第一段");
@@ -45,11 +41,8 @@ fn writeback_slots_lock_whitespace_only_regions_even_when_region_is_editable() {
         protect_kind: None,
         writeback_key: Some("r:underline".to_string()),
     });
-    let slots = writeback_slots_from_regions(&[TextRegion {
-        body: "　　　\n\n".to_string(),
-        skip_rewrite: false,
-        presentation: underline.clone(),
-    }]);
+    let slots = writeback_slots_from_regions(&[TextRegion::editable("　　　\n\n")
+        .with_presentation(underline.clone())]);
 
     assert_eq!(slots.len(), 1);
     assert_eq!(slots[0].text, "　　　");
@@ -61,16 +54,8 @@ fn writeback_slots_lock_whitespace_only_regions_even_when_region_is_editable() {
 #[test]
 fn writeback_slots_preserve_paragraph_boundaries_for_rewrite_units() {
     let slots = writeback_slots_from_regions(&[
-        TextRegion {
-            body: "第一段\n\n".to_string(),
-            skip_rewrite: false,
-            presentation: None,
-        },
-        TextRegion {
-            body: "第二段".to_string(),
-            skip_rewrite: false,
-            presentation: None,
-        },
+        TextRegion::editable("第一段\n\n"),
+        TextRegion::editable("第二段"),
     ]);
 
     let units = build_rewrite_units(&slots, SegmentationPreset::Paragraph);
@@ -107,11 +92,7 @@ fn tex_blank_line_boundaries_split_heading_and_paragraph_units() {
 
 #[test]
 fn crlf_blank_line_boundaries_split_paragraph_units() {
-    let slots = writeback_slots_from_regions(&[TextRegion {
-        body: "第一段\r\n\r\n第二段".to_string(),
-        skip_rewrite: false,
-        presentation: None,
-    }]);
+    let slots = writeback_slots_from_regions(&[TextRegion::editable("第一段\r\n\r\n第二段")]);
 
     let units = build_rewrite_units(&slots, SegmentationPreset::Paragraph);
 

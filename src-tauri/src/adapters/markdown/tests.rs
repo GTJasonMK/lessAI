@@ -1,4 +1,8 @@
 use super::MarkdownAdapter;
+use crate::{
+    rewrite_unit::WritebackSlotRole,
+    textual_template::{models::TextRegionSplitMode, slots::build_slots},
+};
 
 #[test]
 fn build_template_marks_markdown_syntax_shells_as_locked_regions() {
@@ -12,13 +16,52 @@ fn build_template_marks_markdown_syntax_shells_as_locked_regions() {
         template.blocks[0]
             .regions
             .iter()
-            .map(|region| (region.anchor.as_str(), region.editable))
+            .map(|region| {
+                (
+                    region.anchor.as_str(),
+                    region.editable,
+                    region.role.clone(),
+                    region.split_mode,
+                )
+            })
             .collect::<Vec<_>>(),
         vec![
-            ("md:b0:r0", false),
-            ("md:b0:r1", false),
-            ("md:b0:r2", true),
-            ("md:b0:r3", false),
+            (
+                "md:b0:r0",
+                false,
+                WritebackSlotRole::SyntaxToken,
+                TextRegionSplitMode::Atomic,
+            ),
+            (
+                "md:b0:r1",
+                false,
+                WritebackSlotRole::SyntaxToken,
+                TextRegionSplitMode::Atomic,
+            ),
+            (
+                "md:b0:r2",
+                true,
+                WritebackSlotRole::EditableText,
+                TextRegionSplitMode::Atomic,
+            ),
+            (
+                "md:b0:r3",
+                false,
+                WritebackSlotRole::SyntaxToken,
+                TextRegionSplitMode::Atomic,
+            ),
+            (
+                "md:b0:r4",
+                false,
+                WritebackSlotRole::InlineObject,
+                TextRegionSplitMode::Atomic,
+            ),
+            (
+                "md:b0:r5",
+                false,
+                WritebackSlotRole::SyntaxToken,
+                TextRegionSplitMode::Atomic,
+            ),
         ]
     );
 }
@@ -128,4 +171,38 @@ fn leaves_unmatched_or_space_padded_markers_editable() {
 
     assert_eq!(rebuilt, text);
     assert!(locked_delimiters.is_empty());
+}
+
+#[test]
+fn keeps_link_label_atomic_when_building_slots() {
+    let template = MarkdownAdapter::build_template("[第一句，第二句](https://example.com)\n", false);
+    let built = build_slots(&template);
+    let editable_slots = built
+        .slots
+        .iter()
+        .filter(|slot| slot.editable)
+        .collect::<Vec<_>>();
+
+    assert_eq!(editable_slots.len(), 1);
+    assert_eq!(editable_slots[0].text, "第一句，第二句");
+}
+
+#[test]
+fn keeps_nested_quote_inside_single_list_item_block() {
+    let template = MarkdownAdapter::build_template("- 第一项\n  > 引用内容\n- 第二项\n", false);
+    let block_texts = template
+        .blocks
+        .iter()
+        .map(|block| {
+            block
+                .regions
+                .iter()
+                .map(|region| format!("{}{}", region.text, region.separator_after))
+                .collect::<String>()
+        })
+        .collect::<Vec<_>>();
+
+    assert_eq!(template.blocks.len(), 2);
+    assert_eq!(block_texts[0], "- 第一项\n  > 引用内容\n");
+    assert_eq!(block_texts[1], "- 第二项\n");
 }

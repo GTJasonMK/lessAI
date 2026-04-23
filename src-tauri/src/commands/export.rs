@@ -9,6 +9,7 @@ use crate::{
     rewrite_unit::merged_text_from_slots,
     rewrite_writeback::execute_session_writeback,
     session_access::{access_current_session, CurrentSessionRequest},
+    session_messages::ACTIVE_JOB_FINALIZE_ERROR,
     state::AppState,
     storage,
 };
@@ -47,7 +48,7 @@ pub fn finalize_document(
             &session_id,
             crate::session_flow::allow_session,
         )
-            .with_active_job_error("当前文档正在执行自动任务，请先暂停并取消后再写回原文件。"),
+            .with_active_job_error(ACTIVE_JOB_FINALIZE_ERROR),
         |session| {
             execute_session_writeback(&session, WritebackMode::Write)?;
 

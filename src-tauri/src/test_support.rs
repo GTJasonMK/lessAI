@@ -10,10 +10,11 @@ use zip::{write::FileOptions, ZipWriter};
 
 use crate::{
     models::{
-        DiffSpan, DocumentSession, RewriteUnitStatus, RunningState, SegmentationPreset,
+        DiffResult, DocumentSession, RewriteUnitStatus, RunningState, SegmentationPreset,
         SuggestionDecision,
     },
     rewrite_unit::{RewriteSuggestion, RewriteUnit, SlotUpdate, WritebackSlot},
+    session_capability_models::{CapabilityGate, DocumentSessionCapabilities},
 };
 
 pub(crate) fn unique_test_dir(name: &str) -> PathBuf {
@@ -57,7 +58,7 @@ pub(crate) fn sample_clean_session(
     source_text: &str,
 ) -> DocumentSession {
     let now = Utc::now();
-    DocumentSession {
+    let mut session = DocumentSession {
         id: id.to_string(),
         title: "示例".to_string(),
         document_path: document_path.to_string(),
@@ -68,10 +69,11 @@ pub(crate) fn sample_clean_session(
         slot_structure_signature: None,
         template_snapshot: None,
         normalized_text: source_text.to_string(),
-        write_back_supported: true,
-        write_back_block_reason: None,
-        plain_text_editor_safe: true,
-        plain_text_editor_block_reason: None,
+        capabilities: DocumentSessionCapabilities {
+            source_writeback: CapabilityGate::allowed(),
+            editor_writeback: CapabilityGate::allowed(),
+            ..Default::default()
+        },
         segmentation_preset: Some(SegmentationPreset::Paragraph),
         rewrite_headings: Some(false),
         writeback_slots: Vec::new(),
@@ -81,7 +83,9 @@ pub(crate) fn sample_clean_session(
         status: RunningState::Idle,
         created_at: now,
         updated_at: now,
-    }
+    };
+    crate::documents::hydrate_session_capabilities(&mut session);
+    session
 }
 
 pub(crate) fn editable_slot(id: &str, order: usize, text: &str) -> WritebackSlot {
@@ -144,7 +148,7 @@ pub(crate) fn rewrite_suggestion(
         rewrite_unit_id: rewrite_unit_id.to_string(),
         before_text: before_text.to_string(),
         after_text: after_text.to_string(),
-        diff_spans: Vec::<DiffSpan>::new(),
+        diff: DiffResult::default(),
         decision,
         slot_updates,
         created_at: now,

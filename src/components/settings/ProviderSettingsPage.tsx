@@ -107,18 +107,20 @@ export const ProviderSettingsPage = memo(function ProviderSettingsPage({
 
       <div className="field-block">
         <div className="field-line">
-          <span>应用更新</span>
+          <span>网络代理</span>
           <strong>网络</strong>
         </div>
         <label className="field">
-          <span>更新代理（可选）</span>
+          <span>代理地址（可选）</span>
           <input
             value={settings.updateProxy}
             onChange={(event) => onUpdateStringSetting("updateProxy", event.target.value)}
             placeholder="http://127.0.0.1:7890"
           />
         </label>
-        <span className="workspace-hint">留空则直连；仅用于检查/下载更新。</span>
+        <span className="workspace-hint">
+          留空则直连；用于 AI 模型请求与应用更新（检查/下载）。
+        </span>
       </div>
 
       {providerStatus ? (

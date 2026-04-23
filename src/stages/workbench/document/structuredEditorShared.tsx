@@ -4,11 +4,17 @@ import type { ClipboardEvent } from "react";
 import { normalizeNewlines } from "../../../lib/helpers";
 import type { WritebackSlot } from "../../../lib/types";
 
-export function slotPresentationClass(slot: WritebackSlot) {
+export function slotPresentationClass(
+  slot: WritebackSlot,
+  options?: { baseClassName?: string; protectedClassName?: string }
+) {
   const presentation = slot.presentation;
+  const baseClassName = options?.baseClassName ?? "structured-editor-slot";
+  const protectedClassName = options?.protectedClassName ?? "is-locked";
+
   return [
-    "docx-editor-slot",
-    slot.editable ? "is-editable" : "is-locked",
+    baseClassName,
+    slot.editable ? "is-editable" : protectedClassName,
     presentation?.bold ? "is-bold" : "",
     presentation?.italic ? "is-italic" : "",
     presentation?.underline ? "is-underline" : "",

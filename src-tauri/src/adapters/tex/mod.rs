@@ -15,6 +15,7 @@ impl TexAdapter {
         template::build_template(text, rewrite_headings)
     }
 
+    #[cfg(test)]
     pub fn parse_regions(text: &str, rewrite_headings: bool) -> Vec<crate::adapters::TextRegion> {
         commands::parse_regions(text, rewrite_headings)
     }

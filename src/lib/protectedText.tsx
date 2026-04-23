@@ -1,15 +1,14 @@
 import type { ReactNode } from "react";
 
 import { splitMarkdownInlineProtected } from "./markdownProtectedSegments";
+import { fileExtensionLower } from "./path";
 import { type ProtectedSegment } from "./protectedTextShared";
 import { splitTexInlineProtected } from "./texProtectedSegments";
 
 export type ClientDocumentFormat = "plain" | "markdown" | "tex";
 
 export function guessClientDocumentFormat(documentPath: string): ClientDocumentFormat {
-  const lowered = (documentPath ?? "").trim().toLowerCase();
-  const dot = lowered.lastIndexOf(".");
-  const ext = dot >= 0 ? lowered.slice(dot + 1) : "";
+  const ext = fileExtensionLower(documentPath ?? "");
 
   if (ext === "md" || ext === "markdown") return "markdown";
   if (ext === "tex" || ext === "latex") return "tex";

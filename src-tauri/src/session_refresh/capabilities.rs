@@ -1,29 +1,26 @@
-use crate::{documents::LoadedDocumentSource, models::DocumentSession};
+use crate::{
+    documents::{apply_capability_policy, capability_gate, DocumentCapabilityPolicy, LoadedDocumentSource},
+    models::DocumentSession,
+};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(super) struct SessionCapabilities {
-    write_back_supported: bool,
-    write_back_block_reason: Option<String>,
-    plain_text_editor_safe: bool,
-    plain_text_editor_block_reason: Option<String>,
+    policy: DocumentCapabilityPolicy,
 }
 
 impl SessionCapabilities {
     pub(super) fn from_loaded(loaded: &LoadedDocumentSource) -> Self {
         Self {
-            write_back_supported: loaded.write_back_supported,
-            write_back_block_reason: loaded.write_back_block_reason.clone(),
-            plain_text_editor_safe: loaded.plain_text_editor_safe,
-            plain_text_editor_block_reason: loaded.plain_text_editor_block_reason.clone(),
+            policy: loaded.capability_policy.clone(),
         }
     }
 
     pub(super) fn blocked(reason: &str) -> Self {
         Self {
-            write_back_supported: false,
-            write_back_block_reason: Some(reason.to_string()),
-            plain_text_editor_safe: false,
-            plain_text_editor_block_reason: Some(reason.to_string()),
+            policy: DocumentCapabilityPolicy::new(
+                capability_gate(false, Some(reason)),
+                capability_gate(false, Some(reason)),
+            ),
         }
     }
 }
@@ -32,19 +29,7 @@ pub(super) fn apply_session_capabilities(
     session: &mut DocumentSession,
     capabilities: &SessionCapabilities,
 ) -> bool {
-    let changed = session.write_back_supported != capabilities.write_back_supported
-        || session.write_back_block_reason != capabilities.write_back_block_reason
-        || session.plain_text_editor_safe != capabilities.plain_text_editor_safe
-        || session.plain_text_editor_block_reason != capabilities.plain_text_editor_block_reason;
-    if !changed {
-        return false;
-    }
-
-    session.write_back_supported = capabilities.write_back_supported;
-    session.write_back_block_reason = capabilities.write_back_block_reason.clone();
-    session.plain_text_editor_safe = capabilities.plain_text_editor_safe;
-    session.plain_text_editor_block_reason = capabilities.plain_text_editor_block_reason.clone();
-    true
+    apply_capability_policy(session, &capabilities.policy)
 }
 
 #[cfg(test)]
@@ -58,39 +43,47 @@ mod tests {
 
         let changed = apply_session_capabilities(
             &mut session,
-            &SessionCapabilities {
-                write_back_supported: false,
-                write_back_block_reason: Some("write blocked".to_string()),
-                plain_text_editor_safe: true,
-                plain_text_editor_block_reason: None,
-            },
+            &SessionCapabilities::blocked("write blocked"),
         );
 
         assert!(changed);
-        assert!(!session.write_back_supported);
+        assert!(!session.capabilities.source_writeback.allowed);
         assert_eq!(
-            session.write_back_block_reason.as_deref(),
+            session.capabilities.source_writeback.block_reason.as_deref(),
             Some("write blocked")
         );
-        assert!(session.plain_text_editor_safe);
-        assert_eq!(session.plain_text_editor_block_reason, None);
+        assert!(!session.capabilities.editor_writeback.allowed);
+        assert_eq!(
+            session.capabilities.editor_writeback.block_reason.as_deref(),
+            Some("write blocked")
+        );
     }
 
     #[test]
     fn apply_session_capabilities_skips_unchanged_capabilities() {
         let mut session = sample_session();
+        let loaded = crate::documents::LoadedDocumentSource {
+            source_text: session.source_text.clone(),
+            template_kind: session.template_kind.clone(),
+            template_signature: session.template_signature.clone(),
+            slot_structure_signature: session.slot_structure_signature.clone(),
+            template_snapshot: session.template_snapshot.clone(),
+            writeback_slots: session.writeback_slots.clone(),
+            capability_policy: crate::documents::DocumentCapabilityPolicy::new(
+                crate::documents::capability_gate(
+                    session.capabilities.source_writeback.allowed,
+                    session.capabilities.source_writeback.block_reason.as_deref(),
+                ),
+                crate::documents::capability_gate(
+                    session.capabilities.editor_writeback.allowed,
+                    session.capabilities.editor_writeback.block_reason.as_deref(),
+                ),
+            ),
+        };
 
         let changed = apply_session_capabilities(
             &mut session,
-            &SessionCapabilities {
-                write_back_supported: true,
-                write_back_block_reason: None,
-                plain_text_editor_safe: false,
-                plain_text_editor_block_reason: Some(
-                    "当前文档包含行内锁定内容（如公式、分页符或占位符），暂不支持在纯文本编辑器中直接写回。"
-                        .to_string(),
-                ),
-            },
+            &SessionCapabilities::from_loaded(&loaded),
         );
 
         assert!(!changed);

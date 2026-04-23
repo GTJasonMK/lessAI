@@ -50,10 +50,12 @@ Desktop.ini
 
 # AI / agent tooling (local only)
 .claude/
+.codex
 .codex/
 .superpowers/
 
 # Temp / patch leftovers
+.tmp/
 *.tmp
 *.temp
 *.bak

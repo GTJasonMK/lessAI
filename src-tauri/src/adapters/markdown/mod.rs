@@ -18,11 +18,15 @@ impl MarkdownAdapter {
         template::build_template(text, rewrite_headings)
     }
 
+    #[cfg(test)]
     pub fn parse_block_regions(
         text: &str,
         rewrite_headings: bool,
     ) -> Vec<crate::adapters::TextRegion> {
-        inline::parse_block_regions(text, rewrite_headings)
+        blocks::scan_blocks(text)
+            .into_iter()
+            .flat_map(|block| inline::build_text_regions(&block.text, block.kind, rewrite_headings))
+            .collect()
     }
 }
 

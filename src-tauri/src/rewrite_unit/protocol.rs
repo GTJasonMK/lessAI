@@ -13,6 +13,8 @@ const BATCH_RESPONSE_FORMAT: &str = r#"{"batchId":"...","results":[{"rewriteUnit
 pub struct RewriteUnitSlot {
     pub slot_id: String,
     pub text: String,
+    #[serde(default)]
+    pub separator_after: String,
     pub editable: bool,
     pub role: WritebackSlotRole,
 }
@@ -23,6 +25,7 @@ impl RewriteUnitSlot {
         Self {
             slot_id: slot_id.to_string(),
             text: text.to_string(),
+            separator_after: String::new(),
             editable: true,
             role: WritebackSlotRole::EditableText,
         }
@@ -33,6 +36,7 @@ impl RewriteUnitSlot {
         Self {
             slot_id: slot_id.to_string(),
             text: text.to_string(),
+            separator_after: String::new(),
             editable: false,
             role,
         }
@@ -53,7 +57,10 @@ impl RewriteUnitRequest {
         Self {
             rewrite_unit_id: rewrite_unit_id.to_string(),
             format: format.to_string(),
-            display_text: slots.iter().map(|slot| slot.text.as_str()).collect(),
+            display_text: slots
+                .iter()
+                .map(|slot| format!("{}{}", slot.text, slot.separator_after))
+                .collect(),
             slots,
         }
     }
@@ -62,6 +69,7 @@ impl RewriteUnitRequest {
         format!(
             "你是文档改写助手。请只返回 JSON，格式必须为 {UNIT_RESPONSE_FORMAT}。\
              只能改写 editable=true 的 slot；locked slot 只能用于理解上下文，不能出现在 updates 中。\
+             slot 中的 separatorAfter 表示原文换行/段落边界，只能用于理解结构，不能试图改动它。\
              必须原样返回 rewriteUnitId，不要输出解释或 Markdown 代码块。"
         )
     }
@@ -95,6 +103,7 @@ impl RewriteBatchRequest {
             "你是文档批量改写助手。请只返回 JSON，格式必须为 {BATCH_RESPONSE_FORMAT}。\
              必须原样返回 batchId。results 的顺序必须与输入 units 顺序完全一致。\
              每个结果只能改写本 unit 中 editable=true 的 slot；locked slot 只能用于理解上下文，不能出现在 updates 中。\
+             slot 中的 separatorAfter 表示原文换行/段落边界，只能用于理解结构，不能试图改动它。\
              不要输出解释、注释或 Markdown 代码块。"
         )
     }
@@ -256,6 +265,45 @@ fn validate_batch_results(
     }
 
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::RewriteUnitSlot;
+    use crate::rewrite_unit::WritebackSlotRole;
+
+    #[test]
+    fn rewrite_unit_request_display_text_preserves_slot_separators() {
+        let request = super::RewriteUnitRequest::new(
+            "unit-1",
+            "markdown",
+            vec![
+                RewriteUnitSlot {
+                    slot_id: "slot-1".to_string(),
+                    text: "# ".to_string(),
+                    separator_after: String::new(),
+                    editable: false,
+                    role: WritebackSlotRole::SyntaxToken,
+                },
+                RewriteUnitSlot {
+                    slot_id: "slot-2".to_string(),
+                    text: "标题".to_string(),
+                    separator_after: "\n".to_string(),
+                    editable: true,
+                    role: WritebackSlotRole::EditableText,
+                },
+                RewriteUnitSlot {
+                    slot_id: "slot-3".to_string(),
+                    text: "正文".to_string(),
+                    separator_after: String::new(),
+                    editable: true,
+                    role: WritebackSlotRole::EditableText,
+                },
+            ],
+        );
+
+        assert_eq!(request.display_text, "# 标题\n正文");
+    }
 }
 
 fn validate_single_slot_update(

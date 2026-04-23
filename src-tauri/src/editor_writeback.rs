@@ -5,45 +5,47 @@ use std::{
 
 use crate::{
     documents::{
-        ensure_document_can_write_back, execute_document_writeback, is_docx_path,
-        normalize_text_against_source_layout, DocumentWritebackContext, OwnedDocumentWriteback,
-        WritebackMode,
+        ensure_capability_allowed, execute_document_writeback, normalize_text_against_source_layout,
+        DocumentWritebackContext, OwnedDocumentWriteback, WritebackMode,
     },
-    models::{DocumentSession, EditorSlotEdit, RewriteUnitStatus, RunningState},
+    models::{DocumentSession, EditorSlotEdit},
     rewrite_unit::{apply_slot_updates, SlotUpdate},
 };
-
-const EDITOR_WRITEBACK_CONFLICT_ERROR: &str =
-    "该文档存在修订记录或进度，为避免冲突，请先“覆写并清理记录”或“重置记录”后再编辑。";
+use crate::session_capability_models::DocumentEditorMode;
 
 pub(crate) type EditorWritebackPayload = OwnedDocumentWriteback;
 
-pub(crate) fn ensure_session_can_use_plain_text_editor(
+pub(crate) fn ensure_session_can_use_editor_writeback(
     session: &DocumentSession,
 ) -> Result<(), String> {
-    ensure_document_can_write_back(&session.document_path)?;
-    if !session.plain_text_editor_safe {
-        return Err(session
-            .plain_text_editor_block_reason
-            .clone()
-            .unwrap_or_else(|| "当前文档暂不支持进入编辑模式。".to_string()));
-    }
-    if !plain_text_editor_session_is_clean(session) {
-        return Err(EDITOR_WRITEBACK_CONFLICT_ERROR.to_string());
-    }
-    Ok(())
+    ensure_capability_allowed(
+        &session.capabilities.source_writeback,
+        "当前文档暂不支持写回原文件。",
+    )?;
+    ensure_capability_allowed(
+        &session.capabilities.editor_entry,
+        "当前文档暂不支持进入编辑模式。",
+    )
 }
 
-pub(crate) fn build_plain_text_editor_writeback(
+pub(crate) fn build_full_text_editor_writeback(
     session: &DocumentSession,
     content: &str,
 ) -> Result<EditorWritebackPayload, String> {
     if content.trim().is_empty() {
         return Err("文档内容为空，无法保存。".to_string());
     }
-    ensure_session_can_use_plain_text_editor(session)?;
-    if is_docx_path(Path::new(&session.document_path)) {
-        return Err("docx 编辑模式必须按槽位保存，不能再走整篇纯文本写回。".to_string());
+    ensure_session_can_use_editor_writeback(session)?;
+    match session.capabilities.editor_mode {
+        DocumentEditorMode::FullText => {}
+        DocumentEditorMode::SlotBased => {
+            return Err(
+                "结构化编辑模式必须按槽位保存，不能再走整篇纯文本写回。".to_string(),
+            )
+        }
+        DocumentEditorMode::None => {
+            return Err("当前文档暂不支持整篇纯文本编辑写回。".to_string())
+        }
     }
 
     Ok(EditorWritebackPayload::Text(
@@ -55,9 +57,9 @@ pub(crate) fn build_slot_editor_writeback(
     session: &DocumentSession,
     edits: &[EditorSlotEdit],
 ) -> Result<EditorWritebackPayload, String> {
-    ensure_session_can_use_plain_text_editor(session)?;
-    if !is_docx_path(Path::new(&session.document_path)) {
-        return Err("当前仅 docx 支持按槽位编辑写回。".to_string());
+    ensure_session_can_use_editor_writeback(session)?;
+    if session.capabilities.editor_mode != DocumentEditorMode::SlotBased {
+        return Err("当前仅槽位编辑文档支持按槽位写回。".to_string());
     }
     let slot_updates = collect_slot_edit_updates(session, edits)?;
     let updated_slots = apply_slot_updates(&session.writeback_slots, &slot_updates)?;
@@ -76,15 +78,6 @@ pub(crate) fn execute_editor_writeback(
         mode,
     )
 }
-
-fn plain_text_editor_session_is_clean(session: &DocumentSession) -> bool {
-    session.status == RunningState::Idle
-        && session.suggestions.is_empty()
-        && session.rewrite_units.iter().all(|unit| {
-            unit.status == RewriteUnitStatus::Idle || unit.status == RewriteUnitStatus::Done
-        })
-}
-
 fn collect_slot_edit_updates(
     session: &DocumentSession,
     edits: &[EditorSlotEdit],

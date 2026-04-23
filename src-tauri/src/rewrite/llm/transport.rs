@@ -127,7 +127,7 @@ fn parse_json_chat_response_body(body: &str) -> Result<String, String> {
     }
     let value: Value =
         serde_json::from_str(trimmed).map_err(|error| format!("响应解析失败：{error}"))?;
-    sanitize_completion_text(extract_content(&value))
+    sanitize_completion_text(extract_response_content(&value, ResponseContentMode::Json))
 }
 
 pub(in crate::rewrite) fn parse_stream_chat_response_body(body: &str) -> Result<String, String> {
@@ -159,7 +159,7 @@ fn parse_ndjson_chat_response_body(body: &str) -> Result<String, String> {
         let value: Value =
             serde_json::from_str(line).map_err(|error| format!("流式响应解析失败：{error}"))?;
         saw_json = true;
-        if let Some(delta) = extract_stream_content(&value).or_else(|| extract_content(&value)) {
+        if let Some(delta) = extract_response_content(&value, ResponseContentMode::Stream) {
             merged.push_str(&delta);
         }
     }
@@ -192,7 +192,7 @@ fn parse_sse_chat_response_body(body: &str) -> Result<String, String> {
 
         let value: Value =
             serde_json::from_str(payload).map_err(|error| format!("流式响应解析失败：{error}"))?;
-        if let Some(delta) = extract_stream_content(&value) {
+        if let Some(delta) = extract_response_content(&value, ResponseContentMode::Stream) {
             merged.push_str(&delta);
         }
     }
@@ -280,29 +280,54 @@ fn chat_url(base_url: &str) -> String {
     }
 }
 
-fn extract_content(value: &Value) -> Option<String> {
-    extract_text_field(&value["choices"][0]["message"]["content"])
-        .or_else(|| extract_text_field(&value["choices"][0]["delta"]["content"]))
-        .or_else(|| {
-            value["choices"][0]["text"]
-                .as_str()
-                .map(|text| text.to_string())
-        })
+#[derive(Clone, Copy)]
+enum ResponseContentMode {
+    Json,
+    Stream,
 }
 
-fn extract_stream_content(value: &Value) -> Option<String> {
-    extract_text_field(&value["choices"][0]["delta"]["content"])
-        .or_else(|| {
-            value["choices"][0]["delta"]["text"]
-                .as_str()
-                .map(|text| text.to_string())
-        })
-        .or_else(|| extract_text_field(&value["choices"][0]["message"]["content"]))
-        .or_else(|| {
-            value["choices"][0]["text"]
-                .as_str()
-                .map(|text| text.to_string())
-        })
+fn extract_response_content(value: &Value, mode: ResponseContentMode) -> Option<String> {
+    let paths = match mode {
+        ResponseContentMode::Json => &[
+            ChoiceTextPath::MessageContent,
+            ChoiceTextPath::DeltaContent,
+            ChoiceTextPath::Text,
+        ][..],
+        ResponseContentMode::Stream => &[
+            ChoiceTextPath::DeltaContent,
+            ChoiceTextPath::DeltaText,
+            ChoiceTextPath::MessageContent,
+            ChoiceTextPath::Text,
+        ][..],
+    };
+
+    extract_choice_text(
+        &value["choices"][0],
+        paths,
+    )
+}
+
+#[derive(Clone, Copy)]
+enum ChoiceTextPath {
+    MessageContent,
+    DeltaContent,
+    DeltaText,
+    Text,
+}
+
+fn extract_choice_text(choice: &Value, paths: &[ChoiceTextPath]) -> Option<String> {
+    for path in paths {
+        let value = match path {
+            ChoiceTextPath::MessageContent => &choice["message"]["content"],
+            ChoiceTextPath::DeltaContent => &choice["delta"]["content"],
+            ChoiceTextPath::DeltaText => &choice["delta"]["text"],
+            ChoiceTextPath::Text => &choice["text"],
+        };
+        if let Some(text) = extract_text_field(value) {
+            return Some(text);
+        }
+    }
+    None
 }
 
 fn extract_text_field(value: &Value) -> Option<String> {

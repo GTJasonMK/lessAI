@@ -230,6 +230,7 @@ where
     }
 
     session.downgrade_active_job_to_cancelled();
+    crate::documents::hydrate_session_capabilities(&mut session);
     session.updated_at = now;
     save(&session)?;
     Ok(session)

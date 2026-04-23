@@ -247,7 +247,7 @@ fn locked_block_slot(
     }
 }
 
-fn paragraph_is_locked(
+pub(super) fn paragraph_is_locked(
     paragraph: &WritebackParagraphTemplate,
     region: &WritebackRegionTemplate,
     rewrite_headings: bool,
@@ -258,14 +258,19 @@ fn paragraph_is_locked(
     region.skip_rewrite()
 }
 
-fn region_role(region: &WritebackRegionTemplate, editable: bool) -> WritebackSlotRole {
+pub(super) fn region_role(
+    region: &WritebackRegionTemplate,
+    editable: bool,
+) -> WritebackSlotRole {
     if editable {
         return WritebackSlotRole::EditableText;
     }
     locked_role(region.presentation())
 }
 
-fn locked_role(presentation: Option<&crate::models::TextPresentation>) -> WritebackSlotRole {
+pub(super) fn locked_role(
+    presentation: Option<&crate::models::TextPresentation>,
+) -> WritebackSlotRole {
     if presentation
         .and_then(|item| item.protect_kind.as_deref())
         .is_some()

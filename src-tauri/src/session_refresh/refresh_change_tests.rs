@@ -40,8 +40,8 @@ fn rebuilds_clean_session_when_snapshot_changes_even_if_text_is_same() {
     );
     assert_eq!(refreshed.session.writeback_slots.len(), 3);
     assert_eq!(refreshed.session.rewrite_units.len(), 1);
-    assert!(refreshed.session.write_back_supported);
-    assert_eq!(refreshed.session.write_back_block_reason, None);
+    assert!(refreshed.session.capabilities.source_writeback.allowed);
+    assert_eq!(refreshed.session.capabilities.source_writeback.block_reason, None);
 }
 
 #[test]
@@ -61,11 +61,13 @@ fn blocks_dirty_session_when_snapshot_changes_even_if_text_is_same() {
 
     assert!(refreshed.changed);
     assert_eq!(refreshed.session.suggestions.len(), 1);
-    assert!(!refreshed.session.write_back_supported);
-    assert!(!refreshed.session.plain_text_editor_safe);
+    assert!(!refreshed.session.capabilities.source_writeback.allowed);
+    assert!(!refreshed.session.capabilities.editor_writeback.allowed);
     assert!(refreshed
         .session
-        .write_back_block_reason
+        .capabilities
+        .source_writeback
+        .block_reason
         .as_deref()
         .is_some_and(|reason| reason.contains("外部发生变化")));
     assert_eq!(
@@ -92,10 +94,10 @@ fn rebuilds_snapshotless_clean_session_when_source_changes() {
             locked_slot("slot-1", 1, "E=mc^2"),
             editable_slot("slot-2", 2, "新后文"),
         ],
-        write_back_supported: true,
-        write_back_block_reason: None,
-        plain_text_editor_safe: true,
-        plain_text_editor_block_reason: None,
+        capability_policy: crate::documents::DocumentCapabilityPolicy::new(
+            crate::documents::capability_gate(true, None),
+            crate::documents::capability_gate(true, None),
+        ),
     };
 
     let refreshed = refresh_session_from_loaded(
@@ -138,6 +140,7 @@ fn blocks_snapshotless_dirty_session_when_source_changes() {
         ],
     ));
     existing.status = RunningState::Completed;
+    crate::documents::hydrate_session_capabilities(&mut existing);
 
     let loaded = LoadedDocumentSource {
         source_text: "新前文E=mc^2新后文".to_string(),
@@ -146,10 +149,10 @@ fn blocks_snapshotless_dirty_session_when_source_changes() {
         slot_structure_signature: None,
         template_snapshot: None,
         writeback_slots: vec![editable_slot("slot-0", 0, "新前文E=mc^2新后文")],
-        write_back_supported: true,
-        write_back_block_reason: None,
-        plain_text_editor_safe: true,
-        plain_text_editor_block_reason: None,
+        capability_policy: crate::documents::DocumentCapabilityPolicy::new(
+            crate::documents::capability_gate(true, None),
+            crate::documents::capability_gate(true, None),
+        ),
     };
 
     let refreshed = refresh_session_from_loaded(
@@ -165,8 +168,8 @@ fn blocks_snapshotless_dirty_session_when_source_changes() {
 
     assert!(refreshed.changed);
     assert_eq!(refreshed.session.suggestions.len(), 1);
-    assert!(!refreshed.session.write_back_supported);
-    assert!(!refreshed.session.plain_text_editor_safe);
+    assert!(!refreshed.session.capabilities.source_writeback.allowed);
+    assert!(!refreshed.session.capabilities.editor_writeback.allowed);
     assert_eq!(refreshed.session.source_snapshot, None);
 }
 
@@ -186,6 +189,7 @@ fn blocks_snapshotless_dirty_session_even_when_source_text_is_unchanged() {
         ],
     ));
     existing.status = RunningState::Completed;
+    crate::documents::hydrate_session_capabilities(&mut existing);
 
     let refreshed = refresh_session_from_loaded(
         &existing,
@@ -200,7 +204,7 @@ fn blocks_snapshotless_dirty_session_even_when_source_text_is_unchanged() {
 
     assert!(refreshed.changed);
     assert_eq!(refreshed.session.suggestions.len(), 1);
-    assert!(!refreshed.session.write_back_supported);
-    assert!(!refreshed.session.plain_text_editor_safe);
+    assert!(!refreshed.session.capabilities.source_writeback.allowed);
+    assert!(!refreshed.session.capabilities.editor_writeback.allowed);
     assert_eq!(refreshed.session.source_snapshot, None);
 }

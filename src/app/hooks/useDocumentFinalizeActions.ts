@@ -6,12 +6,14 @@ import {
   openDocument,
   resetSession
 } from "../../lib/api";
+import {
+  documentBackendKind,
+  sessionSupportsSourceWriteback
+} from "../../lib/documentCapabilities";
 import type { DocumentSession, RewriteProgress } from "../../lib/types";
 import {
   formatDisplayPath,
   getSessionStats,
-  isDocxPath,
-  isPdfPath,
   readableError,
   sanitizeFileName
 } from "../../lib/helpers";
@@ -111,18 +113,11 @@ export function useDocumentFinalizeActions(options: {
       showNotice,
       errorPrefix: "写回失败",
       formatError: readableError,
-      allowed: (current) => current.writeBackSupported,
-      blockedMessage: (current) => current.writeBackBlockReason,
+      allowed: sessionSupportsSourceWriteback,
+      blockedMessage: (current) => current.capabilities.sourceWriteback.blockReason,
       defaultBlockedMessage: "当前文档暂不支持安全写回覆盖。"
     });
     if (!latestSession) {
-      return;
-    }
-    if (isPdfPath(latestSession.documentPath)) {
-      showNotice(
-        "warning",
-        "pdf 暂不支持写回覆盖（PDF 不是纯文本格式）。请先“导出”为 .txt 再进行后续排版。"
-      );
       return;
     }
 
@@ -136,7 +131,7 @@ export function useDocumentFinalizeActions(options: {
       "该操作会把【已应用】的修改覆盖写回原文件，并删除该文档的全部历史记录（建议、进度）。",
       "不可撤销，建议你先“导出”做一份备份。",
       "写回成功后会自动重新打开该文件（以全新会话展示）。",
-      isDocxPath(latestSession.documentPath)
+      documentBackendKind(latestSession) === "docx"
         ? "简单 docx 会按原段落结构写回；如果原文件已在外部变化，系统会直接报错并拒绝覆盖。"
         : "",
       "",
