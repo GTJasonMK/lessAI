@@ -149,6 +149,10 @@ export async function closeMainWindow() {
   return invokeCommand<void>("close_main_window");
 }
 
+export async function startDragMainWindow() {
+  return invokeCommand<void>("start_drag_main_window");
+}
+
 export async function startResizeMainWindow(direction: WindowResizeDirection) {
   return invokeCommand<void>("start_resize_main_window", { direction });
 }

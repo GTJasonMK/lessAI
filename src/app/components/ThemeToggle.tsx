@@ -18,6 +18,7 @@ export const ThemeToggle = memo(function ThemeToggle({
     <button
       type="button"
       className="theme-toggle"
+      data-window-drag-exclude="true"
       aria-label={title}
       aria-pressed={themeMode === "dark"}
       title={title}

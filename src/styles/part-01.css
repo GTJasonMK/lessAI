@@ -9,6 +9,9 @@
   --ink: #141414;
   --muted: #5b544a;
   --line: #141414;
+  --shell-outline: rgba(20, 20, 20, 0.2);
+  --shell-highlight: rgba(255, 255, 255, 0.34);
+  --shell-shadow: 0 18px 44px rgba(20, 20, 20, 0.16);
   --red: #d62d20;
   --blue: #1744cf;
   --yellow: #efc122;
@@ -58,16 +61,16 @@ body,
 #root {
   height: 100%;
   overflow: hidden;
+  background: transparent;
 }
 
 body {
   margin: 0;
   color: var(--ink);
-  background: #141414;
 }
 
 #root {
-  background: #141414;
+  background: transparent;
 }
 
 button,
@@ -166,16 +169,28 @@ p {
 }
 
 .app-shell {
-  height: calc(100vh - 8px);
-  margin: 4px;
+  position: relative;
+  height: calc(100vh - 10px);
+  margin: 5px;
   display: flex;
   flex-direction: column;
   border-radius: 16px;
-  border: 3px solid rgba(20, 20, 20, 0.96);
+  border: 0;
   background: var(--app-bg);
   background-size: auto, auto, 28px 28px, 28px 28px, auto;
-  box-shadow: 0 12px 32px rgba(20, 20, 20, 0.22);
+  box-shadow: var(--shell-shadow);
   overflow: hidden;
+}
+
+.app-shell::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  box-shadow:
+    inset 0 0 0 2px var(--shell-outline),
+    inset 0 1px 0 var(--shell-highlight);
+  pointer-events: none;
 }
 
 .app-shell.is-maximized {
@@ -595,6 +610,18 @@ p {
   background: rgba(255, 250, 241, 0.92);
   /* 顶栏按钮有明显阴影，避免被容器裁切 */
   overflow: visible;
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+.workspace-bar * {
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+.workspace-bar img,
+.workspace-bar svg {
+  -webkit-user-drag: none;
 }
 
 .workspace-bar-left {

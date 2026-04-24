@@ -76,6 +76,13 @@ pub fn close_main_window(app: AppHandle) -> Result<(), String> {
 }
 
 #[tauri::command]
+pub fn start_drag_main_window(app: AppHandle) -> Result<(), String> {
+    main_window(&app)?
+        .start_dragging()
+        .map_err(|error| format!("启动窗口拖拽失败：{error}"))
+}
+
+#[tauri::command]
 pub fn start_resize_main_window(
     app: AppHandle,
     direction: ResizeDirectionPayload,

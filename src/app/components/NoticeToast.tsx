@@ -14,7 +14,12 @@ export const NoticeToast = memo(function NoticeToast({
   if (!notice) return null;
 
   return (
-    <div className="toast-layer" aria-live="polite" aria-label="操作提示">
+    <div
+      className="toast-layer"
+      aria-live="polite"
+      aria-label="操作提示"
+      data-window-drag-exclude="true"
+    >
       <div className={`notice is-${notice.tone} toast`}>
         <span>{notice.message}</span>
         <button
@@ -30,4 +35,3 @@ export const NoticeToast = memo(function NoticeToast({
     </div>
   );
 });
-

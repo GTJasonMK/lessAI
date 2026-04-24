@@ -17,6 +17,6 @@ pub use settings::{load_settings, save_settings, test_provider};
 pub use snippet::rewrite_selection;
 pub use suggestions::{apply_suggestion, delete_suggestion, dismiss_suggestion};
 pub use window::{
-    close_main_window, is_main_window_maximized, minimize_main_window, start_resize_main_window,
-    toggle_maximize_main_window,
+    close_main_window, is_main_window_maximized, minimize_main_window, start_drag_main_window,
+    start_resize_main_window, toggle_maximize_main_window,
 };

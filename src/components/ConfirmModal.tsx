@@ -45,6 +45,7 @@ export const ConfirmModal = memo(function ConfirmModal({
   return (
     <div
       className="modal-overlay"
+      data-window-drag-exclude="true"
       role="dialog"
       aria-modal="true"
       aria-label={title}
@@ -96,4 +97,3 @@ export const ConfirmModal = memo(function ConfirmModal({
     </div>
   );
 });
-

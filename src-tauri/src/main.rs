@@ -41,7 +41,8 @@ use commands::{
     export_document, finalize_document, is_main_window_maximized, load_session, load_settings,
     minimize_main_window, open_document, pause_rewrite, reset_session, resume_rewrite,
     retry_rewrite_unit, rewrite_selection, run_document_writeback, save_settings,
-    start_resize_main_window, start_rewrite, test_provider, toggle_maximize_main_window,
+    start_drag_main_window, start_resize_main_window, start_rewrite, test_provider,
+    toggle_maximize_main_window,
 };
 use state::AppState;
 use tauri_plugin_log::{Target, TargetKind, TimezoneStrategy};
@@ -99,6 +100,7 @@ fn main() {
             minimize_main_window,
             toggle_maximize_main_window,
             close_main_window,
+            start_drag_main_window,
             start_resize_main_window
         ])
         .run(tauri::generate_context!())

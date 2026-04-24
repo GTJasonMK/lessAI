@@ -1,4 +1,5 @@
 import {
+  type PointerEvent as ReactPointerEvent,
   startTransition,
   useCallback,
   useEffect,
@@ -61,6 +62,27 @@ type ThemePreference = ThemeMode | "system";
 const LEGACY_THEME_STORAGE_KEY = "lessai.theme";
 const THEME_PREFERENCE_STORAGE_KEY = "lessai.theme-preference";
 const DARK_THEME_MEDIA_QUERY = "(prefers-color-scheme: dark)";
+const WINDOW_DRAG_EXCLUDED_SELECTOR = [
+  '[data-window-drag-exclude="true"]',
+  "button",
+  "input",
+  "textarea",
+  "select",
+  "option",
+  "label",
+  "a",
+  "summary",
+  '[role="button"]',
+  '[contenteditable="true"]',
+  ".panel",
+  ".modal-overlay",
+  ".modal-card",
+  ".dialog-card",
+  ".settings-content",
+  ".toast-layer",
+  ".notice",
+  ".scroll-region"
+].join(", ");
 
 function resolveSystemThemeMode(): ThemeMode {
   if (typeof window === "undefined") {
@@ -128,6 +150,7 @@ export default function App() {
   const {
     windowMaximized,
     customResizeEnabled,
+    handleStartWindowDrag,
     handleMinimizeWindow,
     handleToggleMaximizeWindow,
     handleCloseWindow,
@@ -207,6 +230,26 @@ export default function App() {
   );
 
   const settingsReady = isSettingsReady(settings);
+
+  const handleWindowDragPointerDown = useCallback(
+    (event: ReactPointerEvent<HTMLElement>) => {
+      if (event.button !== 0 || !event.isPrimary) {
+        return;
+      }
+
+      const target = event.target;
+      if (!(target instanceof Element)) {
+        return;
+      }
+
+      if (target.closest(WINDOW_DRAG_EXCLUDED_SELECTOR)) {
+        return;
+      }
+
+      void handleStartWindowDrag();
+    },
+    [handleStartWindowDrag]
+  );
 
   const { segmentationPresetLock, readSegmentationPresetLockedReason } = useSegmentationPresetLock({
     stage,
@@ -664,7 +707,7 @@ export default function App() {
   return (
     <div className={`app-shell${windowMaximized ? " is-maximized" : ""}`}>
       <div className="body-shell">
-        <main className="workspace">
+        <main className="workspace" onPointerDown={handleWindowDragPointerDown}>
           <WorkspaceBar
             logoUrl={logoUrl}
             stage={stage}
@@ -679,6 +722,7 @@ export default function App() {
             onOpenDocument={() => void handleOpenDocument()}
             onOpenSettings={openSettings}
             onExport={() => void handleExport()}
+            onStartWindowDrag={() => void handleStartWindowDrag()}
             onMinimizeWindow={() => void handleMinimizeWindow()}
             onToggleMaximizeWindow={() => void handleToggleMaximizeWindow()}
             onCloseWindow={() => void handleCloseWindow()}

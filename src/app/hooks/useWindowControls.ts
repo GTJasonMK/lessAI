@@ -3,6 +3,7 @@ import {
   closeMainWindow,
   isMainWindowMaximized,
   minimizeMainWindow,
+  startDragMainWindow,
   startResizeMainWindow,
   toggleMaximizeMainWindow,
   type WindowResizeDirection
@@ -85,6 +86,14 @@ export function useWindowControls(showNotice: ShowNotice) {
     }
   }, [showNotice]);
 
+  const handleStartWindowDrag = useCallback(async () => {
+    try {
+      await startDragMainWindow();
+    } catch (error) {
+      showNotice("error", `窗口拖动失败：${readableError(error)}`);
+    }
+  }, [showNotice]);
+
   const handleResizeWindow = useCallback(
     async (direction: ResizeDirection) => {
       try {
@@ -99,6 +108,7 @@ export function useWindowControls(showNotice: ShowNotice) {
   return {
     customResizeEnabled,
     windowMaximized,
+    handleStartWindowDrag,
     handleMinimizeWindow,
     handleToggleMaximizeWindow,
     handleCloseWindow,

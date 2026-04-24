@@ -92,6 +92,7 @@ export const SettingsModal = memo(function SettingsModal({
   return (
     <div
       className="modal-overlay"
+      data-window-drag-exclude="true"
       role="dialog"
       aria-modal="true"
       aria-label="设置"
