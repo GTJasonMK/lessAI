@@ -4,6 +4,7 @@ use crate::{
         apply_slot_updates, build_rewrite_unit_request_from_slots, merged_text_from_slots,
         RewriteUnitResponse, SlotUpdate, WritebackSlot,
     },
+    textual_template,
 };
 
 use super::plain_support::finalize_plain_candidate;
@@ -19,8 +20,7 @@ pub(super) async fn rewrite_selection_text_with_client(
 ) -> Result<String, String> {
     super::validate_settings(settings)?;
 
-    let slots =
-        crate::textual_template::factory::build_slots(source_text, format, rewrite_headings);
+    let slots = build_selection_slots(source_text, format, rewrite_headings);
     if !slots
         .iter()
         .any(|slot| slot.editable && !slot.text.trim().is_empty())
@@ -33,6 +33,29 @@ pub(super) async fn rewrite_selection_text_with_client(
     let updates = normalize_selection_updates(&slots, response)?;
     let updated_slots = apply_slot_updates(&slots, &updates)?;
     Ok(merged_text_from_slots(&updated_slots))
+}
+
+fn build_selection_slots(
+    source_text: &str,
+    format: DocumentFormat,
+    rewrite_headings: bool,
+) -> Vec<WritebackSlot> {
+    // Selection rewrite works on in-memory snippet text; for docx/pdf snippets
+    // we intentionally use plain-text slot projection.
+    let template = match format {
+        DocumentFormat::PlainText | DocumentFormat::Docx | DocumentFormat::Pdf => {
+            crate::adapters::plain_text::PlainTextAdapter::build_template(source_text)
+        }
+        DocumentFormat::Markdown => crate::adapters::markdown::MarkdownAdapter::build_template(
+            source_text,
+            rewrite_headings,
+        ),
+        DocumentFormat::Tex => {
+            crate::adapters::tex::TexAdapter::build_template(source_text, rewrite_headings)
+        }
+    };
+
+    textual_template::slots::build_slots(&template).slots
 }
 
 fn normalize_selection_updates(

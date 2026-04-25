@@ -11,6 +11,7 @@ tauri-build = { version = "2", features = [] }
 [dependencies]
 chrono = { version = "0.4", features = ["serde"] }
 log = "0.4"
+lopdf = "0.38"
 pdf-extract = "0.10"
 quick-xml = "0.38"
 reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }

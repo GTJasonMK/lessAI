@@ -87,14 +87,6 @@ impl OwnedDocumentWriteback {
     }
 }
 
-#[cfg(test)]
-pub(crate) fn ensure_document_can_write_back(path: &str) -> Result<(), String> {
-    if document_backend_kind(Path::new(path)) == DocumentBackendKind::Pdf {
-        return Err(PDF_WRITE_BACK_UNSUPPORTED.to_string());
-    }
-    Ok(())
-}
-
 pub(crate) fn ensure_document_can_ai_rewrite(ai_rewrite: &CapabilityGate) -> Result<(), String> {
     ensure_capability_allowed(
         ai_rewrite,
@@ -106,9 +98,6 @@ pub(crate) fn ensure_document_source_matches_session(
     path: &Path,
     expected_source_snapshot: Option<&models::DocumentSnapshot>,
 ) -> Result<(), String> {
-    if document_backend_kind(path) == DocumentBackendKind::Pdf {
-        return Ok(());
-    }
     load_verified_writeback_source(path, expected_source_snapshot, false).map(|_| ())
 }
 
@@ -127,13 +116,6 @@ pub(crate) fn execute_document_writeback(
     writeback: DocumentWriteback<'_>,
     mode: WritebackMode,
 ) -> Result<(), String> {
-    if document_backend_kind(path) == DocumentBackendKind::Pdf {
-        return match (mode, writeback) {
-            (WritebackMode::Validate, DocumentWriteback::Text(_)) => Ok(()),
-            _ => Err(PDF_WRITE_BACK_UNSUPPORTED.to_string()),
-        };
-    }
-
     let source = load_verified_writeback_source(
         path,
         context.expected_source_snapshot,
@@ -156,6 +138,10 @@ enum VerifiedWritebackSource {
         bytes: Vec<u8>,
         source: adapters::docx::LoadedDocxWritebackSource,
         model: adapters::docx::DocxWritebackModel,
+    },
+    Pdf {
+        bytes: Vec<u8>,
+        source: adapters::pdf::LoadedPdfWritebackSource,
     },
 }
 
@@ -183,7 +169,19 @@ fn load_verified_writeback_source(
                 model,
             })
         }
-        DocumentBackendKind::Pdf => Err(PDF_WRITE_BACK_UNSUPPORTED.to_string()),
+        DocumentBackendKind::Pdf => {
+            let source = adapters::pdf::PdfAdapter::load_writeback_source(&source_bytes)?;
+            if !source.supports_safe_writeback() {
+                return Err(source
+                    .writeback_block_reason
+                    .clone()
+                    .unwrap_or_else(|| PDF_WRITE_BACK_UNSUPPORTED.to_string()));
+            }
+            Ok(VerifiedWritebackSource::Pdf {
+                bytes: source_bytes,
+                source,
+            })
+        }
     }
 }
 
@@ -208,6 +206,9 @@ fn build_text_writeback_bytes(
             expected_source_text,
             updated_text,
         ),
+        VerifiedWritebackSource::Pdf { .. } => {
+            Err("当前 PDF 仅支持基于槽位结构的安全写回，不支持整篇纯文本覆写。".to_string())
+        }
     }
 }
 
@@ -269,6 +270,24 @@ fn build_slot_writeback_bytes(
                 current_bytes,
                 source,
                 context.expected_source_text,
+                updated_slots,
+            )
+        }
+        VerifiedWritebackSource::Pdf {
+            bytes: current_bytes,
+            source,
+        } => {
+            textual_template::validate::ensure_template_signature(
+                context.expected_template_signature,
+                &source.template,
+            )?;
+            textual_template::validate::ensure_slot_structure_signature(
+                context.expected_slot_structure_signature,
+                updated_slots,
+            )?;
+            adapters::pdf::PdfAdapter::write_updated_slots_with_source(
+                current_bytes,
+                source,
                 updated_slots,
             )
         }

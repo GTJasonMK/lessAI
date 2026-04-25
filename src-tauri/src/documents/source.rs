@@ -1,4 +1,4 @@
-use crate::{adapters, models, rewrite_unit::WritebackSlot};
+use crate::{adapters, rewrite_unit::WritebackSlot};
 use std::{fs, path::Path};
 use uuid::Uuid;
 
@@ -6,7 +6,7 @@ use super::textual::{load_textual_template_source, path_extension_lower};
 use super::{capability_gate, DocumentCapabilityPolicy};
 
 pub(super) const PDF_WRITE_BACK_UNSUPPORTED: &str =
-    "当前文件为 .pdf：暂不支持写回覆盖（PDF 不是纯文本格式）。请使用“导出”为 .txt 后再进行后续排版。";
+    "当前 PDF 的文本层结构不足以安全进入原文件改写链路；不允许继续 AI 改写或写回原文件。";
 
 pub(crate) fn document_session_id(document_path: &str) -> String {
     let namespace = Uuid::from_bytes([
@@ -68,22 +68,31 @@ fn load_docx_source(path: &Path, rewrite_headings: bool) -> Result<LoadedDocumen
 
 fn load_pdf_source(path: &Path) -> Result<LoadedDocumentSource, String> {
     let bytes = fs::read(path).map_err(|error| error.to_string())?;
-    let source_text = adapters::pdf::PdfAdapter::extract_text(&bytes)?;
-    let writeback_slots = crate::textual_template::factory::build_slots(
-        &source_text,
-        models::DocumentFormat::PlainText,
-        false,
-    );
+    let loaded = adapters::pdf::PdfAdapter::load_writeback_source(&bytes)?;
+    let model = adapters::pdf::PdfAdapter::extract_writeback_model_from_source(&loaded);
+    let source_text = model.source_text.clone();
+    let writeback_supported = loaded.supports_safe_writeback();
+    let writeback_block_reason = loaded
+        .writeback_block_reason
+        .clone()
+        .unwrap_or_else(|| PDF_WRITE_BACK_UNSUPPORTED.to_string());
+
     Ok(LoadedDocumentSource {
         source_text,
-        template_kind: None,
-        template_signature: None,
-        slot_structure_signature: None,
+        template_kind: Some("pdf".to_string()),
+        template_signature: Some(model.template_signature),
+        slot_structure_signature: Some(model.slot_structure_signature),
         template_snapshot: None,
-        writeback_slots,
+        writeback_slots: model.writeback_slots,
         capability_policy: DocumentCapabilityPolicy::new(
-            capability_gate(false, Some(PDF_WRITE_BACK_UNSUPPORTED)),
-            capability_gate(false, Some(PDF_WRITE_BACK_UNSUPPORTED)),
+            capability_gate(
+                writeback_supported,
+                (!writeback_supported).then_some(writeback_block_reason.as_str()),
+            ),
+            capability_gate(
+                writeback_supported,
+                (!writeback_supported).then_some(writeback_block_reason.as_str()),
+            ),
         ),
     })
 }

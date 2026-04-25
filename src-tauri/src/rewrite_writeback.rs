@@ -3,17 +3,16 @@ use std::path::Path;
 
 use log::{error, info};
 
-use crate::session_capability_models::DocumentBackendKind;
 use crate::{
     documents::{
         ensure_capability_allowed, ensure_document_can_ai_rewrite, execute_document_writeback,
-        session_document_backend, DocumentWritebackContext, OwnedDocumentWriteback, WritebackMode,
+        DocumentWritebackContext, OwnedDocumentWriteback, WritebackMode,
     },
     models::{DocumentSession, SuggestionDecision},
     observability::{document_kind_label, writeback_mode_label},
     rewrite_permissions::ensure_rewrite_unit_can_rewrite,
     rewrite_projection::{apply_preview_suggestion, build_applied_slot_projection},
-    rewrite_unit::{merged_text_from_slots, RewriteUnitResponse},
+    rewrite_unit::RewriteUnitResponse,
 };
 
 type SessionWritebackPlan = OwnedDocumentWriteback;
@@ -113,12 +112,6 @@ fn validate_unique_batch_slot_updates(responses: &[RewriteUnitResponse]) -> Resu
 
 fn build_session_writeback_plan(session: &DocumentSession) -> Result<SessionWritebackPlan, String> {
     let updated_slots = build_applied_slot_projection(session)?;
-    if session_document_backend(session) == DocumentBackendKind::Pdf {
-        return Ok(SessionWritebackPlan::Text(merged_text_from_slots(
-            &updated_slots,
-        )));
-    }
-
     Ok(SessionWritebackPlan::Slots(updated_slots))
 }
 

@@ -3,7 +3,7 @@ use super::{
     WritebackMode,
 };
 use crate::document_snapshot::capture_document_snapshot;
-use crate::test_support::{build_minimal_docx, cleanup_dir, write_temp_file};
+use crate::test_support::{build_minimal_docx, build_minimal_pdf, cleanup_dir, write_temp_file};
 
 fn textual_writeback_context<'a>(
     loaded: &'a super::LoadedDocumentSource,
@@ -277,16 +277,63 @@ fn validate_document_writeback_allows_tex_slot_text_updates() {
 }
 
 #[test]
-fn validate_document_writeback_allows_pdf_text_projection_without_source_reload() {
-    let (root, target) = write_temp_file("pdf-validate", "pdf", b"%PDF-1.4\n");
+fn validate_document_writeback_allows_safe_pdf_slot_updates() {
+    let bytes = build_minimal_pdf(&["Alpha line", "Beta line"]);
+    let (root, target) = write_temp_file("pdf-safe-validate", "pdf", &bytes);
+    let loaded = load_document_source(&target, false).expect("load pdf");
+    let snapshot = capture_document_snapshot(&target).expect("capture snapshot");
+    let mut slots = loaded.writeback_slots.clone();
+    slots[0].text = "Alpha revised".to_string();
 
     execute_document_writeback(
         &target,
-        DocumentWritebackContext::new("原文", None),
+        textual_writeback_context(&loaded, &snapshot),
+        DocumentWriteback::Slots(&slots),
+        WritebackMode::Validate,
+    )
+    .expect("safe pdf slot update should validate");
+
+    cleanup_dir(&root);
+}
+
+#[test]
+fn write_document_content_updates_safe_pdf() {
+    let bytes = build_minimal_pdf(&["Alpha line", "Beta line"]);
+    let (root, target) = write_temp_file("pdf-safe-write", "pdf", &bytes);
+    let loaded = load_document_source(&target, false).expect("load pdf");
+    let snapshot = capture_document_snapshot(&target).expect("capture snapshot");
+    let mut slots = loaded.writeback_slots.clone();
+    slots[0].text = "Alpha revised".to_string();
+
+    execute_document_writeback(
+        &target,
+        textual_writeback_context(&loaded, &snapshot),
+        DocumentWriteback::Slots(&slots),
+        WritebackMode::Write,
+    )
+    .expect("safe pdf write should succeed");
+
+    let reloaded = load_document_source(&target, false).expect("reload pdf");
+    assert_eq!(reloaded.source_text, "Alpha revised\nBeta line\n");
+
+    cleanup_dir(&root);
+}
+
+#[test]
+fn validate_document_writeback_rejects_unsafe_pdf_text_projection() {
+    let bytes = build_minimal_pdf(&["Repeat", "Repeat"]);
+    let (root, target) = write_temp_file("pdf-validate", "pdf", &bytes);
+    let snapshot = capture_document_snapshot(&target).expect("capture snapshot");
+
+    let error = execute_document_writeback(
+        &target,
+        DocumentWritebackContext::new("Repeat\nRepeat\n", Some(&snapshot)),
         DocumentWriteback::Text("改写后"),
         WritebackMode::Validate,
     )
-    .expect("pdf validate should allow export-style text projection");
+    .expect_err("unsafe pdf validate should fail");
+
+    assert!(error.contains("安全进入原文件改写链路") || error.contains("重复文本块"));
 
     cleanup_dir(&root);
 }

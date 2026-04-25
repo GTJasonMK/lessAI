@@ -5,7 +5,12 @@ import assert from "node:assert/strict";
 import ts from "typescript";
 import React from "react";
 import { renderToStaticMarkup } from "react-dom/server";
-import { assertIncludes, read } from "./test-helpers.mjs";
+import {
+  assertIncludes,
+  assertMatches,
+  assertNotIncludes,
+  read
+} from "./test-helpers.mjs";
 
 function hasRule(css, selector, property, value) {
   const escaped = selector.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
@@ -29,14 +34,6 @@ function assertNoRule(css, selector, property, value) {
   );
 }
 
-function assertNotIncludes(text, snippet) {
-  assert.ok(!text.includes(snippet), `期望内容不包含：${snippet}`);
-}
-
-function assertMatches(text, pattern, message) {
-  assert.ok(pattern.test(text), message);
-}
-
 function rewriteRelativeImports(code) {
   return code.replace(/from\s+["']((?:\.\.?\/)[^"']+)["']/g, 'from "$1.mjs"');
 }
@@ -47,6 +44,10 @@ async function loadProtectedTextModule() {
   const dir = mkdtempSync(join(tempRoot, "lessai-protected-text-"));
   const modules = [
     ["src/lib/protectedText.tsx", "protectedText.tsx"],
+    [
+      "src/lib/protectedTextPlaceholderLabels.generated.ts",
+      "protectedTextPlaceholderLabels.generated.ts"
+    ],
     ["src/lib/markdownProtectedSegments.ts", "markdownProtectedSegments.ts"],
     ["src/lib/path.ts", "path.ts"],
     ["src/lib/protectedTextShared.ts", "protectedTextShared.ts"],
@@ -188,6 +189,12 @@ const { getSessionStats, summarizeRewriteUnitSuggestions } = await loadHelpersMo
 assertIncludes(workspaceBar, 'className="workspace-bar-status-row"');
 assertIncludes(workspaceBar, 'className="workspace-bar-path-line"');
 assertIncludes(workspaceBar, 'className="workspace-bar-path-text"');
+assertIncludes(appSource, 'from "./lib/windowDrag"');
+assertIncludes(workspaceBar, 'from "../../lib/windowDrag"');
+assertIncludes(appSource, "isWindowDragExcludedTarget(event.target)");
+assertIncludes(workspaceBar, "isWindowDragExcludedTarget(event.target)");
+assertNotIncludes(appSource, "const WINDOW_DRAG_EXCLUDED_SELECTOR = [");
+assertNotIncludes(workspaceBar, "const HEADER_DRAG_EXCLUDED_SELECTOR = [");
 assertIncludes(settingsTypes, "unitsPerBatch: number;");
 assertIncludes(settingsConstants, "unitsPerBatch: 1");
 assertIncludes(rewriteStrategyPage, "单批处理单元数");
@@ -530,6 +537,16 @@ function renderMarkdownMarkup(text) {
   );
 }
 
+function renderPdfMarkup(text, slot = null) {
+  return renderToStaticMarkup(
+    React.createElement(
+      React.Fragment,
+      null,
+      renderInlineProtectedText(text, "pdf", "ui-regression", { slot })
+    )
+  );
+}
+
 // 1) 审阅区动作按钮不应依赖横向滚动（避免“左滑右滑”）
 assertNoRule(
   part02,
@@ -599,6 +616,24 @@ assertMatches(
   markdownBareUrlMarkup,
   /<span[^>]*class="inline-protected"[^>]*>https:\/\/example\.com\/report\/final<\/span>；后面的中文正文/,
   "期望 Markdown 裸 URL 在中文全角标点前正确收口"
+);
+
+// 13) PDF 占位符文本在无 slot 上下文时也应能高亮
+const pdfPlaceholderMarkup = renderPdfMarkup("正文[链接]后文");
+assertMatches(
+  pdfPlaceholderMarkup,
+  /正文<span[^>]*class="inline-protected"[^>]*>\[链接\]<\/span>后文/,
+  "期望 PDF 占位符在无 slot 上下文时也能高亮"
+);
+
+// 14) PDF slot 携带 protectKind 时，应优先按 slot 保护区渲染
+const pdfSlotProtectedMarkup = renderPdfMarkup("[图形]", {
+  presentation: { protectKind: "pdf-graphics" }
+});
+assertMatches(
+  pdfSlotProtectedMarkup,
+  /<span[^>]*class="inline-protected"[^>]*data-protect-kind="pdf-graphics"[^>]*>\[图形\]<\/span>/,
+  "期望 PDF protectKind 来自 slot.presentation，且渲染标记一致"
 );
 
 console.log("[ui-regression] OK");

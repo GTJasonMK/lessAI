@@ -5,7 +5,7 @@ use super::{
 use crate::{
     document_snapshot::capture_document_snapshot,
     rewrite_unit::WritebackSlot,
-    test_support::{cleanup_dir, write_temp_file},
+    test_support::{build_minimal_pdf, cleanup_dir, write_temp_file},
 };
 
 struct TextFixture {
@@ -104,6 +104,39 @@ fn docx_roundtrip_preserves_slot_structure_signature() {
         editable_slot_count(&loaded.writeback_slots)
     );
     assert!(reloaded.source_text.contains("〔改〕"));
+
+    cleanup_dir(&root);
+}
+
+#[test]
+fn safe_pdf_roundtrip_preserves_source_projection() {
+    let bytes = build_minimal_pdf(&["Alpha line", "Beta line"]);
+    let (root, path) = write_temp_file("pdf-roundtrip", "pdf", &bytes);
+
+    let loaded = load_document_source(&path, false).expect("load pdf");
+    let snapshot = capture_document_snapshot(&path).expect("capture snapshot");
+    let mut updated_slots = loaded.writeback_slots.clone();
+    let first_editable = updated_slots
+        .iter_mut()
+        .find(|slot| slot.editable)
+        .expect("editable pdf slot");
+    first_editable.text = format!("{} [rev]", first_editable.text);
+
+    execute_document_writeback(
+        &path,
+        DocumentWritebackContext::new(&loaded.source_text, Some(&snapshot))
+            .with_structure_signatures(
+                loaded.template_signature.as_deref(),
+                loaded.slot_structure_signature.as_deref(),
+                false,
+            ),
+        DocumentWriteback::Slots(&updated_slots),
+        WritebackMode::Write,
+    )
+    .expect("pdf roundtrip should succeed");
+
+    let reloaded = load_document_source(&path, false).expect("reload pdf");
+    assert!(reloaded.source_text.contains("[rev]"));
 
     cleanup_dir(&root);
 }

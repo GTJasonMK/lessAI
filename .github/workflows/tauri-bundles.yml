@@ -565,4 +565,10 @@ jobs:
         with:
           tag_name: ${{ env.RELEASE_TAG }}
           files: release-assets/*
+          body: |
+            ## 文档兼容边界（重要）
+            - DOCX / PDF 当前采用“安全优先”的原文件写回策略。
+            - 能导入并查看，不等于一定允许写回原文件。
+            - 检测到结构歧义、锁定区变化或文本层定位不稳定时，会主动拒绝写回以保护原文。
+            - 如遇写回阻断，可先导出为新文件继续处理。
           generate_release_notes: true

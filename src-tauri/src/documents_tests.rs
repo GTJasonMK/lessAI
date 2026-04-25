@@ -1,14 +1,16 @@
 use std::fs;
 
 use super::{
-    ensure_document_can_write_back, ensure_document_source_matches_session,
-    execute_document_writeback, load_document_source, normalize_text_against_source_layout,
-    DocumentWriteback, DocumentWritebackContext, WritebackMode,
+    ensure_document_source_matches_session, execute_document_writeback, load_document_source,
+    normalize_text_against_source_layout, DocumentWriteback, DocumentWritebackContext,
+    WritebackMode,
 };
 use crate::document_snapshot::{capture_document_snapshot, SNAPSHOT_MISSING_ERROR};
 use crate::models::SegmentationPreset;
 use crate::rewrite_unit::build_rewrite_units;
-use crate::test_support::{build_docx_entries, build_minimal_docx, cleanup_dir, write_temp_file};
+use crate::test_support::{
+    build_docx_entries, build_minimal_docx, build_minimal_pdf, cleanup_dir, write_temp_file,
+};
 
 fn rebuild_source_text(loaded: &super::LoadedDocumentSource) -> String {
     loaded
@@ -43,11 +45,6 @@ fn decode_invalid_text_file_returns_error() {
 }
 
 #[test]
-fn docx_is_allowed_to_write_back() {
-    assert!(ensure_document_can_write_back("/tmp/demo.docx").is_ok());
-}
-
-#[test]
 fn document_format_maps_docx_extension_to_docx() {
     assert_eq!(
         super::textual::document_format(std::path::Path::new("/tmp/demo.docx")),
@@ -56,16 +53,27 @@ fn document_format_maps_docx_extension_to_docx() {
 }
 
 #[test]
-fn pdf_is_not_allowed_to_write_back() {
-    assert!(ensure_document_can_write_back("/tmp/demo.pdf").is_err());
+fn document_format_maps_pdf_extension_to_pdf() {
+    assert_eq!(
+        super::textual::document_format(std::path::Path::new("/tmp/demo.pdf")),
+        crate::models::DocumentFormat::Pdf
+    );
 }
 
 #[test]
-fn pdf_is_allowed_to_continue_ai_rewrite_without_writeback() {
-    assert!(super::writeback::ensure_document_can_ai_rewrite(
-        &crate::session_capability_models::CapabilityGate::allowed(),
-    )
-    .is_ok());
+fn load_pdf_source_returns_pdf_template_metadata() {
+    let bytes = build_minimal_pdf(&["Alpha line", "Beta line"]);
+    let (root, target) = write_temp_file("pdf-source", "pdf", &bytes);
+
+    let loaded = load_document_source(&target, false).expect("load pdf");
+
+    assert_eq!(loaded.template_kind.as_deref(), Some("pdf"));
+    assert_eq!(loaded.source_text, "Alpha line\nBeta line\n");
+    assert_eq!(rebuild_source_text(&loaded), loaded.source_text);
+    assert!(loaded.template_signature.is_some());
+    assert!(loaded.slot_structure_signature.is_some());
+
+    cleanup_dir(&root);
 }
 
 #[test]
@@ -78,6 +86,18 @@ fn docx_without_writeback_support_is_not_allowed_to_continue_ai_rewrite() {
     .expect_err("expected rewrite guard");
 
     assert!(error.contains("docx") || error.contains("写回"));
+}
+
+#[test]
+fn pdf_without_writeback_support_is_not_allowed_to_continue_ai_rewrite() {
+    let error = super::writeback::ensure_document_can_ai_rewrite(
+        &crate::session_capability_models::CapabilityGate::blocked(
+            "当前 PDF 的文本层结构不足以安全写回原文件。",
+        ),
+    )
+    .expect_err("expected rewrite guard");
+
+    assert!(error.contains("PDF") || error.contains("写回"));
 }
 
 #[test]

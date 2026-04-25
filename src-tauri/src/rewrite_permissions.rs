@@ -1,5 +1,3 @@
-use std::path::Path;
-
 use crate::{
     documents::ensure_document_can_ai_rewrite_safely, models::DocumentSession,
     rewrite_unit::find_rewrite_unit,
@@ -13,7 +11,7 @@ pub(crate) fn protected_rewrite_unit_error(rewrite_unit_id: &str) -> String {
 
 pub(crate) fn ensure_session_can_rewrite(session: &DocumentSession) -> Result<(), String> {
     ensure_document_can_ai_rewrite_safely(
-        Path::new(&session.document_path),
+        std::path::Path::new(&session.document_path),
         session.source_snapshot.as_ref(),
         &session.capabilities.ai_rewrite,
     )

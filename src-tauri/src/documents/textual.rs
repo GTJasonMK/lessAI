@@ -47,10 +47,12 @@ pub(crate) fn load_textual_template_source(
 }
 
 pub(crate) fn document_format(path: &Path) -> models::DocumentFormat {
-    format_from_extension(path_extension_lower(path).as_deref())
+    document_format_from_extension(path_extension_lower(path).as_deref())
 }
 
-fn textual_template_format(path: &Path) -> Result<models::DocumentFormat, String> {
+fn textual_template_format(
+    path: &Path,
+) -> Result<textual_template::factory::TextualTemplateFormat, String> {
     let extension = path_extension_lower(path);
     match extension.as_deref() {
         Some("txt" | "md" | "markdown" | "tex" | "latex") | None => {
@@ -60,9 +62,20 @@ fn textual_template_format(path: &Path) -> Result<models::DocumentFormat, String
     }
 }
 
-fn format_from_extension(extension: Option<&str>) -> models::DocumentFormat {
+fn format_from_extension(
+    extension: Option<&str>,
+) -> textual_template::factory::TextualTemplateFormat {
+    match extension {
+        Some("md" | "markdown") => textual_template::factory::TextualTemplateFormat::Markdown,
+        Some("tex" | "latex") => textual_template::factory::TextualTemplateFormat::Tex,
+        _ => textual_template::factory::TextualTemplateFormat::PlainText,
+    }
+}
+
+fn document_format_from_extension(extension: Option<&str>) -> models::DocumentFormat {
     match extension {
         Some("docx") => models::DocumentFormat::Docx,
+        Some("pdf") => models::DocumentFormat::Pdf,
         Some("md" | "markdown") => models::DocumentFormat::Markdown,
         Some("tex" | "latex") => models::DocumentFormat::Tex,
         _ => models::DocumentFormat::PlainText,

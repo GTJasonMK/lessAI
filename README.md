@@ -253,6 +253,7 @@ cargo test
 
 - 推送 `v*` tag 触发 `.github/workflows/tauri-bundles.yml`
 - Workflow 会在 Windows/macOS/Linux 打包，并创建 GitHub Release（包含各平台安装包与校验文件）
+- 每个 Release 说明都会固定包含文档兼容边界提示：DOCX/PDF 走“安全优先”写回策略，复杂结构可能导入可读但拒绝写回
 
 ```bash
 git tag v0.1.0

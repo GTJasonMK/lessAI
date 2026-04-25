@@ -12,7 +12,8 @@
     "tauri": "pnpm exec tauri",
     "tauri:dev": "pnpm exec tauri dev --config src-tauri/tauri.dev.conf.json",
     "tauri:build": "pnpm exec tauri build",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "placeholders:generate": "node scripts/generate-placeholder-labels.mjs"
   },
   "dependencies": {
     "@tauri-apps/api": "^2.0.0",

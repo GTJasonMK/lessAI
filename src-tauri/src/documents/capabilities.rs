@@ -134,8 +134,7 @@ fn ai_rewrite_gate(
     source_writeback: &CapabilityGate,
 ) -> CapabilityGate {
     match backend_kind {
-        DocumentBackendKind::Pdf => CapabilityGate::allowed(),
-        DocumentBackendKind::Docx | DocumentBackendKind::Textual => {
+        DocumentBackendKind::Docx | DocumentBackendKind::Pdf | DocumentBackendKind::Textual => {
             if source_writeback.allowed {
                 CapabilityGate::allowed()
             } else {
@@ -187,7 +186,7 @@ fn compute_document_editor_mode(
     }
 
     match backend_kind {
-        DocumentBackendKind::Pdf => DocumentEditorMode::None,
+        DocumentBackendKind::Pdf => DocumentEditorMode::SlotBased,
         DocumentBackendKind::Docx => DocumentEditorMode::SlotBased,
         DocumentBackendKind::Textual => match template_kind {
             Some("markdown" | "tex") => DocumentEditorMode::SlotBased,
@@ -259,9 +258,14 @@ mod tests {
     }
 
     #[test]
-    fn hydrate_session_capabilities_keeps_pdf_ai_rewrite_enabled() {
+    fn hydrate_session_capabilities_blocks_pdf_ai_rewrite_when_writeback_is_blocked() {
         let pdf = sample_session("/tmp/example.pdf");
         assert!(pdf.capabilities.ai_rewrite.allowed);
+
+        let mut blocked_pdf = sample_session("/tmp/example.pdf");
+        blocked_pdf.capabilities.source_writeback = CapabilityGate::blocked("blocked");
+        super::hydrate_session_capabilities(&mut blocked_pdf);
+        assert!(!blocked_pdf.capabilities.ai_rewrite.allowed);
 
         let mut docx = sample_session("/tmp/example.docx");
         docx.capabilities.source_writeback = CapabilityGate::blocked("blocked");
@@ -302,17 +306,25 @@ mod tests {
             crate::session_capability_models::DocumentEditorMode::SlotBased
         );
 
-        let mut pdf = sample_session("/tmp/example.pdf");
+        let pdf = sample_session("/tmp/example.pdf");
         assert_eq!(
             pdf.capabilities.editor_mode,
+            crate::session_capability_models::DocumentEditorMode::SlotBased
+        );
+
+        let mut blocked_pdf = sample_session("/tmp/example.pdf");
+        blocked_pdf.capabilities.editor_writeback = CapabilityGate::blocked("blocked");
+        super::hydrate_session_capabilities(&mut blocked_pdf);
+        assert_eq!(
+            blocked_pdf.capabilities.editor_mode,
             crate::session_capability_models::DocumentEditorMode::None
         );
 
-        pdf.document_path = "/tmp/example.docx".to_string();
-        pdf.capabilities.editor_writeback = CapabilityGate::blocked("blocked");
-        super::hydrate_session_capabilities(&mut pdf);
+        let mut docx = sample_session("/tmp/example.docx");
+        docx.capabilities.editor_writeback = CapabilityGate::blocked("blocked");
+        super::hydrate_session_capabilities(&mut docx);
         assert_eq!(
-            pdf.capabilities.editor_mode,
+            docx.capabilities.editor_mode,
             crate::session_capability_models::DocumentEditorMode::None
         );
     }

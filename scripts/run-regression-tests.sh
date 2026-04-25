@@ -7,4 +7,4 @@ node scripts/workbench-scroll-regression.test.mjs
 node scripts/scroll-log-tracepoints.test.mjs
 node scripts/scroll-log-persistence.test.mjs
 node scripts/packaging-regression.test.mjs
-node scripts/docx-placeholder-sync.test.mjs
+node scripts/placeholder-sync.test.mjs

@@ -3,7 +3,7 @@ use crate::{
     documents::{load_document_source, writeback_slots_from_regions},
     models::{SegmentationPreset, TextPresentation},
     rewrite_unit::build_rewrite_units,
-    test_support::{build_minimal_docx, cleanup_dir, write_temp_file},
+    test_support::{build_minimal_docx, build_minimal_pdf, cleanup_dir, write_temp_file},
 };
 
 fn slot_block_anchors(loaded: &crate::documents::source::LoadedDocumentSource) -> Vec<String> {
@@ -186,6 +186,51 @@ fn load_tex_source_builds_template_metadata_and_anchors() {
     assert_eq!(loaded.template_kind.as_deref(), Some("tex"));
     assert!(loaded.template_signature.is_some());
     assert!(loaded.slot_structure_signature.is_some());
+
+    cleanup_dir(&root);
+}
+
+#[test]
+fn load_pdf_source_builds_template_metadata_and_safe_capabilities() {
+    let bytes = build_minimal_pdf(&["Alpha line", "Beta line"]);
+    let (root, path) = write_temp_file("pdf-template", "pdf", &bytes);
+
+    let loaded = load_document_source(&path, false).expect("load pdf");
+    let anchors = loaded
+        .writeback_slots
+        .iter()
+        .map(|slot| slot.anchor.clone().unwrap_or_default())
+        .collect::<Vec<_>>();
+
+    assert_eq!(loaded.template_kind.as_deref(), Some("pdf"));
+    assert!(loaded.template_signature.is_some());
+    assert!(loaded.slot_structure_signature.is_some());
+    assert!(loaded.template_snapshot.is_none());
+    assert_eq!(loaded.source_text, "Alpha line\nBeta line\n");
+    assert_eq!(anchors, vec!["pdf:p0:b0:r0:s0", "pdf:p0:b1:r0:s0"]);
+    assert!(loaded.capability_policy.source_writeback.allowed);
+    assert!(loaded.capability_policy.editor_writeback.allowed);
+
+    cleanup_dir(&root);
+}
+
+#[test]
+fn load_pdf_source_blocks_rewrite_for_duplicate_chunks() {
+    let bytes = build_minimal_pdf(&["Repeat", "Repeat"]);
+    let (root, path) = write_temp_file("pdf-duplicate", "pdf", &bytes);
+
+    let loaded = load_document_source(&path, false).expect("load pdf");
+
+    assert_eq!(loaded.template_kind.as_deref(), Some("pdf"));
+    assert_eq!(loaded.source_text, "Repeat\nRepeat\n");
+    assert!(!loaded.capability_policy.source_writeback.allowed);
+    assert!(!loaded.capability_policy.editor_writeback.allowed);
+    assert!(loaded
+        .capability_policy
+        .source_writeback
+        .block_reason
+        .as_deref()
+        .is_some_and(|message| message.contains("重复文本块")));
 
     cleanup_dir(&root);
 }

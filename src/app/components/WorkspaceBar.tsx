@@ -15,6 +15,7 @@ import {
   formatSessionStatus,
   statusTone
 } from "../../lib/helpers";
+import { isWindowDragExcludedTarget } from "../../lib/windowDrag";
 import { StatusBadge } from "../../components/StatusBadge";
 
 interface WorkspaceBarProps {
@@ -36,18 +37,6 @@ interface WorkspaceBarProps {
   onToggleMaximizeWindow: () => void;
   onCloseWindow: () => void;
 }
-
-const HEADER_DRAG_EXCLUDED_SELECTOR = [
-  '[data-window-drag-exclude="true"]',
-  "button",
-  "input",
-  "textarea",
-  "select",
-  "option",
-  "label",
-  "a",
-  ".scroll-region"
-].join(", ");
 
 export const WorkspaceBar = memo(function WorkspaceBar({
   logoUrl,
@@ -85,12 +74,7 @@ export const WorkspaceBar = memo(function WorkspaceBar({
       return;
     }
 
-    const target = event.target;
-    if (!(target instanceof Element)) {
-      return;
-    }
-
-    if (target.closest(HEADER_DRAG_EXCLUDED_SELECTOR)) {
+    if (isWindowDragExcludedTarget(event.target)) {
       return;
     }
 

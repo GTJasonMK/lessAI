@@ -7,15 +7,12 @@ mod writeback;
 
 pub(crate) use capabilities::{
     apply_capability_policy, capability_gate, ensure_capability_allowed,
-    hydrate_session_capabilities, hydrated_session_clone, session_document_backend,
-    DocumentCapabilityPolicy,
+    hydrate_session_capabilities, hydrated_session_clone, DocumentCapabilityPolicy,
 };
 pub(crate) use source::{document_session_id, load_document_source, LoadedDocumentSource};
 #[cfg(test)]
 pub(crate) use test_support::writeback_slots_from_regions;
 pub(crate) use textual::document_format;
-#[cfg(test)]
-pub(crate) use writeback::ensure_document_can_write_back;
 #[cfg(test)]
 pub(crate) use writeback::DocumentWriteback;
 pub(crate) use writeback::{

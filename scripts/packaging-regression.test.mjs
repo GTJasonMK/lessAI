@@ -4,7 +4,9 @@ import { resolve } from "node:path";
 
 const root = resolve(import.meta.dirname, "..");
 const tauriConfigPath = resolve(root, "src-tauri/tauri.conf.json");
+const tauriBundlesWorkflowPath = resolve(root, ".github/workflows/tauri-bundles.yml");
 const tauriConfig = JSON.parse(readFileSync(tauriConfigPath, "utf8"));
+const tauriBundlesWorkflow = readFileSync(tauriBundlesWorkflowPath, "utf8");
 
 assert.ok(Array.isArray(tauriConfig.bundle?.icon), "bundle.icon 必须为数组");
 assert.ok(tauriConfig.bundle.icon.length > 0, "bundle.icon 不能为空");
@@ -36,5 +38,14 @@ for (const key of ["bannerPath", "dialogImagePath"]) {
   const assetPath = resolve(root, "src-tauri", wix[key]);
   assert.ok(existsSync(assetPath), `WiX 资源不存在：${wix[key]}`);
 }
+
+assert.ok(
+  tauriBundlesWorkflow.includes("## 文档兼容边界（重要）"),
+  "发布流程必须在 Release 说明中包含文档兼容边界提示"
+);
+assert.ok(
+  tauriBundlesWorkflow.includes("DOCX / PDF 当前采用“安全优先”的原文件写回策略。"),
+  "发布流程缺少 DOCX/PDF 安全优先写回口径"
+);
 
 console.log("[packaging-regression] OK");

@@ -52,6 +52,98 @@ pub(crate) fn build_minimal_docx(document_xml: &str) -> Vec<u8> {
     build_docx_entries(&[("word/document.xml", document_xml)])
 }
 
+pub(crate) fn build_minimal_pdf(lines: &[&str]) -> Vec<u8> {
+    build_minimal_pdf_with_features(lines, false, false)
+}
+
+pub(crate) fn build_minimal_pdf_with_features(
+    lines: &[&str],
+    include_graphics_path: bool,
+    include_link_annotation: bool,
+) -> Vec<u8> {
+    use lopdf::{
+        content::{Content, Operation},
+        dictionary, Document, Object, Stream,
+    };
+
+    let mut doc = Document::with_version("1.5");
+    let pages_id = doc.new_object_id();
+
+    let font_id = doc.add_object(dictionary! {
+        "Type" => "Font",
+        "Subtype" => "Type1",
+        "BaseFont" => "Helvetica",
+    });
+    let resources_id = doc.add_object(dictionary! {
+        "Font" => dictionary! {
+            "F1" => font_id,
+        },
+    });
+
+    let mut operations = Vec::new();
+    if include_graphics_path {
+        operations.push(Operation::new(
+            "re",
+            vec![72.into(), 680.into(), 120.into(), 40.into()],
+        ));
+        operations.push(Operation::new("S", vec![]));
+    }
+    for (index, line) in lines.iter().enumerate() {
+        operations.push(Operation::new("BT", vec![]));
+        operations.push(Operation::new("Tf", vec!["F1".into(), 14.into()]));
+        operations.push(Operation::new(
+            "Td",
+            vec![72.into(), (760_i64 - (index as i64 * 24)).into()],
+        ));
+        operations.push(Operation::new("Tj", vec![Object::string_literal(*line)]));
+        operations.push(Operation::new("ET", vec![]));
+    }
+    let content = Content { operations };
+    let content_id = doc.add_object(Stream::new(dictionary! {}, content.encode().unwrap()));
+
+    let mut page = dictionary! {
+        "Type" => "Page",
+        "Parent" => pages_id,
+        "Contents" => content_id,
+    };
+    if include_link_annotation {
+        let action_id = doc.add_object(dictionary! {
+            "S" => "URI",
+            "URI" => Object::string_literal("https://example.com"),
+        });
+        let annotation_id = doc.add_object(dictionary! {
+            "Type" => "Annot",
+            "Subtype" => "Link",
+            "Rect" => vec![72.into(), 680.into(), 192.into(), 720.into()],
+            "Border" => vec![0.into(), 0.into(), 0.into()],
+            "A" => action_id,
+        });
+        page.set("Annots", vec![annotation_id.into()]);
+    }
+    let page_id = doc.add_object(page);
+
+    doc.objects.insert(
+        pages_id,
+        Object::Dictionary(dictionary! {
+            "Type" => "Pages",
+            "Kids" => vec![page_id.into()],
+            "Count" => 1,
+            "Resources" => resources_id,
+            "MediaBox" => vec![0.into(), 0.into(), 595.into(), 842.into()],
+        }),
+    );
+
+    let catalog_id = doc.add_object(dictionary! {
+        "Type" => "Catalog",
+        "Pages" => pages_id,
+    });
+    doc.trailer.set("Root", catalog_id);
+
+    let mut output = Vec::new();
+    doc.save_to(&mut output).expect("save pdf");
+    output
+}
+
 pub(crate) fn load_repo_docx_fixture_or<F>(file_name: &str, fallback: F) -> Vec<u8>
 where
     F: FnOnce() -> Vec<u8>,
