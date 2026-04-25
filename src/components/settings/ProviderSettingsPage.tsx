@@ -78,7 +78,7 @@ export const ProviderSettingsPage = memo(function ProviderSettingsPage({
           <input
             value={settings.baseUrl}
             onChange={(event) => onUpdateStringSetting("baseUrl", event.target.value)}
-            placeholder="https://cliproxy.eqing.tech/v1"
+            placeholder="https://api.openai.com/v1"
           />
         </label>
         <label className="field">
@@ -95,7 +95,7 @@ export const ProviderSettingsPage = memo(function ProviderSettingsPage({
           <input
             value={settings.model}
             onChange={(event) => onUpdateStringSetting("model", event.target.value)}
-            placeholder="gpt-5.4-mini"
+            placeholder="gpt-4.1-mini"
           />
         </label>
         <label className="field field-inline">

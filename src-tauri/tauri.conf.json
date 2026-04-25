@@ -1,7 +1,7 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
   "productName": "LessAI",
-  "version": "0.2.7",
+  "version": "0.1.0",
   "identifier": "com.lessai.desktop",
   "build": {
     "beforeDevCommand": "pnpm dev",
@@ -55,9 +55,9 @@
   "plugins": {
     "updater": {
       "endpoints": [
-        "https://github.com/88lin/lessAI/releases/latest/download/latest.json"
+        "https://github.com/GTJasonMK/lessAI/releases/latest/download/latest.json"
       ],
-      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDI2MjlGMzM4OEQxNjlBMUYKUldRZm1oYU5PUE1wSm9xclArMmNXMmVRTVJuZWNRQm0xc0p6MzlnTHdPbVpvTzNhdmM2S01FTU8K"
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDJGRDMzOUQ4QUM2OTk4RTgKUldUb21HbXMyRG5UTHc5R1l2VXZTdEV1b3ZPNHcwWk1xS1k0Z1NoY0RvTy96V1lCWnJEbUZocFgK"
     }
   }
 }

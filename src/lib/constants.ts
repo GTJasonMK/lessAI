@@ -46,17 +46,17 @@ export const TAURI_EVENTS = {
 } as const;
 
 export const DEFAULT_SETTINGS: AppSettings = {
-  baseUrl: "https://cliproxy.eqing.tech/v1",
+  baseUrl: "https://api.openai.com/v1",
   apiKey: "",
-  model: "gpt-5.4-mini",
+  model: "gpt-4.1-mini",
   updateProxy: "",
   timeoutMs: 45_000,
   temperature: 0.8,
-  segmentationPreset: "sentence",
+  segmentationPreset: "paragraph",
   rewriteHeadings: false,
-  rewriteMode: "auto",
+  rewriteMode: "manual",
   maxConcurrency: 2,
-  unitsPerBatch: 2,
+  unitsPerBatch: 1,
   promptPresetId: "humanizer_zh",
   customPrompts: []
 };

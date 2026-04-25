@@ -197,9 +197,9 @@ mod tests {
         fs::write(
             &path,
             r#"{
-  "baseUrl": "https://cliproxy.eqing.tech/v1",
+  "baseUrl": "https://api.openai.com/v1",
   "apiKey": "",
-  "model": "gpt-5.4-mini",
+  "model": "gpt-4.1-mini",
   "updateProxy": "",
   "timeoutMs": 45000,
   "temperature": 0.8,
@@ -228,11 +228,12 @@ mod tests {
         fs::create_dir_all(&root).expect("create root");
         let path = root.join("settings.json");
         let original = r#"{
-  "baseUrl": "https://cliproxy.eqing.tech/v1",
+  "baseUrl": "https://api.openai.com/v1",
   "apiKey": "key",
-  "model": "gpt-5.4-mini",
+  "model": "gpt-4.1-mini",
   "timeoutMs": 45000,
-  "temperature": 0.8
+  "temperature": 0.8,
+  "rewriteMode": "manual"
 }"#;
         fs::write(&path, original).expect("write partial settings");
 
@@ -242,12 +243,11 @@ mod tests {
         assert_eq!(settings.api_key, "key");
         assert_eq!(
             settings.segmentation_preset,
-            crate::models::SegmentationPreset::Sentence
+            crate::models::SegmentationPreset::Paragraph
         );
         assert!(!settings.rewrite_headings);
-        assert_eq!(settings.rewrite_mode, crate::models::RewriteMode::Auto);
         assert_eq!(settings.max_concurrency, 2);
-        assert_eq!(settings.units_per_batch, 2);
+        assert_eq!(settings.units_per_batch, 1);
 
         let stored = fs::read_to_string(&path).expect("read migrated settings");
         assert_eq!(stored, original);

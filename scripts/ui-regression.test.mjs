@@ -196,7 +196,7 @@ assertIncludes(workspaceBar, "isWindowDragExcludedTarget(event.target)");
 assertNotIncludes(appSource, "const WINDOW_DRAG_EXCLUDED_SELECTOR = [");
 assertNotIncludes(workspaceBar, "const HEADER_DRAG_EXCLUDED_SELECTOR = [");
 assertIncludes(settingsTypes, "unitsPerBatch: number;");
-assertIncludes(settingsConstants, "unitsPerBatch: 2");
+assertIncludes(settingsConstants, "unitsPerBatch: 1");
 assertIncludes(rewriteStrategyPage, "单批处理单元数");
 assertIncludes(rewriteStrategyPage, 'onUpdateNumberSetting("unitsPerBatch", event.target.value)');
 assertIncludes(settingsHandlers, '"unitsPerBatch"');

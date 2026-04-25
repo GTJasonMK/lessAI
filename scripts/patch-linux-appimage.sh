@@ -165,3 +165,4 @@ rm -f "$RUNTIME_FILE"
 rm -rf "$TMP_APPIMAGE_DIR"
 
 echo "[INFO] Repacked AppImage: $OUT_APPIMAGE"
+

@@ -196,9 +196,9 @@ mod tests {
 
     fn valid_settings() -> AppSettings {
         AppSettings {
-            base_url: "https://cliproxy.eqing.tech/v1".to_string(),
+            base_url: "https://api.openai.com/v1".to_string(),
             api_key: "test-key".to_string(),
-            model: "gpt-5.4-mini".to_string(),
+            model: "gpt-4.1-mini".to_string(),
             ..AppSettings::default()
         }
     }

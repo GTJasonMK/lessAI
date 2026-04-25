@@ -27,7 +27,7 @@ fn default_max_concurrency() -> usize {
 }
 
 fn default_units_per_batch() -> usize {
-    2
+    1
 }
 
 fn default_prompt_preset_id() -> String {
@@ -45,15 +45,15 @@ pub struct PromptTemplate {
 impl Default for AppSettings {
     fn default() -> Self {
         Self {
-            base_url: "https://cliproxy.eqing.tech/v1".to_string(),
+            base_url: "https://api.openai.com/v1".to_string(),
             api_key: String::new(),
-            model: "gpt-5.4-mini".to_string(),
+            model: "gpt-4.1-mini".to_string(),
             update_proxy: String::new(),
             timeout_ms: 45_000,
             temperature: 0.8,
-            segmentation_preset: SegmentationPreset::Sentence,
+            segmentation_preset: SegmentationPreset::Paragraph,
             rewrite_headings: false,
-            rewrite_mode: RewriteMode::Auto,
+            rewrite_mode: RewriteMode::Manual,
             max_concurrency: default_max_concurrency(),
             units_per_batch: default_units_per_batch(),
             prompt_preset_id: default_prompt_preset_id(),
