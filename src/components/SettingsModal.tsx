@@ -1,5 +1,5 @@
 import { memo, useEffect, useMemo, useState } from "react";
-import { ArrowUpCircle, Check, X } from "lucide-react";
+import { Check, X } from "lucide-react";
 import type {
   AppSettings,
   PromptTemplate,
@@ -8,14 +8,16 @@ import type {
 } from "../lib/types";
 import type { NoticeTone } from "../lib/constants";
 import { isSettingsReady } from "../lib/helpers";
+import { isDemoRuntime } from "../lib/runtimeMode";
 import { ActionButton } from "./ActionButton";
 import type { ConfirmModalOptions } from "./ConfirmModal";
 import { StatusBadge } from "./StatusBadge";
 import { PromptSettingsPage } from "./settings/PromptSettingsPage";
 import { ProviderSettingsPage } from "./settings/ProviderSettingsPage";
 import { RewriteStrategyPage } from "./settings/RewriteStrategyPage";
+import { VersionSettingsPage } from "./settings/VersionSettingsPage";
 
-type SettingsPage = "provider" | "strategy" | "prompt";
+type SettingsPage = "provider" | "version" | "strategy" | "prompt";
 
 interface SettingsModalProps {
   open: boolean;
@@ -47,6 +49,7 @@ interface SettingsModalProps {
   selectedRelease: ReleaseVersionSummary | null;
   selectedReleaseIsCurrent: boolean;
   releaseListLoadedAt: string | null;
+  switchRequiresUpdaterManifest: boolean;
   onConfirm: (options: ConfirmModalOptions) => Promise<boolean>;
   onTestProvider: () => void;
   onSaveSettings: () => void;
@@ -78,6 +81,7 @@ export const SettingsModal = memo(function SettingsModal({
   selectedRelease,
   selectedReleaseIsCurrent,
   releaseListLoadedAt,
+  switchRequiresUpdaterManifest,
   onConfirm,
   onTestProvider,
   onSaveSettings,
@@ -87,6 +91,8 @@ export const SettingsModal = memo(function SettingsModal({
   onSwitchSelectedRelease
 }: SettingsModalProps) {
   const [page, setPage] = useState<SettingsPage>("provider");
+  const demoRuntime = isDemoRuntime();
+  const versionSettingsEnabled = !demoRuntime;
 
   useEffect(() => {
     if (!open) return;
@@ -104,6 +110,13 @@ export const SettingsModal = memo(function SettingsModal({
     // 每次打开设置，默认落在连接配置页，并收起提示词预览，减少干扰。
     setPage("provider");
   }, [open]);
+
+  useEffect(() => {
+    if (versionSettingsEnabled) return;
+    if (page === "version") {
+      setPage("provider");
+    }
+  }, [page, versionSettingsEnabled]);
 
   const providerTone: NoticeTone =
     providerStatus == null ? "info" : providerStatus.ok ? "success" : "warning";
@@ -130,7 +143,7 @@ export const SettingsModal = memo(function SettingsModal({
           <div className="modal-header-title">
             <h2>设置</h2>
             <p className="modal-subtitle">
-              连接、改写策略、提示词都在这里统一管理
+              连接、版本、改写策略、提示词都在这里统一管理
             </p>
           </div>
           <button
@@ -156,6 +169,24 @@ export const SettingsModal = memo(function SettingsModal({
             </button>
             <button
               type="button"
+              className={`settings-nav-item ${page === "version" ? "is-active" : ""}`}
+              onClick={() => setPage("version")}
+              disabled={!versionSettingsEnabled}
+              title={
+                versionSettingsEnabled
+                  ? "检查更新 / 版本切换"
+                  : "网页版不支持应用内更新与版本切换"
+              }
+            >
+              <strong>版本管理</strong>
+              <span>
+                {versionSettingsEnabled
+                  ? "检查更新 / 版本切换"
+                  : "网页版不可用（仅桌面版）"}
+              </span>
+            </button>
+            <button
+              type="button"
               className={`settings-nav-item ${page === "strategy" ? "is-active" : ""}`}
               onClick={() => setPage("strategy")}
             >
@@ -176,18 +207,32 @@ export const SettingsModal = memo(function SettingsModal({
             {page === "provider" ? (
               <ProviderSettingsPage
                 settings={settings}
+                demoRuntime={demoRuntime}
                 providerStatus={providerStatus}
                 providerTone={providerTone}
                 testProviderBusy={busyAction === "test-provider"}
                 testProviderDisabled={
                   Boolean(busyAction) && busyAction !== "test-provider"
                 }
+                onTestProvider={onTestProvider}
+                onUpdateStringSetting={onUpdateStringSetting}
+                onUpdateNumberSetting={onUpdateNumberSetting}
+              />
+            ) : null}
+
+            {page === "version" ? (
+              <VersionSettingsPage
                 currentVersion={currentVersion}
                 releaseVersions={releaseVersions}
                 selectedReleaseTag={selectedReleaseTag}
                 selectedRelease={selectedRelease}
                 selectedReleaseIsCurrent={selectedReleaseIsCurrent}
                 releaseListLoadedAt={releaseListLoadedAt}
+                switchRequiresUpdaterManifest={switchRequiresUpdaterManifest}
+                checkUpdateBusy={busyAction === "check-update"}
+                checkUpdateDisabled={
+                  Boolean(busyAction) && busyAction !== "check-update"
+                }
                 refreshReleasesBusy={busyAction === "list-releases"}
                 refreshReleasesDisabled={
                   Boolean(busyAction) && busyAction !== "list-releases"
@@ -196,9 +241,7 @@ export const SettingsModal = memo(function SettingsModal({
                 switchReleaseDisabled={
                   Boolean(busyAction) && busyAction !== "switch-release-version"
                 }
-                onTestProvider={onTestProvider}
-                onUpdateStringSetting={onUpdateStringSetting}
-                onUpdateNumberSetting={onUpdateNumberSetting}
+                onCheckUpdate={onCheckUpdate}
                 onRefreshReleaseVersions={onRefreshReleaseVersions}
                 onSelectReleaseTag={onSelectReleaseTag}
                 onSwitchSelectedRelease={onSwitchSelectedRelease}
@@ -238,14 +281,6 @@ export const SettingsModal = memo(function SettingsModal({
           </div>
 
           <div className="modal-footer-actions">
-            <ActionButton
-              icon={ArrowUpCircle}
-              label="检查更新"
-              busy={busyAction === "check-update"}
-              disabled={Boolean(busyAction) && busyAction !== "check-update"}
-              onClick={onCheckUpdate}
-              variant="secondary"
-            />
             <ActionButton
               icon={Check}
               label="保存配置"

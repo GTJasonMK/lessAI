@@ -1,5 +1,4 @@
 import { useEffect, useRef } from "react";
-import { listen } from "@tauri-apps/api/event";
 import { TAURI_EVENTS } from "../lib/constants";
 import type {
   RewriteFailedPayload,
@@ -7,6 +6,7 @@ import type {
   SessionEventPayload
 } from "../lib/constants";
 import type { RewriteProgress } from "../lib/types";
+import { listenRuntimeEvent } from "../lib/runtimeEvents";
 
 interface TauriEventHandlers {
   onProgress: (payload: RewriteProgress) => void;
@@ -25,16 +25,16 @@ export function useTauriEvents(handlers: TauriEventHandlers) {
 
     void (async () => {
       const unlisteners = await Promise.all([
-        listen<RewriteProgress>(TAURI_EVENTS.REWRITE_PROGRESS, ({ payload }) => {
+        listenRuntimeEvent<RewriteProgress>(TAURI_EVENTS.REWRITE_PROGRESS, ({ payload }) => {
           handlersRef.current.onProgress(payload);
         }),
-        listen<RewriteUnitCompletedPayload>(TAURI_EVENTS.REWRITE_UNIT_COMPLETED, ({ payload }) => {
+        listenRuntimeEvent<RewriteUnitCompletedPayload>(TAURI_EVENTS.REWRITE_UNIT_COMPLETED, ({ payload }) => {
           handlersRef.current.onRewriteUnitCompleted(payload);
         }),
-        listen<SessionEventPayload>(TAURI_EVENTS.REWRITE_FINISHED, ({ payload }) => {
+        listenRuntimeEvent<SessionEventPayload>(TAURI_EVENTS.REWRITE_FINISHED, ({ payload }) => {
           handlersRef.current.onFinished(payload);
         }),
-        listen<RewriteFailedPayload>(TAURI_EVENTS.REWRITE_FAILED, ({ payload }) => {
+        listenRuntimeEvent<RewriteFailedPayload>(TAURI_EVENTS.REWRITE_FAILED, ({ payload }) => {
           handlersRef.current.onFailed(payload);
         })
       ]);

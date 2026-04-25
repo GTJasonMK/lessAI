@@ -23,14 +23,10 @@ pub(crate) use writeback::{
 };
 
 #[cfg(test)]
-#[path = "documents_roundtrip_tests.rs"]
 mod roundtrip_tests;
 #[cfg(test)]
-#[path = "documents_source_tests.rs"]
 mod source_tests;
 #[cfg(test)]
-#[path = "documents_tests.rs"]
 mod tests;
 #[cfg(test)]
-#[path = "documents_writeback_tests.rs"]
 mod writeback_tests;

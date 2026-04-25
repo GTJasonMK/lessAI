@@ -1,46 +1,40 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 mod adapters;
-mod atomic_write;
 mod commands;
-mod document_snapshot;
+mod core;
+mod domain;
 mod documents;
-mod editor_session;
-mod editor_writeback;
-mod models;
-mod observability;
-mod persist;
-mod result_flow;
+mod editor;
 mod rewrite;
-mod rewrite_batch_commit;
-mod rewrite_job_state;
-mod rewrite_jobs;
-mod rewrite_permissions;
-mod rewrite_projection;
-mod rewrite_targets;
+mod rewrite_core;
 mod rewrite_unit;
-mod rewrite_writeback;
-mod session_access;
-mod session_builder;
-mod session_capability_models;
-mod session_edit;
-mod session_flow;
-mod session_loader;
-mod session_messages;
-mod session_refresh;
-mod settings_validation;
-mod state;
-mod storage;
+mod session;
 #[cfg(test)]
 mod test_support;
-mod text_boundaries;
 mod textual_template;
+
+pub(crate) use core::{
+    atomic_write, document_snapshot, network_proxy, observability, persist, result_flow,
+    settings_validation, state, storage, text_boundaries,
+};
+pub(crate) use domain::models;
+pub(crate) use editor::{editor_session, editor_writeback};
+pub(crate) use rewrite_core::{
+    rewrite_batch_commit, rewrite_job_state, rewrite_jobs, rewrite_permissions, rewrite_projection,
+    rewrite_targets, rewrite_writeback,
+};
+pub(crate) use session::{
+    session_access, session_builder, session_capability_models, session_edit, session_flow,
+    session_loader, session_messages, session_refresh,
+};
 
 use commands::{
     apply_suggestion, cancel_rewrite, close_main_window, delete_suggestion, dismiss_suggestion,
-    export_document, finalize_document, is_main_window_maximized, list_release_versions,
-    load_session, load_settings, minimize_main_window, open_document, pause_rewrite, reset_session,
-    resume_rewrite, retry_rewrite_unit, rewrite_selection, run_document_writeback, save_settings,
+    export_document, finalize_document, install_system_package_release,
+    is_main_window_maximized, list_release_versions, load_session, load_settings,
+    minimize_main_window, open_document, pause_rewrite, reset_session, resume_rewrite,
+    retry_rewrite_unit, rewrite_selection, run_document_writeback, save_settings,
     start_drag_main_window, start_resize_main_window, start_rewrite, switch_release_version,
     test_provider, toggle_maximize_main_window,
 };
@@ -63,14 +57,30 @@ fn apply_linux_graphics_compat_env() {
         }
     }
 
-    fn parse_graphics_mode() -> GraphicsMode {
-        let mode = std::env::var("LESSAI_LINUX_GRAPHICS_MODE")
-            .unwrap_or_else(|_| "auto".to_string())
-            .to_ascii_lowercase();
-        match mode.as_str() {
-            "native" => GraphicsMode::Native,
-            "safe" => GraphicsMode::Safe,
-            _ => GraphicsMode::Auto,
+    fn parse_graphics_mode(appimage_runtime: bool) -> (GraphicsMode, bool) {
+        match std::env::var("LESSAI_LINUX_GRAPHICS_MODE") {
+            Ok(raw_mode) => {
+                let mode = raw_mode.to_ascii_lowercase();
+                let parsed = match mode.as_str() {
+                    "native" => GraphicsMode::Native,
+                    "safe" => GraphicsMode::Safe,
+                    "auto" => GraphicsMode::Auto,
+                    _ => {
+                        eprintln!(
+                            "unknown LESSAI_LINUX_GRAPHICS_MODE='{raw_mode}', fallback to auto"
+                        );
+                        GraphicsMode::Auto
+                    }
+                };
+                (parsed, true)
+            }
+            Err(_) => {
+                if appimage_runtime {
+                    (GraphicsMode::Safe, false)
+                } else {
+                    (GraphicsMode::Auto, false)
+                }
+            }
         }
     }
 
@@ -104,7 +114,15 @@ fn apply_linux_graphics_compat_env() {
     let session_is_wayland = session_type == "wayland" || has_wayland;
     let appimage_runtime = std::env::var_os("APPIMAGE").is_some();
 
-    match parse_graphics_mode() {
+    let (graphics_mode, has_explicit_graphics_mode) = parse_graphics_mode(appimage_runtime);
+    if appimage_runtime && !has_explicit_graphics_mode && graphics_mode == GraphicsMode::Safe {
+        eprintln!(
+            "AppImage detected: defaulting LESSAI_LINUX_GRAPHICS_MODE to safe. \
+Set LESSAI_LINUX_GRAPHICS_MODE=auto or native to override."
+        );
+    }
+
+    match graphics_mode {
         GraphicsMode::Native => {
             // Keep full native behavior. User/environment controls all graphics vars.
         }
@@ -194,6 +212,7 @@ fn main() {
             test_provider,
             list_release_versions,
             switch_release_version,
+            install_system_package_release,
             open_document,
             load_session,
             reset_session,

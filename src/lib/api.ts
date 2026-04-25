@@ -1,4 +1,5 @@
-import { invoke } from "@tauri-apps/api/core";
+import { isDemoRuntime } from "./runtimeMode";
+import { webInvoke } from "./webBridge";
 import type {
   AppSettings,
   DocumentSession,
@@ -25,7 +26,11 @@ export type WindowResizeDirection =
 
 type CommandPayload = Record<string, unknown>;
 
-function invokeCommand<T>(command: string, payload?: CommandPayload) {
+async function invokeCommand<T>(command: string, payload?: CommandPayload) {
+  if (isDemoRuntime()) {
+    return webInvoke<T>(command, payload);
+  }
+  const { invoke } = await import("@tauri-apps/api/core");
   return invoke<T>(command, payload);
 }
 
@@ -55,6 +60,10 @@ export async function listReleaseVersions(proxy?: string) {
 
 export async function switchReleaseVersion(tag: string, proxy?: string) {
   return invokeCommand<string>("switch_release_version", { tag, proxy });
+}
+
+export async function installSystemPackageRelease(tag: string, proxy?: string) {
+  return invokeCommand<string>("install_system_package_release", { tag, proxy });
 }
 
 export async function openDocument(path: string) {

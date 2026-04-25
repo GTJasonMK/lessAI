@@ -174,8 +174,8 @@ p {
 
 .app-shell {
   position: relative;
-  height: calc(100vh - 10px);
-  margin: 5px;
+  height: 100vh;
+  margin: 0;
   display: flex;
   flex-direction: column;
   border-radius: 16px;

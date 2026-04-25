@@ -1,4 +1,4 @@
-import { info } from "@tauri-apps/plugin-log";
+import { infoRuntime } from "../../lib/runtimeLog";
 
 const SCROLL_RESTORE_PREFIX = "[lessai::scroll_restore]";
 
@@ -17,5 +17,5 @@ export function snapshotScrollNode(node: HTMLDivElement | null) {
 }
 
 export function logScrollRestore(event: string, detail: Record<string, unknown>) {
-  void info(`${SCROLL_RESTORE_PREFIX} ${event} ${JSON.stringify(detail)}`);
+  void infoRuntime(`${SCROLL_RESTORE_PREFIX} ${event} ${JSON.stringify(detail)}`);
 }

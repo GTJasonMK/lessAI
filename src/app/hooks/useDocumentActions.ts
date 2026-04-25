@@ -1,6 +1,7 @@
-import { open } from "@tauri-apps/plugin-dialog";
 import { startTransition, useCallback } from "react";
 import { openDocument, runDocumentWriteback } from "../../lib/api";
+import { openRuntimeDialog } from "../../lib/runtimeDialog";
+import { isDemoRuntime } from "../../lib/runtimeMode";
 import {
   documentEditorMode,
   editorEntryBlockedReason,
@@ -46,6 +47,7 @@ export function useDocumentActions(options: {
   showNotice: ShowNotice;
   withBusy: WithBusy;
 }) {
+  const demoRuntime = isDemoRuntime();
   const {
     busyAction,
     stageRef,
@@ -88,7 +90,7 @@ export function useDocumentActions(options: {
     }
 
     try {
-      const selection = await open({
+      const selection = await openRuntimeDialog({
         multiple: false,
         directory: false,
         filters: [
@@ -297,11 +299,19 @@ export function useDocumentActions(options: {
         if (returnToWorkbench) {
           editorBaseSnapshotRef.current = null;
           setStage("workbench");
-          showNotice("success", "已保存并返回工作台，可继续 AI 优化。");
+          showNotice(
+            "success",
+            demoRuntime
+              ? "已保存到网页缓存并返回工作台，可继续 AI 优化。"
+              : "已保存并返回工作台，可继续 AI 优化。"
+          );
           return;
         }
 
-        showNotice("success", "已保存到原文件。");
+        showNotice(
+          "success",
+          demoRuntime ? "已保存到网页缓存（未覆盖本地文件）。" : "已保存到原文件。"
+        );
       } catch (error) {
         showNotice("error", `保存失败：${readableError(error)}`);
       }
@@ -320,6 +330,7 @@ export function useDocumentActions(options: {
       setEditorText,
       setLiveProgress,
       setStage,
+      demoRuntime,
       showNotice,
       stageRef,
       withBusy

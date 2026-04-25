@@ -182,6 +182,13 @@
     linear-gradient(135deg, rgba(239, 193, 34, 0.18), rgba(255, 250, 241, 0.95));
 }
 
+.settings-nav-item:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+  transform: none;
+  box-shadow: none;
+}
+
 .settings-content {
   min-height: 0;
   overflow: auto;

@@ -1,9 +1,19 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { relaunch } from "@tauri-apps/plugin-process";
-import { check } from "@tauri-apps/plugin-updater";
-import { BundleType, getBundleType, getVersion } from "@tauri-apps/api/app";
-import { listReleaseVersions, switchReleaseVersion } from "../../lib/api";
+import {
+  installSystemPackageRelease,
+  listReleaseVersions,
+  switchReleaseVersion
+} from "../../lib/api";
 import { formatBytes, readableError } from "../../lib/helpers";
+import { normalizeNetworkProxy } from "../../lib/networkProxy";
+import {
+  RuntimeBundleType,
+  type RuntimeBundleTypeValue,
+  runtimeCheckUpdate,
+  runtimeGetBundleType,
+  runtimeGetVersion,
+  runtimeRelaunch
+} from "../../lib/runtimeUpdater";
 import type { ReleaseVersionSummary } from "../../lib/types";
 import type { ConfirmModalOptions } from "../../components/ConfirmModal";
 import type { ShowNotice, WithBusy } from "./sessionActionShared";
@@ -11,14 +21,102 @@ import type { ShowNotice, WithBusy } from "./sessionActionShared";
 const UPDATE_MANIFEST_URL =
   "https://github.com/GTJasonMK/lessAI/releases/latest/download/latest.json";
 
-function normalizeProxy(rawProxy: string) {
-  const proxy = rawProxy.trim();
-  if (!proxy) return undefined;
-  return proxy.includes("://") ? proxy : `http://${proxy}`;
-}
-
 function normalizeVersion(value: string) {
   return value.trim().replace(/^v/i, "");
+}
+
+interface ParsedSemver {
+  core: number[];
+  prerelease: string[];
+}
+
+function parseSemver(value: string): ParsedSemver | null {
+  const normalized = normalizeVersion(value).trim();
+  if (!normalized) return null;
+
+  const noBuild = normalized.split("+", 1)[0] ?? normalized;
+  const [coreText, prereleaseText = ""] = noBuild.split("-", 2);
+  const coreParts = coreText.split(".");
+  if (coreParts.length === 0 || coreParts.some((part) => !/^\d+$/.test(part))) {
+    return null;
+  }
+
+  const core = coreParts.map((part) => Number(part));
+  const prerelease = prereleaseText
+    .split(".")
+    .map((part) => part.trim())
+    .filter(Boolean);
+  return { core, prerelease };
+}
+
+function compareSemver(a: string, b: string): number | null {
+  const left = parseSemver(a);
+  const right = parseSemver(b);
+  if (!left || !right) return null;
+
+  const maxCoreLen = Math.max(left.core.length, right.core.length);
+  for (let index = 0; index < maxCoreLen; index += 1) {
+    const l = left.core[index] ?? 0;
+    const r = right.core[index] ?? 0;
+    if (l !== r) return l > r ? 1 : -1;
+  }
+
+  const leftPre = left.prerelease;
+  const rightPre = right.prerelease;
+  if (leftPre.length === 0 && rightPre.length === 0) return 0;
+  if (leftPre.length === 0) return 1;
+  if (rightPre.length === 0) return -1;
+
+  const maxPreLen = Math.max(leftPre.length, rightPre.length);
+  for (let index = 0; index < maxPreLen; index += 1) {
+    const l = leftPre[index];
+    const r = rightPre[index];
+    if (l == null && r == null) return 0;
+    if (l == null) return -1;
+    if (r == null) return 1;
+    if (l === r) continue;
+
+    const lNum = /^\d+$/.test(l) ? Number(l) : null;
+    const rNum = /^\d+$/.test(r) ? Number(r) : null;
+    if (lNum != null && rNum != null) return lNum > rNum ? 1 : -1;
+    if (lNum != null) return -1;
+    if (rNum != null) return 1;
+    return l > r ? 1 : -1;
+  }
+
+  return 0;
+}
+
+function pickNewestReleaseBySemver(releases: ReleaseVersionSummary[]) {
+  if (releases.length === 0) return null;
+  const sorted = [...releases].sort((left, right) => {
+    const semverCmp = compareSemver(left.version, right.version);
+    if (semverCmp != null && semverCmp !== 0) {
+      return semverCmp > 0 ? -1 : 1;
+    }
+
+    const leftTime = left.publishedAt ? Date.parse(left.publishedAt) : Number.NaN;
+    const rightTime = right.publishedAt ? Date.parse(right.publishedAt) : Number.NaN;
+    if (!Number.isNaN(leftTime) && !Number.isNaN(rightTime) && leftTime !== rightTime) {
+      return rightTime - leftTime;
+    }
+    return left.tag.localeCompare(right.tag);
+  });
+  return sorted[0] ?? null;
+}
+
+function isInAppUpdateUnsupportedBundle(bundleType: RuntimeBundleTypeValue) {
+  return bundleType === RuntimeBundleType.Deb || bundleType === RuntimeBundleType.Rpm;
+}
+
+function unsupportedBundleMessage(bundleType: RuntimeBundleTypeValue, action: "更新" | "切换版本") {
+  if (bundleType === RuntimeBundleType.Deb || bundleType === RuntimeBundleType.Rpm) {
+    return [
+      `当前安装包类型（${bundleType}）由系统包管理器维护，不支持应用内${action}。`,
+      "请使用系统包管理器升级（如 apt/dnf/zypper），或改用 AppImage 以启用应用内更新。"
+    ].join("");
+  }
+  return `当前安装包类型（${bundleType}）不支持应用内${action}。`;
 }
 
 export function useUpdateChecker(options: {
@@ -33,10 +131,17 @@ export function useUpdateChecker(options: {
   const [releaseVersions, setReleaseVersions] = useState<ReleaseVersionSummary[]>([]);
   const [selectedReleaseTag, setSelectedReleaseTag] = useState("");
   const [releaseListLoadedAt, setReleaseListLoadedAt] = useState<string | null>(null);
+  const [runtimeBundleType, setRuntimeBundleType] = useState<RuntimeBundleTypeValue>(
+    RuntimeBundleType.Other
+  );
+  const normalizedProxy = useMemo(
+    () => normalizeNetworkProxy(updateProxy),
+    [updateProxy]
+  );
 
   useEffect(() => {
     let disposed = false;
-    void getVersion()
+    void runtimeGetVersion()
       .then((version) => {
         if (!disposed) {
           setCurrentVersion(version);
@@ -44,6 +149,22 @@ export function useUpdateChecker(options: {
       })
       .catch(() => {
         // 忽略版本读取失败，按需再读取。
+      });
+    return () => {
+      disposed = true;
+    };
+  }, []);
+
+  useEffect(() => {
+    let disposed = false;
+    void runtimeGetBundleType()
+      .then((bundleType) => {
+        if (!disposed) {
+          setRuntimeBundleType(bundleType);
+        }
+      })
+      .catch(() => {
+        // ignore
       });
     return () => {
       disposed = true;
@@ -74,23 +195,93 @@ export function useUpdateChecker(options: {
         return;
       }
 
-      const currentVersion = await getVersion();
-      const bundleType = await getBundleType();
+      const currentVersion = await runtimeGetVersion();
+      if (currentVersion === "web-demo") {
+        showNotice("warning", "网页版演示环境不支持应用内更新，请使用桌面版。");
+        return;
+      }
+      const bundleType = await runtimeGetBundleType();
 
-      if (bundleType === BundleType.Deb || bundleType === BundleType.Rpm) {
-        showNotice(
-          "warning",
-          `当前安装包类型（${bundleType}）不支持应用内更新，请前往 GitHub Releases 下载新版本。`
-        );
+      if (isInAppUpdateUnsupportedBundle(bundleType)) {
+        await withBusy("check-update", async () => {
+          showNotice("info", "正在查询系统包更新…", { autoDismissMs: null });
+          const releases = await listReleaseVersions(normalizedProxy);
+          const stableReleases = releases.filter((release) => !release.prerelease);
+          const targetRelease = pickNewestReleaseBySemver(
+            stableReleases.length > 0 ? stableReleases : releases
+          );
+
+          if (!targetRelease) {
+            showNotice("warning", "未找到可用发布版本。");
+            return;
+          }
+
+          const semverCmp = compareSemver(targetRelease.version, currentVersion);
+          if (semverCmp != null && semverCmp <= 0) {
+            if (semverCmp === 0) {
+              showNotice("success", `已是最新版本（${currentVersion}）。`);
+            } else {
+              showNotice(
+                "info",
+                `当前版本（${currentVersion}）高于可用稳定版本（${targetRelease.version}），不会自动降级。`
+              );
+            }
+            return;
+          }
+
+          if (
+            semverCmp == null &&
+            normalizeVersion(targetRelease.version) === normalizeVersion(currentVersion)
+          ) {
+            showNotice("success", `已是最新版本（${currentVersion}）。`);
+            return;
+          }
+
+          dismissNotice();
+          const ok = await requestConfirm({
+            title: `发现新版本 ${targetRelease.tag}`,
+            message: [
+              `当前版本：${currentVersion}`,
+              `目标版本：${targetRelease.tag}`,
+              targetRelease.publishedAt ? `发布时间：${targetRelease.publishedAt}` : null,
+              "",
+              unsupportedBundleMessage(bundleType, "更新"),
+              "将下载对应安装包并请求管理员权限执行安装，完成后重启应用。是否继续？"
+            ]
+              .filter((item): item is string => Boolean(item))
+              .join("\n"),
+            okLabel: "立即更新",
+            cancelLabel: "稍后"
+          });
+
+          if (!ok) {
+            return;
+          }
+
+          showNotice("info", `正在安装 ${targetRelease.tag}（将请求管理员授权）…`, {
+            autoDismissMs: null
+          });
+          const installedVersion = await installSystemPackageRelease(
+            targetRelease.tag,
+            normalizedProxy
+          );
+
+          try {
+            showNotice("success", `版本 ${installedVersion} 已安装，正在重启应用…`, {
+              autoDismissMs: null
+            });
+            await runtimeRelaunch();
+          } catch (error) {
+            showNotice("warning", `版本已安装，请手动重启应用：${readableError(error)}`);
+          }
+        });
         return;
       }
 
       await withBusy("check-update", async () => {
         showNotice("info", "正在检查更新…", { autoDismissMs: null });
 
-        const proxy = normalizeProxy(updateProxy);
-
-        const update = await check({ timeout: 15_000, proxy });
+        const update = await runtimeCheckUpdate({ timeout: 15_000, proxy: normalizedProxy });
         if (!update) {
           showNotice("success", `已是最新版本（${currentVersion}）。`);
           return;
@@ -175,7 +366,7 @@ export function useUpdateChecker(options: {
         // 其他平台安装完成后可调用 relaunch() 自动重启。
         try {
           showNotice("success", "更新已安装，正在重启应用…", { autoDismissMs: null });
-          await relaunch();
+          await runtimeRelaunch();
         } catch (error) {
           showNotice("warning", `更新已安装，请手动重启应用：${readableError(error)}`);
         }
@@ -210,13 +401,13 @@ export function useUpdateChecker(options: {
         }`
       );
     }
-  }, [dismissNotice, requestConfirm, showNotice, updateProxy, withBusy]);
+  }, [dismissNotice, normalizedProxy, requestConfirm, showNotice, withBusy]);
 
   const handleRefreshReleaseVersions = useCallback(async () => {
     try {
       await withBusy("list-releases", async () => {
         showNotice("info", "正在拉取版本列表…", { autoDismissMs: null });
-        const releases = await listReleaseVersions(normalizeProxy(updateProxy));
+        const releases = await listReleaseVersions(normalizedProxy);
         setReleaseVersions(releases);
         setReleaseListLoadedAt(new Date().toISOString());
 
@@ -242,7 +433,7 @@ export function useUpdateChecker(options: {
     } catch (error) {
       showNotice("error", `拉取版本列表失败：${readableError(error)}`);
     }
-  }, [showNotice, updateProxy, withBusy]);
+  }, [normalizedProxy, showNotice, withBusy]);
 
   const handleSwitchSelectedRelease = useCallback(async () => {
     if (import.meta.env.DEV) {
@@ -252,18 +443,14 @@ export function useUpdateChecker(options: {
       );
       return;
     }
+    if (currentVersion === "web-demo") {
+      showNotice("warning", "网页版演示环境不支持版本切换，请使用桌面版。");
+      return;
+    }
 
     const release = selectedRelease;
     if (!release) {
       showNotice("warning", "请先选择一个目标版本。");
-      return;
-    }
-
-    if (!release.updaterAvailable) {
-      showNotice(
-        "warning",
-        `版本 ${release.tag} 未检测到 updater 清单（latest.json），请从 GitHub Releases 手动下载安装。`
-      );
       return;
     }
 
@@ -272,11 +459,15 @@ export function useUpdateChecker(options: {
       return;
     }
 
-    const bundleType = await getBundleType();
-    if (bundleType === BundleType.Deb || bundleType === BundleType.Rpm) {
+    const bundleType = await runtimeGetBundleType();
+    const useSystemPackageInstall = isInAppUpdateUnsupportedBundle(bundleType);
+    const semverCmp = compareSemver(release.version, currentVersion);
+    const downgradeRequested = semverCmp != null && semverCmp < 0;
+
+    if (!useSystemPackageInstall && !release.updaterAvailable) {
       showNotice(
         "warning",
-        `当前安装包类型（${bundleType}）不支持应用内切换版本，请手动下载安装目标版本。`
+        `版本 ${release.tag} 未检测到 updater 清单（latest.json），请从 GitHub Releases 手动下载安装。`
       );
       return;
     }
@@ -289,7 +480,13 @@ export function useUpdateChecker(options: {
         release.publishedAt ? `发布时间：${release.publishedAt}` : null,
         release.prerelease ? "注意：这是预发布版本（prerelease）。" : null,
         "",
-        "将下载并安装所选版本，安装完成后会重启应用。是否继续？"
+        useSystemPackageInstall
+          ? [
+              "当前是 Deb/Rpm 安装包。",
+              "将先下载目标版本安装包，然后请求管理员权限调用系统包管理器安装。",
+              "安装完成后会重启应用。是否继续？"
+            ].join("\n")
+          : "将下载并安装所选版本，安装完成后会重启应用。是否继续？"
       ]
         .filter((item): item is string => Boolean(item))
         .join("\n"),
@@ -301,19 +498,41 @@ export function useUpdateChecker(options: {
       return;
     }
 
+    if (downgradeRequested) {
+      const downgradeConfirmed = await requestConfirm({
+        title: `确认降级到 ${release.tag}`,
+        message: [
+          `当前版本：${currentVersion || "未知"}`,
+          `目标版本：${release.tag}`,
+          "检测到目标版本低于当前版本。",
+          "这会执行降级安装，可能影响现有数据兼容性。是否继续？"
+        ].join("\n"),
+        okLabel: "继续降级",
+        cancelLabel: "取消"
+      });
+      if (!downgradeConfirmed) {
+        return;
+      }
+    }
+
     try {
       await withBusy("switch-release-version", async () => {
-        showNotice("info", `正在切换到 ${release.tag}，请稍候…`, { autoDismissMs: null });
-        const installedVersion = await switchReleaseVersion(
-          release.tag,
-          normalizeProxy(updateProxy)
+        showNotice(
+          "info",
+          useSystemPackageInstall
+            ? `正在安装 ${release.tag}（将请求管理员授权）…`
+            : `正在切换到 ${release.tag}，请稍候…`,
+          { autoDismissMs: null }
         );
+        const installedVersion = useSystemPackageInstall
+          ? await installSystemPackageRelease(release.tag, normalizedProxy)
+          : await switchReleaseVersion(release.tag, normalizedProxy);
 
         try {
           showNotice("success", `版本 ${installedVersion} 已安装，正在重启应用…`, {
             autoDismissMs: null
           });
-          await relaunch();
+          await runtimeRelaunch();
         } catch (error) {
           showNotice("warning", `版本已安装，请手动重启应用：${readableError(error)}`);
         }
@@ -327,9 +546,10 @@ export function useUpdateChecker(options: {
     selectedRelease,
     selectedReleaseIsCurrent,
     showNotice,
-    updateProxy,
+    normalizedProxy,
     withBusy
   ]);
+  const switchRequiresUpdaterManifest = !isInAppUpdateUnsupportedBundle(runtimeBundleType);
 
   return {
     currentVersion,
@@ -338,6 +558,7 @@ export function useUpdateChecker(options: {
     selectedRelease,
     selectedReleaseIsCurrent,
     releaseListLoadedAt,
+    switchRequiresUpdaterManifest,
     handleCheckUpdate,
     handleRefreshReleaseVersions,
     handleSelectReleaseTag: setSelectedReleaseTag,

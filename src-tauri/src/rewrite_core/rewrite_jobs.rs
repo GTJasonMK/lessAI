@@ -1,9 +1,16 @@
+#[path = "rewrite_jobs/auto.rs"]
 mod auto;
+#[path = "rewrite_jobs/auto_loop.rs"]
 mod auto_loop;
+#[path = "rewrite_jobs/auto_runtime.rs"]
 mod auto_runtime;
+#[path = "rewrite_jobs/auto_state.rs"]
 mod auto_state;
+#[path = "rewrite_jobs/manual.rs"]
 mod manual;
+#[path = "rewrite_jobs/process.rs"]
 mod process;
+#[path = "rewrite_jobs/support.rs"]
 mod support;
 
 pub(crate) use auto::run_auto_rewrite;

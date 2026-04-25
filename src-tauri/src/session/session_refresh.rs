@@ -11,8 +11,11 @@ use crate::{
     storage,
 };
 
+#[path = "session_refresh/capabilities.rs"]
 mod capabilities;
+#[path = "session_refresh/draft.rs"]
 mod draft;
+#[path = "session_refresh/rules.rs"]
 mod rules;
 
 use capabilities::SessionCapabilities;
@@ -190,8 +193,11 @@ fn block_session_with_reason(
 }
 
 #[cfg(test)]
+#[path = "session_refresh/refresh_change_tests.rs"]
 mod refresh_change_tests;
 #[cfg(test)]
+#[path = "session_refresh/refresh_structure_tests.rs"]
 mod refresh_structure_tests;
 #[cfg(test)]
+#[path = "session_refresh/test_support.rs"]
 mod test_support;

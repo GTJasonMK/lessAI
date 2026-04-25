@@ -19,31 +19,31 @@ const TEXT_FIXTURES: &[TextFixture] = &[
     TextFixture {
         name: "plain-multiline",
         extension: "txt",
-        content: include_str!("../test-fixtures/roundtrip/plain/multiline.txt"),
+        content: include_str!("../../test-fixtures/roundtrip/plain/multiline.txt"),
         rewrite_headings: false,
     },
     TextFixture {
         name: "markdown-nested-quote",
         extension: "md",
-        content: include_str!("../test-fixtures/roundtrip/markdown/nested-quote.md"),
+        content: include_str!("../../test-fixtures/roundtrip/markdown/nested-quote.md"),
         rewrite_headings: false,
     },
     TextFixture {
         name: "markdown-mixed-inline",
         extension: "md",
-        content: include_str!("../test-fixtures/roundtrip/markdown/mixed-inline.md"),
+        content: include_str!("../../test-fixtures/roundtrip/markdown/mixed-inline.md"),
         rewrite_headings: false,
     },
     TextFixture {
         name: "tex-multiline-command",
         extension: "tex",
-        content: include_str!("../test-fixtures/roundtrip/tex/multiline-command.tex"),
+        content: include_str!("../../test-fixtures/roundtrip/tex/multiline-command.tex"),
         rewrite_headings: true,
     },
     TextFixture {
         name: "tex-nested-command",
         extension: "tex",
-        content: include_str!("../test-fixtures/roundtrip/tex/nested-command.tex"),
+        content: include_str!("../../test-fixtures/roundtrip/tex/nested-command.tex"),
         rewrite_headings: false,
     },
 ];

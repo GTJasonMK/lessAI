@@ -1,6 +1,7 @@
 use std::time::Duration;
 
 use crate::models::{AppSettings, DocumentFormat, ProviderCheckResult};
+use crate::network_proxy::normalize_proxy_url;
 use crate::rewrite_unit::{
     parse_rewrite_batch_response, parse_rewrite_unit_response, RewriteBatchRequest,
     RewriteBatchResponse, RewriteUnitRequest, RewriteUnitResponse,
@@ -23,18 +24,6 @@ pub fn build_client(settings: &AppSettings) -> Result<reqwest::Client, String> {
     }
 
     builder.build().map_err(|error| error.to_string())
-}
-
-fn normalize_proxy_url(raw_proxy: &str) -> Option<String> {
-    let trimmed = raw_proxy.trim();
-    if trimmed.is_empty() {
-        return None;
-    }
-    if trimmed.contains("://") {
-        Some(trimmed.to_string())
-    } else {
-        Some(format!("http://{trimmed}"))
-    }
 }
 
 pub async fn test_provider(settings: &AppSettings) -> Result<ProviderCheckResult, String> {
@@ -147,7 +136,7 @@ fn validate_settings(settings: &AppSettings) -> Result<(), String> {
 
 #[cfg(test)]
 mod tests {
-    use super::{build_client, normalize_proxy_url, validate_settings};
+    use super::{build_client, validate_settings};
     use crate::models::AppSettings;
 
     #[test]
@@ -168,20 +157,6 @@ mod tests {
         let error = validate_settings(&settings).expect_err("expected invalid max concurrency");
 
         assert_eq!(error, "自动并发数必须在 1 到 8 之间。");
-    }
-
-    #[test]
-    fn normalize_proxy_url_adds_http_scheme_for_host_port() {
-        let normalized = normalize_proxy_url("127.0.0.1:7890");
-
-        assert_eq!(normalized.as_deref(), Some("http://127.0.0.1:7890"));
-    }
-
-    #[test]
-    fn normalize_proxy_url_keeps_existing_scheme() {
-        let normalized = normalize_proxy_url("socks5h://127.0.0.1:7891");
-
-        assert_eq!(normalized.as_deref(), Some("socks5h://127.0.0.1:7891"));
     }
 
     #[test]

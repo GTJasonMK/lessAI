@@ -11,6 +11,8 @@
 <p align="center">
   <a href="https://github.com/GTJasonMK/lessAI/releases">Releases</a>
   ·
+  <a href="https://gtjasonmk.github.io/lessAI/">Web Demo</a>
+  ·
   <a href="https://github.com/GTJasonMK/lessAI/issues">Issues</a>
   ·
   <a href="LICENSE">License</a>
@@ -166,6 +168,12 @@ LessAI 是一个基于 **Tauri 2** 的桌面端中文改写工作台：把“改
 
 - <https://github.com/GTJasonMK/lessAI/releases>
 
+Web 演示版（GitHub Pages）：
+
+- <https://gtjasonmk.github.io/lessAI/>
+
+> Pages 演示站仅提供 TXT 子集能力（分段改写/审阅/导出），不包含桌面版的 DOCX/TeX/PDF 安全写回与 Tauri 会话能力。
+
 如果你需要从源码运行/构建，请看下方“开发与构建”。
 
 ## 🔐 配置与数据存储（重要）
@@ -225,6 +233,8 @@ chmod +x start-lessai.sh build-lessai.sh scripts/lessai-linux-common.sh
 ```bash
 pnpm run typecheck
 pnpm run build
+pnpm run build:demo
+pnpm run dev:demo
 pnpm run tauri:build
 ```
 
@@ -254,6 +264,7 @@ cargo test
 - 推送 `v*` tag 触发 `.github/workflows/tauri-bundles.yml`
 - Workflow 会在 Windows/macOS/Linux 打包，并创建 GitHub Release（包含各平台安装包与校验文件）
 - 每个 Release 说明都会固定包含文档兼容边界提示：DOCX/PDF 走“安全优先”写回策略，复杂结构可能导入可读但拒绝写回
+- `master` 分支 push 会触发 `.github/workflows/pages-demo.yml`，自动发布 TXT 演示站到 GitHub Pages
 
 ```bash
 git tag v0.1.0

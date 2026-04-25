@@ -1,24 +1,18 @@
-mod editor;
-mod export;
-mod rewrite;
+mod document;
 mod session;
-mod settings;
-mod snippet;
-mod suggestions;
-mod update;
-mod window;
+mod system;
 
-pub use editor::run_document_writeback;
-pub use export::{export_document, finalize_document};
-pub use rewrite::{
-    cancel_rewrite, pause_rewrite, resume_rewrite, retry_rewrite_unit, start_rewrite,
+pub use document::{
+    apply_suggestion, delete_suggestion, dismiss_suggestion, export_document, finalize_document,
+    rewrite_selection, run_document_writeback,
 };
-pub use session::{load_session, open_document, reset_session};
-pub use settings::{load_settings, save_settings, test_provider};
-pub use snippet::rewrite_selection;
-pub use suggestions::{apply_suggestion, delete_suggestion, dismiss_suggestion};
-pub use update::{list_release_versions, switch_release_version};
-pub use window::{
-    close_main_window, is_main_window_maximized, minimize_main_window, start_drag_main_window,
-    start_resize_main_window, toggle_maximize_main_window,
+pub use session::{
+    cancel_rewrite, load_session, open_document, pause_rewrite, reset_session, resume_rewrite,
+    retry_rewrite_unit, start_rewrite,
+};
+pub use system::{
+    close_main_window, install_system_package_release, is_main_window_maximized,
+    list_release_versions, load_settings, minimize_main_window, save_settings,
+    start_drag_main_window, start_resize_main_window, switch_release_version, test_provider,
+    toggle_maximize_main_window,
 };

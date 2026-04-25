@@ -143,6 +143,7 @@ export default function App() {
     selectedRelease,
     selectedReleaseIsCurrent,
     releaseListLoadedAt,
+    switchRequiresUpdaterManifest,
     handleCheckUpdate,
     handleRefreshReleaseVersions,
     handleSelectReleaseTag,
@@ -785,6 +786,7 @@ export default function App() {
             selectedRelease={selectedRelease}
             selectedReleaseIsCurrent={selectedReleaseIsCurrent}
             releaseListLoadedAt={releaseListLoadedAt}
+            switchRequiresUpdaterManifest={switchRequiresUpdaterManifest}
             onConfirm={requestConfirm}
             onTestProvider={handleTestProvider}
             onSaveSettings={handleSaveSettings}

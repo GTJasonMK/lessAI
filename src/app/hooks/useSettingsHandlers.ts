@@ -2,6 +2,7 @@ import { useCallback } from "react";
 import type { AppSettings, DocumentSession, PromptTemplate, ProviderCheckResult } from "../../lib/types";
 import { isSettingsReady, readableError } from "../../lib/helpers";
 import { saveSettings, testProvider } from "../../lib/api";
+import { isDemoRuntime } from "../../lib/runtimeMode";
 import type {
   RefreshSessionState,
   ShowNotice,
@@ -33,6 +34,9 @@ export function useSettingsHandlers(options: {
 
   const handleUpdateStringSetting = useCallback(
     (key: "baseUrl" | "apiKey" | "model" | "updateProxy", value: string) => {
+      if (isDemoRuntime() && key === "updateProxy") {
+        return;
+      }
       if (key !== "updateProxy") {
         setProviderStatus(null);
       }
