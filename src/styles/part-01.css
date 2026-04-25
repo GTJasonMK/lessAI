@@ -61,7 +61,7 @@ body,
 #root {
   height: 100%;
   overflow: hidden;
-  background: transparent;
+  background: var(--paper);
 }
 
 body {
@@ -70,7 +70,7 @@ body {
 }
 
 #root {
-  background: transparent;
+  background: var(--paper);
 }
 
 button,
