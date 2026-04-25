@@ -197,10 +197,25 @@ p {
   pointer-events: none;
 }
 
+.app-shell.is-web-runtime {
+  width: min(1400px, calc(100vw - 56px));
+  height: min(920px, calc(100vh - 56px));
+  margin: 28px auto;
+  border-radius: 24px;
+  border: 1px solid rgba(20, 20, 20, 0.12);
+}
+
 .app-shell.is-maximized {
   height: 100vh;
   margin: 0;
   border-radius: 0;
+}
+
+.app-shell.is-web-runtime.is-maximized {
+  width: min(1400px, calc(100vw - 56px));
+  height: min(920px, calc(100vh - 56px));
+  margin: 28px auto;
+  border-radius: 24px;
 }
 
 .topbar {
@@ -526,6 +541,22 @@ p {
   gap: 14px;
   padding: 0;
   overflow: hidden;
+}
+
+@media (max-width: 900px) {
+  .app-shell.is-web-runtime {
+    width: calc(100vw - 24px);
+    height: calc(100vh - 24px);
+    margin: 12px auto;
+    border-radius: 18px;
+  }
+
+  .app-shell.is-web-runtime.is-maximized {
+    width: calc(100vw - 24px);
+    height: calc(100vh - 24px);
+    margin: 12px auto;
+    border-radius: 18px;
+  }
 }
 
 .window-resize-layer {

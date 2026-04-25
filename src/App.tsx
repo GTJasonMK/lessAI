@@ -55,6 +55,7 @@ import { useWindowControls } from "./app/hooks/useWindowControls";
 import { resolveNextRewriteUnitId } from "./app/hooks/sessionActionShared";
 import { WorkbenchStage } from "./stages/WorkbenchStage";
 import type { DocumentEditorHandle } from "./stages/workbench/document/DocumentEditor";
+import { isDesktopRuntime } from "./lib/runtimeMode";
 import logoUrl from "../src-tauri/icons/lessai-logo.svg";
 
 type ThemeMode = "light" | "dark";
@@ -101,6 +102,7 @@ function resolveInitialThemePreference(): ThemePreference {
 }
 
 export default function App() {
+  const desktopRuntime = isDesktopRuntime();
   const [stage, setStage] = useState<"workbench" | "editor">("workbench");
   const [booting, setBooting] = useState(true);
   const [themePreference, setThemePreference] =
@@ -225,6 +227,10 @@ export default function App() {
 
   const handleWindowDragPointerDown = useCallback(
     (event: ReactPointerEvent<HTMLElement>) => {
+      if (!desktopRuntime) {
+        return;
+      }
+
       if (event.button !== 0 || !event.isPrimary) {
         return;
       }
@@ -235,7 +241,7 @@ export default function App() {
 
       void handleStartWindowDrag();
     },
-    [handleStartWindowDrag]
+    [desktopRuntime, handleStartWindowDrag]
   );
 
   const { segmentationPresetLock, readSegmentationPresetLockedReason } = useSegmentationPresetLock({
@@ -692,7 +698,9 @@ export default function App() {
   }
 
   return (
-    <div className={`app-shell${windowMaximized ? " is-maximized" : ""}`}>
+    <div
+      className={`app-shell${windowMaximized ? " is-maximized" : ""}${desktopRuntime ? " is-desktop-runtime" : " is-web-runtime"}`}
+    >
       <div className="body-shell">
         <main className="workspace" onPointerDown={handleWindowDragPointerDown}>
           <WorkspaceBar
@@ -706,6 +714,8 @@ export default function App() {
             liveProgress={liveProgress}
             busyAction={busyAction}
             windowMaximized={windowMaximized}
+            showWindowControls={desktopRuntime}
+            enableWindowDrag={desktopRuntime}
             onOpenDocument={() => void handleOpenDocument()}
             onOpenSettings={openSettings}
             onExport={() => void handleExport()}
@@ -809,7 +819,7 @@ export default function App() {
         variant={confirmDialog?.variant}
         onResult={handleConfirmResult}
       />
-      {customResizeEnabled && !windowMaximized ? (
+      {desktopRuntime && customResizeEnabled && !windowMaximized ? (
         <WindowResizeLayer onResize={handleResizeWindow} />
       ) : null}
     </div>

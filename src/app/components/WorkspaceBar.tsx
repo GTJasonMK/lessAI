@@ -29,6 +29,8 @@ interface WorkspaceBarProps {
   liveProgress: RewriteProgress | null;
   busyAction: string | null;
   windowMaximized: boolean;
+  showWindowControls?: boolean;
+  enableWindowDrag?: boolean;
   onOpenDocument: () => void;
   onOpenSettings: () => void;
   onExport: () => void;
@@ -49,6 +51,8 @@ export const WorkspaceBar = memo(function WorkspaceBar({
   liveProgress,
   busyAction,
   windowMaximized,
+  showWindowControls = true,
+  enableWindowDrag = true,
   onOpenDocument,
   onOpenSettings,
   onExport,
@@ -70,7 +74,7 @@ export const WorkspaceBar = memo(function WorkspaceBar({
 
   const rawPath = currentSession ? formatDisplayPath(currentSession.documentPath) : "";
   const handleHeaderPointerDown = (event: ReactPointerEvent<HTMLDivElement>) => {
-    if (event.button !== 0 || !event.isPrimary) {
+    if (!enableWindowDrag || event.button !== 0 || !event.isPrimary) {
       return;
     }
 
@@ -86,7 +90,7 @@ export const WorkspaceBar = memo(function WorkspaceBar({
   return (
     <div
       className="workspace-bar"
-      onPointerDown={handleHeaderPointerDown}
+      onPointerDown={enableWindowDrag ? handleHeaderPointerDown : undefined}
       onDoubleClick={(event) => event.preventDefault()}
     >
       <div className="workspace-bar-left">
@@ -173,39 +177,41 @@ export const WorkspaceBar = memo(function WorkspaceBar({
         </button>
       </div>
 
-      <div
-        className="window-controls"
-        data-tauri-drag-region="false"
-        data-window-drag-exclude="true"
-      >
-        <button
-          type="button"
-          className="window-control-button"
-          onClick={onMinimizeWindow}
-          aria-label="最小化窗口"
-          title="最小化"
+      {showWindowControls ? (
+        <div
+          className="window-controls"
+          data-tauri-drag-region="false"
+          data-window-drag-exclude="true"
         >
-          <Minus />
-        </button>
-        <button
-          type="button"
-          className="window-control-button"
-          onClick={onToggleMaximizeWindow}
-          aria-label={windowMaximized ? "还原窗口" : "最大化窗口"}
-          title={windowMaximized ? "还原" : "最大化"}
-        >
-          {windowMaximized ? <Copy /> : <Square />}
-        </button>
-        <button
-          type="button"
-          className="window-control-button is-close"
-          onClick={onCloseWindow}
-          aria-label="关闭窗口"
-          title="关闭"
-        >
-          <X />
-        </button>
-      </div>
+          <button
+            type="button"
+            className="window-control-button"
+            onClick={onMinimizeWindow}
+            aria-label="最小化窗口"
+            title="最小化"
+          >
+            <Minus />
+          </button>
+          <button
+            type="button"
+            className="window-control-button"
+            onClick={onToggleMaximizeWindow}
+            aria-label={windowMaximized ? "还原窗口" : "最大化窗口"}
+            title={windowMaximized ? "还原" : "最大化"}
+          >
+            {windowMaximized ? <Copy /> : <Square />}
+          </button>
+          <button
+            type="button"
+            className="window-control-button is-close"
+            onClick={onCloseWindow}
+            aria-label="关闭窗口"
+            title="关闭"
+          >
+            <X />
+          </button>
+        </div>
+      ) : null}
     </div>
   );
 });
