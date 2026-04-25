@@ -8,7 +8,6 @@ import type {
 import type { EditorSlotOverrides } from "../../lib/editorSlots";
 import type { SessionStats } from "../../lib/helpers";
 import {
-  documentBackendKind,
   editorEntryBlockedReason,
   sessionIsClean,
   sessionSupportsSourceWriteback
@@ -206,22 +205,10 @@ export const DocumentPanel = memo(function DocumentPanel({
     settingsReady
   ]);
 
-  const writebackScopeHint = useMemo(() => {
-    if (!currentSession) return undefined;
-    const backendKind = documentBackendKind(currentSession);
-    if (backendKind === "docx" || backendKind === "pdf") {
-      return "安全写回子集：复杂结构会锁定保留，部分改动可能被拒绝写回";
-    }
-    return undefined;
-  }, [currentSession]);
-
   const documentSubtitle = useMemo(() => {
-    if (!currentSession) return undefined;
-    if (editorMode) {
-      return writebackScopeHint ? `编辑终稿 · ${writebackScopeHint}` : "编辑终稿";
-    }
-    return writebackScopeHint;
-  }, [currentSession, editorMode, writebackScopeHint]);
+    if (!currentSession || !editorMode) return undefined;
+    return "编辑终稿";
+  }, [currentSession, editorMode]);
 
   const canEnterEditor = Boolean(
     currentSession &&

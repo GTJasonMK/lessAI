@@ -259,6 +259,73 @@ jobs:
           echo "[HINT] Without a stable signing key, in-app updates cannot work." >&2
           exit 1
 
+      - name: Validate updater key consistency (tag release)
+        if: ${{ matrix.os == 'ubuntu-latest' && env.RELEASE_VERSION != '' && env.TAURI_SIGNING_PRIVATE_KEY != '' }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import base64
+          import json
+          import subprocess
+          import tempfile
+          from pathlib import Path
+
+          config_path = Path("src-tauri/tauri.conf.json")
+          config = json.loads(config_path.read_text(encoding="utf-8"))
+          pubkey_b64 = (
+              config.get("plugins", {})
+              .get("updater", {})
+              .get("pubkey", "")
+              .strip()
+          )
+          if not pubkey_b64:
+              raise SystemExit("[ERROR] Missing plugins.updater.pubkey in src-tauri/tauri.conf.json")
+
+          pubkey_text = base64.b64decode(pubkey_b64).decode("utf-8")
+          pubkey_lines = [line.strip() for line in pubkey_text.splitlines() if line.strip()]
+          if len(pubkey_lines) < 2:
+              raise SystemExit("[ERROR] Invalid updater pubkey payload format.")
+          pubkey_raw = base64.b64decode(pubkey_lines[1])
+          if len(pubkey_raw) < 10:
+              raise SystemExit("[ERROR] Invalid updater pubkey raw payload length.")
+          expected_key_id = pubkey_raw[2:10].hex()
+
+          with tempfile.TemporaryDirectory(prefix="lessai-updater-keycheck-") as tmpdir:
+              probe = Path(tmpdir) / "updater-key-check.txt"
+              probe.write_text("lessai-updater-key-check\n", encoding="utf-8")
+
+              subprocess.run(
+                  ["pnpm", "exec", "tauri", "signer", "sign", str(probe)],
+                  check=True,
+                  stdout=subprocess.DEVNULL,
+                  stderr=subprocess.DEVNULL,
+              )
+
+              sig_path = Path(f"{probe}.sig")
+              if not sig_path.exists():
+                  raise SystemExit(f"[ERROR] Sign probe failed: signature file not found: {sig_path}")
+
+              sig_b64 = sig_path.read_text(encoding="utf-8").strip()
+              sig_text = base64.b64decode(sig_b64).decode("utf-8")
+              sig_lines = [line.strip() for line in sig_text.splitlines() if line.strip()]
+              if len(sig_lines) < 2:
+                  raise SystemExit("[ERROR] Invalid generated signature payload format.")
+              sig_raw = base64.b64decode(sig_lines[1])
+              if len(sig_raw) < 10:
+                  raise SystemExit("[ERROR] Invalid generated signature raw payload length.")
+              actual_key_id = sig_raw[2:10].hex()
+
+          if actual_key_id != expected_key_id:
+              raise SystemExit(
+                  "[ERROR] Updater signing key mismatch: "
+                  f"tauri.conf pubkey id={expected_key_id}, CI private key id={actual_key_id}. "
+                  "Update signatures will fail verification."
+              )
+
+          print(f"[INFO] Updater key consistency check passed: key id={expected_key_id}")
+          PY
+
       - name: Build bundles (with updater artifacts)
         if: ${{ env.TAURI_SIGNING_PRIVATE_KEY != '' }}
         shell: bash
@@ -336,6 +403,28 @@ jobs:
             echo "[ERROR] AppImage smoke test failed with exit code ${code}." >&2
             exit "${code}"
           fi
+
+      - name: Re-sign patched Linux AppImage
+        if: matrix.os == 'ubuntu-latest' && env.TAURI_SIGNING_PRIVATE_KEY != ''
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          appimage="$(ls src-tauri/target/release/bundle/appimage/*.AppImage 2>/dev/null | head -n 1 || true)"
+          if [ -z "${appimage}" ]; then
+            echo "[ERROR] AppImage not found for re-signing." >&2
+            exit 1
+          fi
+
+          rm -f "${appimage}.sig"
+          pnpm exec tauri signer sign "${appimage}"
+
+          if [ ! -f "${appimage}.sig" ]; then
+            echo "[ERROR] Re-sign failed: signature file missing (${appimage}.sig)." >&2
+            exit 1
+          fi
+
+          echo "[INFO] Re-signed patched AppImage: ${appimage}"
 
       - name: Write bundle metadata
         shell: bash

@@ -280,7 +280,7 @@ git push origin v0.1.0
 
 ## 🙏 致谢
 
-- 感谢 **[linuxdo（linux.do）](https://linux.do/)** 社区的交流、分享与反馈，让 LessAI 的迭代更高效。
+- 感谢 **[Linuxdo](https://linux.do/)** 社区的交流、分享与反馈，让 LessAI 的迭代更高效。
 
 ## 📄 License
 
