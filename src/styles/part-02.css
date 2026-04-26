@@ -310,8 +310,16 @@
   --slot-duration: 220ms;
   --slot-ease: cubic-bezier(0.22, 0.8, 0.2, 1);
   --slot-height: 46px;
+  --doc-action-gap: 6px;
+  --doc-action-icon-size: 36px;
+  --doc-action-primary-width: 146px;
+  --doc-action-edge-safe: 6px;
+  --doc-action-right-width: calc(
+    (var(--doc-action-icon-size) * 6) + var(--doc-action-primary-width) + (var(--doc-action-gap) * 6) +
+      var(--doc-action-edge-safe)
+  );
   display: grid;
-  grid-template-columns: minmax(0, 1fr) auto 416px;
+  grid-template-columns: minmax(0, 1fr) auto minmax(0, var(--doc-action-right-width));
   align-items: center;
   justify-content: stretch;
   gap: 12px;
@@ -321,11 +329,13 @@
 .workbench-doc-panel .panel-header {
   flex-wrap: nowrap;
   align-items: center;
+  min-width: 0;
 }
 
 .workbench-doc-panel .panel-heading {
   flex: 1 1 auto;
   min-width: 0;
+  overflow: hidden;
 }
 
 .workbench-doc-panel .panel-subtitle,
@@ -333,12 +343,20 @@
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+  min-width: 0;
 }
 
 .workbench-doc-panel .panel-heading h2 {
   /* Newsreader 在 line-height 较紧 + overflow hidden 时容易出现字形被裁切 */
   line-height: 1.14;
   padding-bottom: 1px;
+  font-size: clamp(1.08rem, 1.2vw, 1.4rem);
+}
+
+.workbench-doc-panel .panel-subtitle {
+  font-size: clamp(0.74rem, 0.84vw, 0.9rem);
+  line-height: 1.25;
+  opacity: 0.86;
 }
 
 .workbench-doc-panel .panel-action {
@@ -402,9 +420,9 @@
 }
 
 .workbench-doc-actionbar-right {
-  inline-size: 416px;
-  min-inline-size: 416px;
-  max-inline-size: 416px;
+  inline-size: var(--doc-action-right-width);
+  min-inline-size: var(--doc-action-right-width);
+  max-inline-size: var(--doc-action-right-width);
   justify-content: flex-end;
   justify-self: end;
 }
@@ -416,11 +434,13 @@
 .workbench-doc-actionbar-right .workbench-doc-actionbar-right-reel {
   inline-size: 100%;
   padding: 0;
-  overflow-x: visible;
+  overflow: hidden;
 }
 
 .workbench-doc-actionbar-right .workbench-doc-actionbar-right-reel .workbench-action-row {
   justify-content: flex-end;
+  gap: var(--doc-action-gap);
+  padding-inline-end: var(--doc-action-edge-safe);
 }
 
 .workbench-action-reel {
@@ -431,7 +451,7 @@
 
 .workbench-doc-actionbar .workbench-action-reel {
   padding: 0;
-  overflow-x: visible;
+  overflow: hidden;
 }
 
 .workbench-doc-actionbar-left .workbench-action-reel {
@@ -461,15 +481,15 @@
 }
 
 .workbench-doc-actionbar .workbench-action-row {
-  gap: 6px;
+  gap: var(--doc-action-gap);
 }
 
 .workbench-doc-actionbar-right .workbench-action-row {
   display: grid;
-  grid-template-columns: repeat(4, 36px) 152px 36px 36px;
+  grid-template-columns: repeat(4, var(--doc-action-icon-size)) var(--doc-action-primary-width) var(--doc-action-icon-size) var(--doc-action-icon-size);
   justify-content: end;
   align-items: center;
-  gap: 6px;
+  gap: var(--doc-action-gap);
 }
 
 .workbench-doc-actionbar .switch-chip:hover:not(:disabled),
@@ -483,8 +503,10 @@
 }
 
 .workbench-doc-actionbar-right .icon-button {
-  width: 36px;
-  height: 36px;
+  width: var(--doc-action-icon-size);
+  height: var(--doc-action-icon-size);
+  min-width: var(--doc-action-icon-size);
+  min-height: var(--doc-action-icon-size);
 }
 
 .workbench-doc-actionbar-right .toolbar-button {
@@ -495,13 +517,13 @@
 }
 
 .workbench-doc-actionbar-right .toolbar-button.is-run-action {
-  inline-size: 152px;
-  min-width: 152px;
+  inline-size: var(--doc-action-primary-width);
+  min-width: var(--doc-action-primary-width);
 }
 
 .workbench-doc-primary-action {
-  inline-size: 152px;
-  min-width: 152px;
+  inline-size: var(--doc-action-primary-width);
+  min-width: var(--doc-action-primary-width);
 }
 
 .workbench-action-row {

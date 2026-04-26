@@ -21,7 +21,7 @@ import type {
   DocumentEditorSelectionSnapshot,
   SlotSelectionSnapshot
 } from "./documentEditorTypes";
-import { buildSelectionSnapshotBase } from "./editorSelectionShared";
+import { buildSelectionSnapshotBase, resolveSnapshotRangeInText } from "./editorSelectionShared";
 import { StructuredEditorUnit } from "./StructuredEditorUnit";
 
 function buildSlotSelectionSnapshot(
@@ -49,15 +49,15 @@ function replaceSelectionText(
     return { ok: false, error: "模型返回内容为空，已取消替换。" } as const;
   }
 
-  const selected = currentText.slice(snapshot.startOffset, snapshot.endOffset);
-  if (selected !== snapshot.text) {
+  const resolvedRange = resolveSnapshotRangeInText(currentText, snapshot);
+  if (!resolvedRange) {
     return { ok: false, error: "选区已变化或文本已被修改，请重新选中后再试。" } as const;
   }
 
   return {
     ok: true,
-    text: `${currentText.slice(0, snapshot.startOffset)}${replacement}${currentText.slice(
-      snapshot.endOffset
+    text: `${currentText.slice(0, resolvedRange.startOffset)}${replacement}${currentText.slice(
+      resolvedRange.endOffset
     )}`
   } as const;
 }
@@ -164,7 +164,9 @@ export const StructuredSlotEditor = memo(
           return { ok: false, error: "当前选区不在可编辑片段内，请重新选中后再试。" };
         }
 
-        const currentText = resolveEditorSlotText(slot, slotOverrides);
+        const currentText = normalizeNewlines(
+          slotNodesRef.current[slot.id]?.innerText ?? resolveEditorSlotText(slot, slotOverrides)
+        );
         const replaced = replaceSelectionText(currentText, snapshot, replacementText);
         if (!replaced.ok) return replaced;
 

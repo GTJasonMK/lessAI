@@ -8,7 +8,7 @@ import type {
   DocumentEditorSelectionSnapshot,
   DocumentEditorPreviewResult,
 } from "./documentEditorTypes";
-import { buildSelectionSnapshotBase } from "./editorSelectionShared";
+import { buildSelectionSnapshotBase, resolveSnapshotRangeInText } from "./editorSelectionShared";
 
 function buildSelectionSnapshot(
   node: HTMLDivElement,
@@ -38,15 +38,15 @@ function previewReplacementValue(
   }
 
   const currentValue = normalizeNewlines(node.innerText);
-  const currentSelected = currentValue.slice(snapshot.startOffset, snapshot.endOffset);
-  if (currentSelected !== snapshot.text) {
+  const resolvedRange = resolveSnapshotRangeInText(currentValue, snapshot);
+  if (!resolvedRange) {
     return { ok: false, error: "选区已变化或文本已被修改，请重新选中后再试。" };
   }
 
   return {
     ok: true,
-    value: `${currentValue.slice(0, snapshot.startOffset)}${replacement}${currentValue.slice(
-      snapshot.endOffset
+    value: `${currentValue.slice(0, resolvedRange.startOffset)}${replacement}${currentValue.slice(
+      resolvedRange.endOffset
     )}`
   };
 }
