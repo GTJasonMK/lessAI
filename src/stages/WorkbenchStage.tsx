@@ -218,6 +218,7 @@ export const WorkbenchStage = memo(function WorkbenchStage({
             busyAction={busyAction}
             editorMode={editorMode}
             editorText={editorText}
+            editorSlotOverrides={editorSlotOverrides}
             editorDirty={editorDirty}
             orderedSuggestions={orderedSuggestions}
             onOpenSettings={onOpenSettings}

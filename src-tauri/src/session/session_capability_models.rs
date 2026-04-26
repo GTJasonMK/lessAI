@@ -10,11 +10,13 @@ pub enum DocumentBackendKind {
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Default)]
-#[serde(rename_all = "lowercase")]
 pub enum DocumentEditorMode {
     #[default]
+    #[serde(rename = "none")]
     None,
+    #[serde(rename = "fullText", alias = "fulltext")]
     FullText,
+    #[serde(rename = "slotBased", alias = "slotbased")]
     SlotBased,
 }
 

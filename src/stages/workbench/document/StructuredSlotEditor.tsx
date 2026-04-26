@@ -67,6 +67,7 @@ export const StructuredSlotEditor = memo(
     {
       session,
       slotOverrides,
+      showMarkers,
       dirty,
       busy,
       onChange,
@@ -227,20 +228,35 @@ export const StructuredSlotEditor = memo(
     );
 
     return (
-      <div className="workbench-editor-editable structured-editor-flow" aria-label="编辑终稿">
-        {session.rewriteUnits.map((rewriteUnit) => {
-          return (
-            <StructuredEditorUnit
-              key={rewriteUnit.id}
-              session={session}
-              rewriteUnit={rewriteUnit}
-              slotOverrides={slotOverrides}
-              busy={busy}
-              registerNode={registerNode}
-              onChangeSlotText={onChangeSlotText}
-            />
-          );
-        })}
+      <div
+        className={`document-flow-wrap structured-editor-wrap ${showMarkers ? "is-markers" : "is-quiet"}`}
+      >
+        {showMarkers ? (
+          <div className="unit-legend" aria-label="高亮说明">
+            <span className="legend-chip is-editable" title="可改写单元（包含可编辑槽位）">
+              可改写
+            </span>
+            <span className="legend-chip is-protected" title="保护区（锁定内容，保持只读）">
+              保护区
+            </span>
+          </div>
+        ) : null}
+
+        <div className="workbench-editor-editable structured-editor-flow" aria-label="编辑终稿">
+          {session.rewriteUnits.map((rewriteUnit) => {
+            return (
+              <StructuredEditorUnit
+                key={rewriteUnit.id}
+                session={session}
+                rewriteUnit={rewriteUnit}
+                slotOverrides={slotOverrides}
+                busy={busy}
+                registerNode={registerNode}
+                onChangeSlotText={onChangeSlotText}
+              />
+            );
+          })}
+        </div>
       </div>
     );
   })

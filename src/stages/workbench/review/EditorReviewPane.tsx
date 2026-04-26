@@ -2,6 +2,7 @@ import { memo, useEffect, useMemo, useRef, useState } from "react";
 import { countCharacters } from "../../../lib/helpers";
 import { StatusBadge } from "../../../components/StatusBadge";
 import type { DocumentSession } from "../../../lib/types";
+import type { EditorSlotOverrides } from "../../../lib/editorSlots";
 import { guessClientDocumentFormat, renderInlineProtectedText } from "../../../lib/protectedText";
 import { useEditorHunks } from "../hooks/useEditorHunks";
 
@@ -19,6 +20,7 @@ const EDITOR_REVIEW_OPTIONS: ReadonlyArray<{
 interface EditorReviewPaneProps {
   currentSession: DocumentSession;
   editorText: string;
+  editorSlotOverrides: EditorSlotOverrides;
   editorDirty: boolean;
   showMarkers: boolean;
 }
@@ -26,6 +28,7 @@ interface EditorReviewPaneProps {
 export const EditorReviewPane = memo(function EditorReviewPane({
   currentSession,
   editorText,
+  editorSlotOverrides,
   editorDirty,
   showMarkers
 }: EditorReviewPaneProps) {
@@ -46,9 +49,10 @@ export const EditorReviewPane = memo(function EditorReviewPane({
     activeEditorHunk,
     setActiveEditorHunkId
   } = useEditorHunks({
-    enabled: true,
+    enabled: editorDirty,
     currentSession,
-    editorText
+    editorText,
+    editorSlotOverrides
   });
 
   useEffect(() => {

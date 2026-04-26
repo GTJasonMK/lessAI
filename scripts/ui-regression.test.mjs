@@ -256,7 +256,14 @@ assertIncludes(
 );
 assertIncludes(documentScrollRestore, "node.scrollTop = pending.targetScrollTop;");
 assertIncludes(documentPanel, "documentScrollRef: MutableRefObject<HTMLDivElement | null>;");
-assertIncludes(documentPanel, '<div ref={documentScrollRef} className="paper-content scroll-region">');
+assertIncludes(documentPanel, "const flowScrollRef = useRef<HTMLDivElement | null>(null);");
+assertIncludes(documentPanel, "const editorScrollRef = useRef<HTMLDivElement | null>(null);");
+assertIncludes(
+  documentPanel,
+  "documentScrollRef.current = editorMode ? editorScrollRef.current : flowScrollRef.current;"
+);
+assertIncludes(documentPanel, 'className="paper-content workbench-mode-host"');
+assertIncludes(documentPanel, 'className="workbench-mode-content workbench-doc-mode-content"');
 assertIncludes(documentActions, "captureDocumentScrollPosition: () => number | null;");
 assertIncludes(documentActions, "const preservedScrollTop = captureDocumentScrollPosition();");
 assertIncludes(documentActions, "runSessionActionWithScroll({");
@@ -558,8 +565,8 @@ assertNoRule(
 // 2) 审阅视图切换条不应依赖横向滚动（按钮应固定在一个位置）
 assertNoRule(part04, ".review-switches", "overflow-x", "auto");
 
-// 3) 文档面板 header 的 action 区域必须允许 shrink，避免按钮在尾部被裁切
-assertRule(part02, ".workbench-doc-panel .panel-action", "flex", "0 1 auto");
+// 3) 文档面板 header 的 action 区域应保持固定宽度，避免动作栏在切换时被压缩裁切
+assertRule(part02, ".workbench-doc-panel .panel-action", "flex", "0 0 auto");
 
 // 4) “已选 N 段”不能继续占用顶部 action bar
 assertNotIncludes(documentActionBar, "已选 {selectedChunkCount} 段");

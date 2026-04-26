@@ -1,4 +1,4 @@
-import { memo, useCallback, useMemo, useState } from "react";
+import { memo, useCallback, useLayoutEffect, useMemo, useRef, useState } from "react";
 import type { MutableRefObject } from "react";
 import type {
   AppSettings,
@@ -14,7 +14,6 @@ import {
 } from "../../lib/documentCapabilities";
 import {
   canRewriteSession,
-  countCharacters,
   rewriteBlockedReason
 } from "../../lib/helpers";
 import {
@@ -117,6 +116,8 @@ export const DocumentPanel = memo(function DocumentPanel({
   onRewriteSelection
 }: DocumentPanelProps) {
   const [documentView, setDocumentView] = useState<DocumentView>("markup");
+  const flowScrollRef = useRef<HTMLDivElement | null>(null);
+  const editorScrollRef = useRef<HTMLDivElement | null>(null);
 
   const rewriteRunning = currentSession?.status === "running";
   const rewritePaused = currentSession?.status === "paused";
@@ -276,11 +277,6 @@ export const DocumentPanel = memo(function DocumentPanel({
     [currentSession?.documentPath]
   );
 
-  const editorCharacterCount = useMemo(
-    () => (editorMode ? countCharacters(editorText) : 0),
-    [editorMode, editorText]
-  );
-
   const resetDisabled =
     editorMode ||
     !currentSession ||
@@ -303,9 +299,12 @@ export const DocumentPanel = memo(function DocumentPanel({
         ? resumeBusy || (anyBusy && busyAction !== runKey)
         : !canStartRewrite || startBusy || (anyBusy && busyAction !== runKey));
 
-  const discardVisible = editorDirty;
   const discardDisabled = !editorDirty || anyBusy;
-  const discardTitle = anyBusy ? "当前有操作在执行，请稍后再试" : "放弃未保存修改";
+  const discardTitle = anyBusy
+    ? "当前有操作在执行，请稍后再试"
+    : editorDirty
+      ? "放弃未保存修改"
+      : "当前没有可放弃的修改";
 
   const editorPrimaryTitle = editorDirty
     ? saveAndExitBusy
@@ -335,6 +334,10 @@ export const DocumentPanel = memo(function DocumentPanel({
     void handleCopyDocument();
   }, [handleCopyDocument]);
 
+  useLayoutEffect(() => {
+    documentScrollRef.current = editorMode ? editorScrollRef.current : flowScrollRef.current;
+  }, [documentScrollRef, editorMode]);
+
   return (
     <Panel
       title="文档"
@@ -354,7 +357,6 @@ export const DocumentPanel = memo(function DocumentPanel({
             copyTitle={copyTitle}
             onCopy={handleCopy}
             editorDirty={editorDirty}
-            editorCharacterCount={editorCharacterCount}
             canEnterEditor={canEnterEditor}
             enterEditorTitle={enterEditorTitle}
             onEnterEditor={onEnterEditor}
@@ -380,7 +382,6 @@ export const DocumentPanel = memo(function DocumentPanel({
             onStartRewrite={onStartRewrite}
             onPause={onPause}
             onResume={onResume}
-            discardVisible={discardVisible}
             discardDisabled={discardDisabled}
             discardTitle={discardTitle}
             onDiscardEditorChanges={onDiscardEditorChanges}
@@ -399,41 +400,64 @@ export const DocumentPanel = memo(function DocumentPanel({
     >
       {currentSession ? (
         <article className="editor-paper workbench-editor-paper">
-          <div ref={documentScrollRef} className="paper-content scroll-region">
-            {editorMode ? (
-              <DocumentEditor
-                ref={editorRef}
-                session={currentSession}
-                value={editorText}
-                slotOverrides={editorSlotOverrides}
-                dirty={editorDirty}
-                busy={anyBusy}
-                onChange={onChangeEditorText}
-                onChangeSlotText={onChangeEditorSlotText}
-                onSave={onSaveEditor}
-                onSelectionChange={onChangeEditorHasSelection}
-              />
-            ) : (
-              <DocumentFlow
-                sessionId={currentSession.id}
-                session={currentSession}
-                rewriteUnits={currentSession.rewriteUnits}
-                documentView={documentView}
-                documentFormat={documentFormat}
-                rewriteEnabled={!rewriteBlockReason}
-                rewriteBlockedReason={rewriteBlockReason}
-                showMarkers={showMarkers}
-                suggestionsByRewriteUnit={suggestionsByRewriteUnit}
-                runningRewriteUnitIdSet={runningRewriteUnitIdSet}
-                optimisticManualRunningRewriteUnitId={optimisticManualRunningRewriteUnitId}
-                activeRewriteUnitId={activeRewriteUnitId}
-                activeSuggestionId={activeSuggestionId}
-                activeReviewNavigationRequestId={activeReviewNavigationRequestId}
-                selectedRewriteUnitIds={selectedRewriteUnitIds}
-                onSelectRewriteUnit={onSelectRewriteUnit}
-                onSelectSuggestion={onSelectSuggestion}
-              />
-            )}
+          <div className="paper-content workbench-mode-host">
+            <div className={`workbench-mode-switch workbench-doc-mode-switch ${editorMode ? "is-editor" : ""}`}>
+              <div
+                className="workbench-mode-pane is-normal"
+                aria-hidden={editorMode}
+                inert={editorMode}
+              >
+                <div
+                  ref={flowScrollRef}
+                  className="workbench-mode-content workbench-doc-mode-content"
+                >
+                  <DocumentFlow
+                    sessionId={currentSession.id}
+                    session={currentSession}
+                    rewriteUnits={currentSession.rewriteUnits}
+                    documentView={documentView}
+                    documentFormat={documentFormat}
+                    rewriteEnabled={!rewriteBlockReason}
+                    rewriteBlockedReason={rewriteBlockReason}
+                    showMarkers={showMarkers}
+                    suggestionsByRewriteUnit={suggestionsByRewriteUnit}
+                    runningRewriteUnitIdSet={runningRewriteUnitIdSet}
+                    optimisticManualRunningRewriteUnitId={optimisticManualRunningRewriteUnitId}
+                    activeRewriteUnitId={activeRewriteUnitId}
+                    activeSuggestionId={activeSuggestionId}
+                    activeReviewNavigationRequestId={activeReviewNavigationRequestId}
+                    selectedRewriteUnitIds={selectedRewriteUnitIds}
+                    onSelectRewriteUnit={onSelectRewriteUnit}
+                    onSelectSuggestion={onSelectSuggestion}
+                  />
+                </div>
+              </div>
+
+              <div
+                className="workbench-mode-pane is-editor"
+                aria-hidden={!editorMode}
+                inert={!editorMode}
+              >
+                <div
+                  ref={editorScrollRef}
+                  className="workbench-mode-content workbench-doc-mode-content"
+                >
+                  <DocumentEditor
+                    ref={editorRef}
+                    session={currentSession}
+                    value={editorText}
+                    slotOverrides={editorSlotOverrides}
+                    showMarkers={showMarkers}
+                    dirty={editorDirty}
+                    busy={anyBusy}
+                    onChange={onChangeEditorText}
+                    onChangeSlotText={onChangeEditorSlotText}
+                    onSave={onSaveEditor}
+                    onSelectionChange={onChangeEditorHasSelection}
+                  />
+                </div>
+              </div>
+            </div>
           </div>
         </article>
       ) : (

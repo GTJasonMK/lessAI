@@ -85,19 +85,9 @@ if [[ -d "$HERE/apprun-hooks" ]]; then
   done < <(find "$HERE/apprun-hooks" -maxdepth 1 -type f -print0 | sort -z)
 fi
 
-if [[ "${LESSAI_FORCE_GPU:-0}" != "1" ]]; then
-  if [[ -n "${DISPLAY:-}" ]]; then
-    unset WAYLAND_DISPLAY
-    export GDK_BACKEND="${GDK_BACKEND:-x11}"
-    export EGL_PLATFORM="${EGL_PLATFORM:-x11}"
-  fi
-  export WEBKIT_DISABLE_COMPOSITING_MODE="${WEBKIT_DISABLE_COMPOSITING_MODE:-1}"
-  export WEBKIT_DISABLE_DMABUF_RENDERER="${WEBKIT_DISABLE_DMABUF_RENDERER:-1}"
-  export WEBKIT_DMABUF_RENDERER_DISABLE_GBM="${WEBKIT_DMABUF_RENDERER_DISABLE_GBM:-1}"
-  export LIBGL_ALWAYS_SOFTWARE="${LIBGL_ALWAYS_SOFTWARE:-1}"
-  export GSK_RENDERER="${GSK_RENDERER:-cairo}"
-  export NO_AT_BRIDGE="${NO_AT_BRIDGE:-1}"
-fi
+# Single source of truth lives in src-tauri/src/main.rs (apply_linux_graphics_compat_env).
+# AppImage defaults to safe mode when unset; users can override via LESSAI_LINUX_GRAPHICS_MODE.
+export LESSAI_LINUX_GRAPHICS_MODE="${LESSAI_LINUX_GRAPHICS_MODE:-safe}"
 
 WEBKIT_BASE=""
 if [[ "${LESSAI_FORCE_BUNDLED_WEBKIT:-0}" == "1" ]]; then
@@ -165,4 +155,3 @@ rm -f "$RUNTIME_FILE"
 rm -rf "$TMP_APPIMAGE_DIR"
 
 echo "[INFO] Repacked AppImage: $OUT_APPIMAGE"
-

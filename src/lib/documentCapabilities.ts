@@ -9,7 +9,17 @@ export function documentBackendKind(session: DocumentSession): DocumentBackendKi
 }
 
 export function documentEditorMode(session: DocumentSession): DocumentEditorMode {
-  return session.capabilities.editorMode;
+  const raw = (session.capabilities as { editorMode?: string | null }).editorMode ?? "";
+  switch (raw) {
+    case "slotBased":
+    case "slotbased":
+      return "slotBased";
+    case "fullText":
+    case "fulltext":
+      return "fullText";
+    default:
+      return "none";
+  }
 }
 
 export function sessionSupportsSourceWriteback(session: DocumentSession) {

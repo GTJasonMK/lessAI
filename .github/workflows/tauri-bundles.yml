@@ -404,6 +404,97 @@ jobs:
             exit "${code}"
           fi
 
+      - name: Windows runtime smoke test
+        if: matrix.os == 'windows-latest'
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          $binary = "src-tauri/target/release/lessai.exe"
+          if (-not (Test-Path $binary)) {
+            throw "[ERROR] Windows smoke binary not found: $binary"
+          }
+
+          $stdoutLog = Join-Path $env:RUNNER_TEMP "lessai-win-smoke.stdout.log"
+          $stderrLog = Join-Path $env:RUNNER_TEMP "lessai-win-smoke.stderr.log"
+          Write-Host "[INFO] Smoke testing $binary"
+
+          $proc = Start-Process -FilePath $binary -PassThru -WindowStyle Hidden -RedirectStandardOutput $stdoutLog -RedirectStandardError $stderrLog
+          Start-Sleep -Seconds 18
+
+          $exitCode = 124
+          if ($proc.HasExited) {
+            $exitCode = $proc.ExitCode
+          } else {
+            Stop-Process -Id $proc.Id -Force
+            Wait-Process -Id $proc.Id -Timeout 5 -ErrorAction SilentlyContinue
+          }
+
+          if (Test-Path $stdoutLog) { Get-Content $stdoutLog -Tail 200 }
+          if (Test-Path $stderrLog) { Get-Content $stderrLog -Tail 200 }
+
+          $combined = ""
+          if (Test-Path $stdoutLog) { $combined += (Get-Content $stdoutLog -Raw) }
+          if (Test-Path $stderrLog) { $combined += "`n" + (Get-Content $stderrLog -Raw) }
+
+          if ($combined -match "(segmentation fault|core dumped|access violation|fatal error|panic)") {
+            throw "[ERROR] Windows smoke test detected fatal runtime signature."
+          }
+
+          if ($exitCode -ne 124 -and $exitCode -ne 0) {
+            throw "[ERROR] Windows smoke test failed with exit code $exitCode."
+          }
+
+      - name: macOS runtime smoke test
+        if: matrix.os == 'macos-latest'
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          app_bin="$(find src-tauri/target/release/bundle/macos -type f -path '*.app/Contents/MacOS/*' | head -n 1 || true)"
+          if [[ -z "${app_bin}" && -x src-tauri/target/release/lessai ]]; then
+            app_bin="src-tauri/target/release/lessai"
+          fi
+          if [[ -z "${app_bin}" ]]; then
+            echo "[ERROR] macOS smoke binary not found." >&2
+            exit 1
+          fi
+
+          echo "[INFO] Smoke testing ${app_bin}"
+          export LESSAI_LINUX_GRAPHICS_MODE=auto
+
+          python3 - "$app_bin" <<'PY'
+          import pathlib
+          import re
+          import signal
+          import subprocess
+          import sys
+          import tempfile
+          import time
+
+          binary = sys.argv[1]
+          log_path = pathlib.Path(tempfile.gettempdir()) / "lessai-macos-smoke.log"
+          with log_path.open("wb") as log_file:
+              proc = subprocess.Popen([binary], stdout=log_file, stderr=subprocess.STDOUT)
+              exit_code = 124
+              try:
+                  proc.wait(timeout=18)
+                  exit_code = proc.returncode
+              except subprocess.TimeoutExpired:
+                  proc.terminate()
+                  try:
+                      proc.wait(timeout=4)
+                  except subprocess.TimeoutExpired:
+                      proc.kill()
+                      proc.wait(timeout=4)
+
+          content = log_path.read_text("utf-8", errors="ignore")
+          print(content[-8000:])
+          if re.search(r"(segmentation fault|abort trap|core dumped|fatal error|panic)", content, re.IGNORECASE):
+              raise SystemExit("[ERROR] macOS smoke test detected fatal runtime signature.")
+          if exit_code not in (0, 124):
+              raise SystemExit(f"[ERROR] macOS smoke test failed with exit code {exit_code}.")
+          PY
+
       - name: Re-sign patched Linux AppImage
         if: matrix.os == 'ubuntu-latest' && env.TAURI_SIGNING_PRIVATE_KEY != ''
         shell: bash
@@ -465,6 +556,8 @@ jobs:
     env:
       RELEASE_TAG: ${{ needs.preflight.outputs.release_tag }}
       RELEASE_VERSION: ${{ needs.preflight.outputs.release_version }}
+      TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+      TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
     permissions:
       contents: write
 
@@ -485,6 +578,21 @@ jobs:
         with:
           path: artifacts
           pattern: bundles-*
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 10
+          run_install: false
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
 
       - name: Prepare release assets
         shell: bash
@@ -767,6 +875,16 @@ jobs:
           print(f"[INFO] system-packages entries: {len(packages)}")
           PY
 
+          if [[ -z "${TAURI_SIGNING_PRIVATE_KEY}" ]]; then
+            echo "[ERROR] Missing TAURI_SIGNING_PRIVATE_KEY for system-packages manifest signing." >&2
+            exit 1
+          fi
+          pnpm exec tauri signer sign release-assets/system-packages.json
+          if [[ ! -f release-assets/system-packages.json.sig ]]; then
+            echo "[ERROR] Missing generated signature: release-assets/system-packages.json.sig" >&2
+            exit 1
+          fi
+
           (cd release-assets && sha256sum * > checksums.sha256)
 
           echo "[INFO] Release assets:"
@@ -799,4 +917,5 @@ jobs:
             - 能导入并查看，不等于一定允许写回原文件。
             - 检测到结构歧义、锁定区变化或文本层定位不稳定时，会主动拒绝写回以保护原文。
             - 如遇写回阻断，可先导出为新文件继续处理。
+            - 详细口径见：`docs/release-writeback-compatibility.md`
           generate_release_notes: true

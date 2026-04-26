@@ -45,6 +45,7 @@ export interface DocumentEditorProps {
   session: DocumentSession;
   value: string;
   slotOverrides: EditorSlotOverrides;
+  showMarkers: boolean;
   dirty: boolean;
   busy: boolean;
   onChange: (value: string) => void;

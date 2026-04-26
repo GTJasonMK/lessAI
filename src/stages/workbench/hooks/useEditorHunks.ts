@@ -3,6 +3,8 @@ import type { DiffHunk } from "../../../lib/diff";
 import { diffTextByLines } from "../../../lib/diff";
 import { countCharacters, normalizeNewlines, rewriteUnitSourceText } from "../../../lib/helpers";
 import type { DocumentSession } from "../../../lib/types";
+import type { EditorSlotOverrides } from "../../../lib/editorSlots";
+import { resolveEditorSlotText } from "../../../lib/editorSlots";
 
 function splitLeadingWhitespaceWithNewline(text: string) {
   if (!text) return { leading: "", rest: "" };
@@ -33,30 +35,97 @@ export function useEditorHunks(options: {
   enabled: boolean;
   currentSession: DocumentSession | null;
   editorText: string;
+  editorSlotOverrides: EditorSlotOverrides;
 }) {
-  const { enabled, currentSession, editorText } = options;
+  const { enabled, currentSession, editorText, editorSlotOverrides } = options;
   const deferredEditorText = useDeferredValue(editorText);
   const [activeEditorHunkId, setActiveEditorHunkId] = useState<string | null>(null);
 
+  const slotBasedMode = useMemo(
+    () => enabled && currentSession?.capabilities.editorMode === "slotBased",
+    [currentSession?.capabilities.editorMode, enabled]
+  );
+
+  const slotBasedHunks = useMemo<DiffHunk[]>(() => {
+    if (!enabled || !slotBasedMode || !currentSession) return [];
+
+    const changed: DiffHunk[] = [];
+    for (const slot of currentSession.writebackSlots) {
+      if (!slot.editable) continue;
+
+      const beforeText = normalizeNewlines(slot.text);
+      const afterText = normalizeNewlines(resolveEditorSlotText(slot, editorSlotOverrides));
+      if (beforeText === afterText) continue;
+
+      const diffSpans = diffTextByLines(beforeText, afterText);
+      let insertedChars = 0;
+      let deletedChars = 0;
+      for (const span of diffSpans) {
+        if (span.type === "insert") insertedChars += countCharacters(span.text);
+        if (span.type === "delete") deletedChars += countCharacters(span.text);
+      }
+
+      changed.push({
+        id: `slot-${slot.id}`,
+        sequence: changed.length + 1,
+        diffSpans,
+        beforeText,
+        afterText,
+        insertedChars,
+        deletedChars
+      });
+    }
+
+    return changed;
+  }, [currentSession, editorSlotOverrides, enabled, slotBasedMode]);
+
   const editorBaselineUnits = useMemo(() => {
-    if (!enabled || !currentSession) return [];
+    if (!enabled || !currentSession || slotBasedMode) return [];
     return currentSession.rewriteUnits.map((rewriteUnit) => ({
       id: rewriteUnit.id,
       beforeText: normalizeNewlines(rewriteUnitSourceText(currentSession, rewriteUnit))
     }));
-  }, [currentSession, enabled]);
+  }, [currentSession, enabled, slotBasedMode]);
 
   const editorBaselineText = useMemo(() => {
-    if (!enabled) return "";
+    if (!enabled || !currentSession) return "";
+    if (slotBasedMode) {
+      return normalizeNewlines(currentSession.sourceText);
+    }
     return editorBaselineUnits.map((item) => item.beforeText).join("");
-  }, [editorBaselineUnits, enabled]);
+  }, [currentSession, editorBaselineUnits, enabled, slotBasedMode]);
+
+  const textUnchanged = useMemo(() => {
+    if (!enabled) return true;
+    return editorBaselineText === deferredEditorText;
+  }, [deferredEditorText, editorBaselineText, enabled]);
 
   const editorDiffSpans = useMemo(() => {
-    if (!enabled || !currentSession) return [];
+    if (!enabled || !currentSession || slotBasedMode) return [];
+    if (textUnchanged) {
+      return [{ type: "unchanged", text: editorBaselineText }];
+    }
     return diffTextByLines(editorBaselineText, deferredEditorText);
-  }, [currentSession, deferredEditorText, editorBaselineText, enabled]);
+  }, [
+    currentSession,
+    deferredEditorText,
+    editorBaselineText,
+    enabled,
+    slotBasedMode,
+    textUnchanged
+  ]);
 
   const editorDiffStats = useMemo(() => {
+    if (slotBasedMode) {
+      return slotBasedHunks.reduce(
+        (acc, hunk) => ({
+          inserted: acc.inserted + hunk.insertedChars,
+          deleted: acc.deleted + hunk.deletedChars
+        }),
+        { inserted: 0, deleted: 0 }
+      );
+    }
+
     let inserted = 0;
     let deleted = 0;
     for (const span of editorDiffSpans) {
@@ -64,10 +133,17 @@ export function useEditorHunks(options: {
       if (span.type === "delete") deleted += countCharacters(span.text);
     }
     return { inserted, deleted };
-  }, [editorDiffSpans]);
+  }, [editorDiffSpans, slotBasedHunks, slotBasedMode]);
 
   const editorHunks = useMemo<DiffHunk[]>(() => {
+    if (slotBasedMode) {
+      return slotBasedHunks;
+    }
+
     if (!enabled || !currentSession || editorBaselineUnits.length === 0) {
+      return [];
+    }
+    if (textUnchanged) {
       return [];
     }
 
@@ -183,7 +259,15 @@ export function useEditorHunks(options: {
     }
 
     return changed;
-  }, [currentSession, editorBaselineUnits, editorDiffSpans, enabled]);
+  }, [
+    currentSession,
+    editorBaselineUnits,
+    editorDiffSpans,
+    enabled,
+    slotBasedHunks,
+    slotBasedMode,
+    textUnchanged
+  ]);
 
   const activeEditorHunk = useMemo(() => {
     if (!enabled || editorHunks.length === 0) return null;

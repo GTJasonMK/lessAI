@@ -915,19 +915,22 @@
 }
 
 .structured-editor-unit {
+  cursor: text;
   display: inline;
-  padding: 0.08em 0.14em;
-  border-radius: 12px;
-  background: var(--mark-editable-bg);
-  box-shadow: inset 0 0 0 1px var(--mark-editable-ring);
-  box-decoration-break: clone;
-  -webkit-box-decoration-break: clone;
-  transition: background-color 140ms ease, box-shadow 140ms ease;
+  padding: 3px 6px;
+  border-radius: 10px;
+  background: rgba(23, 68, 207, 0.03);
+  box-shadow: inset 0 0 0 1px rgba(23, 68, 207, 0.12);
+  box-decoration-break: slice;
+  -webkit-box-decoration-break: slice;
+  transition:
+    background-color var(--transition),
+    box-shadow var(--transition);
 }
 
 .structured-editor-unit:focus-within {
   background: var(--mark-active-bg);
-  box-shadow: inset 0 0 0 1px var(--mark-active-ring);
+  box-shadow: 0 0 0 2px var(--mark-active-ring);
 }
 
 .structured-editor-unit.is-protected {
@@ -937,25 +940,28 @@
 
 .structured-editor-slot {
   display: inline;
-  border-radius: 10px;
   outline: none;
 }
 
 .structured-editor-slot.is-editable {
-  padding: 0.05em 0.12em;
-  background: var(--mark-editable-bg);
-  box-shadow: inset 0 0 0 1px var(--mark-editable-ring);
+  min-width: 0.4ch;
+  background: transparent;
+  box-shadow: none;
+  cursor: text;
+  caret-color: var(--ink);
+}
+
+.structured-editor-slot.is-editable:hover {
+  background: transparent;
+  box-shadow: none;
 }
 
 .structured-editor-slot.is-editable:focus {
-  background: var(--mark-active-bg);
-  box-shadow: inset 0 0 0 1px var(--mark-active-ring);
+  background: transparent;
+  box-shadow: none;
 }
 
 .structured-editor-slot.is-locked {
-  padding: 0.05em 0.16em;
-  background: var(--mark-protected-bg);
-  box-shadow: inset 0 0 0 1px var(--mark-protected-ring);
   color: var(--muted);
 }
 
@@ -985,6 +991,31 @@
   color: rgb(23, 68, 207);
 }
 
+.structured-editor-wrap.is-quiet .structured-editor-unit {
+  background: transparent;
+  box-shadow: none;
+}
+
+.structured-editor-wrap.is-quiet .structured-editor-unit:focus-within {
+  background: var(--mark-active-bg);
+  box-shadow: 0 0 0 2px var(--mark-active-ring);
+}
+
+.structured-editor-wrap.is-quiet .structured-editor-slot.is-editable {
+  background: transparent;
+  box-shadow: none;
+}
+
+.structured-editor-wrap.is-quiet .structured-editor-slot.is-editable:hover {
+  background: transparent;
+  box-shadow: none;
+}
+
+.structured-editor-wrap.is-quiet .structured-editor-slot.is-editable:focus {
+  background: transparent;
+  box-shadow: none;
+}
+
 .paper-content {
   min-height: 0;
   flex: 1;
@@ -1002,6 +1033,10 @@
   white-space: pre-wrap;
   font-size: 1rem;
   line-height: 1.92;
+}
+
+.workbench-editor-editable {
+  caret-color: var(--ink);
 }
 
 .assistant-float {

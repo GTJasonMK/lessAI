@@ -42,7 +42,6 @@ interface DocumentActionBarProps {
   onCopy: () => void;
 
   editorDirty: boolean;
-  editorCharacterCount: number;
   canEnterEditor: boolean;
   enterEditorTitle: string;
   onEnterEditor: () => void;
@@ -73,7 +72,6 @@ interface DocumentActionBarProps {
   onPause: () => void;
   onResume: () => void;
 
-  discardVisible: boolean;
   discardDisabled: boolean;
   discardTitle: string;
   onDiscardEditorChanges: () => void;
@@ -101,7 +99,6 @@ export const DocumentActionBar = memo(function DocumentActionBar({
   copyTitle,
   onCopy,
   editorDirty,
-  editorCharacterCount,
   canEnterEditor,
   enterEditorTitle,
   onEnterEditor,
@@ -127,7 +124,6 @@ export const DocumentActionBar = memo(function DocumentActionBar({
   onStartRewrite,
   onPause,
   onResume,
-  discardVisible,
   discardDisabled,
   discardTitle,
   onDiscardEditorChanges,
@@ -141,9 +137,24 @@ export const DocumentActionBar = memo(function DocumentActionBar({
   rewriteSelectionTitle,
   onRewriteSelection
 }: DocumentActionBarProps) {
+  const copyIcon = !canCopy ? (
+    <Copy />
+  ) : copyState === "copying" ? (
+    <LoaderCircle className="spin" />
+  ) : copyState === "done" ? (
+    <Check />
+  ) : copyState === "error" ? (
+    <AlertCircle />
+  ) : (
+    <Copy />
+  );
+
   return (
     <div className="workbench-doc-actionbar">
-      <div className="workbench-doc-actionbar-left" aria-label="文档视图与编辑状态">
+      <div
+        className="workbench-doc-actionbar-left"
+        aria-label="文档视图与编辑状态"
+      >
         <div
           className={`workbench-action-reel workbench-view-reel ${editorMode ? "is-editor" : ""}`}
         >
@@ -162,36 +173,33 @@ export const DocumentActionBar = memo(function DocumentActionBar({
                   {option.label}
                 </button>
               ))}
-
-              <button
-                type="button"
-                className={`switch-chip ${showMarkers ? "is-active" : ""}`}
-                onClick={onToggleMarkers}
-                aria-label={showMarkers ? "隐藏辅助标记" : "显示辅助标记"}
-                title={
-                  showMarkers
-                    ? "隐藏分块边界/保护区/运行态等辅助高亮（更适合通读）"
-                    : "显示分块边界/保护区/运行态等辅助高亮（更适合处理建议）"
-                }
-                disabled={editorMode}
-              >
-                {showMarkers ? "标记：开" : "标记：关"}
-              </button>
             </div>
 
-            <div className="workbench-action-row is-editor" aria-hidden={!editorMode}>
-              <span className="editor-chip">编辑模式</span>
-              <span className="editor-chip">{editorDirty ? "未保存" : "已保存"}</span>
-              <span className="editor-chip" title="字符数（不含空白）">
-                字符：{editorCharacterCount}
-              </span>
-            </div>
+            <div className="workbench-action-row is-editor" aria-hidden={!editorMode} />
           </div>
         </div>
       </div>
 
-      <div className="workbench-doc-actionbar-right">
-        <div className={`workbench-action-reel ${editorMode ? "is-editor" : ""}`}>
+      <button
+        type="button"
+        className={`switch-chip workbench-doc-markers-toggle ${showMarkers ? "is-active" : ""}`}
+        onClick={onToggleMarkers}
+        aria-label={showMarkers ? "隐藏辅助标记" : "显示辅助标记"}
+        title={
+          showMarkers
+            ? "隐藏编辑范围/保护区等辅助高亮（更适合通读）"
+            : "显示编辑范围/保护区等辅助高亮（更适合精修）"
+        }
+      >
+        {showMarkers ? "标记：开" : "标记：关"}
+      </button>
+
+      <div
+        className={`workbench-doc-actionbar-right ${editorMode ? "is-editor-mode" : "is-normal-mode"}`}
+      >
+        <div
+          className={`workbench-action-reel workbench-doc-actionbar-right-reel ${editorMode ? "is-editor" : ""}`}
+        >
           <div className="workbench-action-track">
             <div className="workbench-action-row is-normal" aria-hidden={editorMode}>
               <button
@@ -200,7 +208,7 @@ export const DocumentActionBar = memo(function DocumentActionBar({
                 onClick={onEnterEditor}
                 aria-label="进入编辑模式"
                 title={enterEditorTitle}
-                disabled={!canEnterEditor || editorMode}
+                disabled={!canEnterEditor}
               >
                 <FilePenLine />
               </button>
@@ -242,7 +250,7 @@ export const DocumentActionBar = memo(function DocumentActionBar({
 
               <button
                 type="button"
-                className={`toolbar-button is-run-action ${
+                className={`toolbar-button is-run-action workbench-doc-primary-action ${
                   rewriteRunning ? "is-warning" : "is-primary"
                 }`}
                 onClick={() => {
@@ -279,17 +287,41 @@ export const DocumentActionBar = memo(function DocumentActionBar({
                 )}
                 <span>{runLabel}</span>
               </button>
+
+              <span className="icon-button is-placeholder" aria-hidden="true" />
+
+              <button
+                type="button"
+                className="icon-button"
+                onClick={onCopy}
+                aria-label={canCopy ? copyTitle : "复制（当前视图不可用）"}
+                title={copyTitle}
+                disabled={!canCopy || copyState === "copying"}
+              >
+                {copyIcon}
+              </button>
             </div>
 
             <div className="workbench-action-row is-editor" aria-hidden={!editorMode}>
+              <span
+                className="icon-button is-placeholder workbench-doc-fixed-placeholder"
+                aria-hidden="true"
+              />
+              <span
+                className="icon-button is-placeholder workbench-doc-fixed-placeholder"
+                aria-hidden="true"
+              />
+              <span
+                className="icon-button is-placeholder workbench-doc-fixed-placeholder"
+                aria-hidden="true"
+              />
+
               <button
                 type="button"
-                className={`icon-button is-danger ${discardVisible ? "" : "is-placeholder"}`}
+                className="icon-button is-danger"
                 onClick={onDiscardEditorChanges}
                 aria-label="放弃未保存修改"
                 title={discardTitle}
-                aria-hidden={!discardVisible}
-                tabIndex={discardVisible ? 0 : -1}
                 disabled={discardDisabled}
               >
                 <Undo2 />
@@ -297,7 +329,7 @@ export const DocumentActionBar = memo(function DocumentActionBar({
 
               <button
                 type="button"
-                className="toolbar-button is-primary"
+                className="toolbar-button is-run-action workbench-doc-primary-action is-primary"
                 onClick={() => {
                   if (editorDirty) {
                     onSaveEditorAndExit();
@@ -320,43 +352,31 @@ export const DocumentActionBar = memo(function DocumentActionBar({
                 )}
                 <span>{editorDirty ? "保存并退出" : "返回工作台"}</span>
               </button>
+
+              <button
+                type="button"
+                className="icon-button"
+                onClick={onRewriteSelection}
+                aria-label="对选区执行降 AIGC 处理"
+                title={rewriteSelectionTitle}
+                disabled={rewriteSelectionDisabled}
+              >
+                {rewriteSelectionBusy ? <LoaderCircle className="spin" /> : <WandSparkles />}
+              </button>
+
+              <button
+                type="button"
+                className="icon-button"
+                onClick={onCopy}
+                aria-label={canCopy ? copyTitle : "复制（当前视图不可用）"}
+                title={copyTitle}
+                disabled={!canCopy || copyState === "copying"}
+              >
+                {copyIcon}
+              </button>
             </div>
           </div>
         </div>
-
-        <button
-          type="button"
-          className={`icon-button ${editorMode ? "" : "is-placeholder"}`}
-          onClick={onRewriteSelection}
-          aria-label="对选区执行降 AIGC 处理"
-          title={rewriteSelectionTitle}
-          aria-hidden={!editorMode}
-          tabIndex={editorMode ? 0 : -1}
-          disabled={rewriteSelectionDisabled}
-        >
-          {rewriteSelectionBusy ? <LoaderCircle className="spin" /> : <WandSparkles />}
-        </button>
-
-        <button
-          type="button"
-          className="icon-button"
-          onClick={onCopy}
-          aria-label={canCopy ? copyTitle : "复制（当前视图不可用）"}
-          title={copyTitle}
-          disabled={!canCopy || copyState === "copying"}
-        >
-          {!canCopy ? (
-            <Copy />
-          ) : copyState === "copying" ? (
-            <LoaderCircle className="spin" />
-          ) : copyState === "done" ? (
-            <Check />
-          ) : copyState === "error" ? (
-            <AlertCircle />
-          ) : (
-            <Copy />
-          )}
-        </button>
       </div>
     </div>
   );

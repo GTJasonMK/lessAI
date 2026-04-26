@@ -54,7 +54,8 @@ Desktop.ini
 .codex/
 .superpowers/
 testdoc
-
+CALUDE.md
+AGENTS.md
 # Temp / patch leftovers
 .tmp/
 *.tmp

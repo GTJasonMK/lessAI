@@ -29,13 +29,15 @@ export const EditableSlotSpan = memo(function EditableSlotSpan({
   text,
   busy,
   registerNode,
-  onChange
+  onChange,
+  classNameOptions
 }: {
   slot: WritebackSlot;
   text: string;
   busy: boolean;
   registerNode: (slotId: string, node: HTMLSpanElement | null) => void;
   onChange: (slotId: string, value: string) => void;
+  classNameOptions?: { baseClassName?: string; protectedClassName?: string };
 }) {
   const nodeRef = useRef<HTMLSpanElement | null>(null);
 
@@ -75,7 +77,7 @@ export const EditableSlotSpan = memo(function EditableSlotSpan({
   return (
     <span
       ref={nodeRef}
-      className={slotPresentationClass(slot)}
+      className={slotPresentationClass(slot, classNameOptions)}
       contentEditable={!busy}
       suppressContentEditableWarning
       spellCheck={false}

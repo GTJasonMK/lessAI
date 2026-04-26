@@ -7,7 +7,7 @@ import {
   editorEntryBlockedReason,
   sessionSupportsEditorEntry
 } from "../../lib/documentCapabilities";
-import { buildEditorSlotEdits, buildEditorTextFromSession } from "../../lib/editorSlots";
+import { buildEditorSlotEdits } from "../../lib/editorSlots";
 import type { DocumentSession, DocumentSnapshot, RewriteProgress } from "../../lib/types";
 import {
   normalizeNewlines,
@@ -48,6 +48,12 @@ export function useDocumentActions(options: {
   withBusy: WithBusy;
 }) {
   const demoRuntime = isDemoRuntime();
+
+  const buildEditorBaseline = useCallback(
+    (session: DocumentSession) => normalizeNewlines(session.sourceText),
+    []
+  );
+
   const {
     busyAction,
     stageRef,
@@ -170,17 +176,13 @@ export function useDocumentActions(options: {
       return;
     }
 
-    startTransition(() => {
-      setStage("editor");
-      const baseline = documentEditorMode(latestSession) === "slotBased"
-        ? buildEditorTextFromSession(latestSession, {})
-        : normalizeNewlines(latestSession.sourceText);
-      setEditorSlotOverrides({});
-      setEditorBaselineText(baseline);
-      setEditorText(baseline);
-      setLiveProgress(null);
-      setSettingsOpen(false);
-    });
+    const baseline = buildEditorBaseline(latestSession);
+    setStage("editor");
+    setEditorSlotOverrides({});
+    setEditorBaselineText(baseline);
+    setEditorText(baseline);
+    setLiveProgress(null);
+    setSettingsOpen(false);
     editorBaseSnapshotRef.current = latestSession.sourceSnapshot ?? null;
     if (documentEditorMode(latestSession) === "slotBased") {
       showNotice(
@@ -190,6 +192,7 @@ export function useDocumentActions(options: {
     }
   }, [
     busyAction,
+    buildEditorBaseline,
     currentSessionRef,
     editorBaseSnapshotRef,
     refreshSessionState,
@@ -288,9 +291,7 @@ export function useDocumentActions(options: {
         setLiveProgress(null);
 
         startTransition(() => {
-          const baseline = documentEditorMode(updated) === "slotBased"
-            ? buildEditorTextFromSession(updated, {})
-            : normalizeNewlines(updated.sourceText);
+          const baseline = buildEditorBaseline(updated);
           setEditorSlotOverrides({});
           setEditorBaselineText(baseline);
           setEditorText(baseline);
@@ -320,10 +321,11 @@ export function useDocumentActions(options: {
       activeRewriteUnitIdRef,
       applySessionState,
       captureDocumentScrollPosition,
-      currentSessionRef,
-      editorDirtyRef,
-      editorBaseSnapshotRef,
-      editorSlotOverridesRef,
+    currentSessionRef,
+    buildEditorBaseline,
+    editorDirtyRef,
+    editorBaseSnapshotRef,
+    editorSlotOverridesRef,
       editorTextRef,
       setEditorBaselineText,
       setEditorSlotOverrides,

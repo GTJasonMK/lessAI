@@ -16,10 +16,20 @@ interface StructuredEditorUnitProps {
 }
 
 function buildUnitClassName(hasEditableSlot: boolean) {
-  return ["structured-editor-unit", hasEditableSlot ? "" : "is-protected"]
+  return [
+    "doc-unit",
+    "doc-paragraph-unit",
+    "structured-editor-unit",
+    hasEditableSlot ? "" : "is-protected"
+  ]
     .filter(Boolean)
     .join(" ");
 }
+
+const slotClassOptions = {
+  baseClassName: "doc-paragraph-fragment structured-editor-slot",
+  protectedClassName: "is-fragment-protected is-locked"
+} as const;
 
 export const StructuredEditorUnit = memo(function StructuredEditorUnit({
   session,
@@ -38,7 +48,7 @@ export const StructuredEditorUnit = memo(function StructuredEditorUnit({
   const trailingSeparator = slots[slots.length - 1]?.separatorAfter ?? "";
 
   return (
-    <Fragment>
+    <span className="doc-unit-wrap">
       <span className={buildUnitClassName(hasEditableSlot)} data-rewrite-unit-id={rewriteUnit.id}>
         {slots.map((slot, index) => {
           const text = resolveEditorSlotText(slot, slotOverrides);
@@ -52,16 +62,17 @@ export const StructuredEditorUnit = memo(function StructuredEditorUnit({
                   busy={busy}
                   registerNode={registerNode}
                   onChange={onChangeSlotText}
+                  classNameOptions={slotClassOptions}
                 />
               ) : (
-                <span className={slotPresentationClass(slot)}>{text}</span>
+                <span className={slotPresentationClass(slot, slotClassOptions)}>{text}</span>
               )}
               {intraUnitSeparator}
             </Fragment>
           );
         })}
       </span>
-      {trailingSeparator}
-    </Fragment>
+      {trailingSeparator ? <span className="doc-unit-separator">{trailingSeparator}</span> : null}
+    </span>
   );
 });

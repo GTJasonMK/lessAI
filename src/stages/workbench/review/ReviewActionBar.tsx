@@ -63,9 +63,7 @@ export const ReviewActionBar = memo(function ReviewActionBar({
           className="workbench-review-actionbar workbench-action-row is-editor"
           aria-hidden={!editorMode}
         >
-          <div className="workbench-review-actionbar-status">
-            <StatusBadge tone="info">编辑模式</StatusBadge>
-          </div>
+          <div className="workbench-review-actionbar-status" />
         </div>
       </div>
     </div>

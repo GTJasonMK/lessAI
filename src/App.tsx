@@ -198,10 +198,8 @@ export default function App() {
       normalized
     );
 
-    startTransition(() => {
-      setEditorSlotOverrides(nextOverrides);
-      setEditorText(buildEditorTextFromSession(session, nextOverrides));
-    });
+    setEditorSlotOverrides(nextOverrides);
+    setEditorText(buildEditorTextFromSession(session, nextOverrides));
   }, []);
 
   const currentStats = useMemo(

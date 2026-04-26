@@ -307,11 +307,14 @@
 }
 
 .workbench-doc-actionbar {
-  display: flex;
+  --slot-duration: 220ms;
+  --slot-ease: cubic-bezier(0.22, 0.8, 0.2, 1);
+  --slot-height: 46px;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto 416px;
   align-items: center;
-  justify-content: space-between;
+  justify-content: stretch;
   gap: 12px;
-  flex-wrap: nowrap;
   max-width: 100%;
 }
 
@@ -339,8 +342,9 @@
 }
 
 .workbench-doc-panel .panel-action {
-  flex: 0 1 auto;
-  min-width: 0;
+  flex: 0 0 auto;
+  min-width: max-content;
+  overflow: visible;
 }
 
 .workbench-review-panel .panel-header {
@@ -378,7 +382,6 @@
 .workbench-doc-actionbar-right {
   display: flex;
   align-items: center;
-  justify-content: flex-end;
   gap: 8px;
   flex-wrap: nowrap;
   min-width: 0;
@@ -386,32 +389,53 @@
 }
 
 .workbench-doc-actionbar-left {
-  flex: 0 1 auto;
-  min-width: 0;
   justify-content: flex-start;
 }
 
-.workbench-doc-actionbar-right {
+.workbench-doc-actionbar-left .workbench-view-reel {
   flex: 1 1 auto;
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) auto auto;
-  align-items: center;
-  justify-content: end;
-  gap: 8px;
-  overflow: visible;
+  min-width: 0;
+}
+
+.workbench-doc-actionbar-left .workbench-view-reel .workbench-action-row {
+  min-width: 0;
+}
+
+.workbench-doc-actionbar-right {
+  inline-size: 416px;
+  min-inline-size: 416px;
+  max-inline-size: 416px;
+  justify-content: flex-end;
+  justify-self: end;
+}
+
+.workbench-doc-actionbar-right > * {
+  flex: 0 0 auto;
+}
+
+.workbench-doc-actionbar-right .workbench-doc-actionbar-right-reel {
+  inline-size: 100%;
+  padding: 0;
+  overflow-x: visible;
+}
+
+.workbench-doc-actionbar-right .workbench-doc-actionbar-right-reel .workbench-action-row {
+  justify-content: flex-end;
 }
 
 .workbench-action-reel {
-  --slot-duration: 240ms;
-  --slot-ease: cubic-bezier(0.22, 0.8, 0.2, 1);
-  --slot-height: 46px;
   height: var(--slot-height);
   overflow-y: hidden;
   overflow-x: hidden;
 }
 
 .workbench-doc-actionbar .workbench-action-reel {
-  /* 给阴影/边框留一点“内边距缓冲”，避免看起来像被裁切了一点点 */
+  padding: 0;
+  overflow-x: visible;
+}
+
+.workbench-doc-actionbar-left .workbench-action-reel {
+  /* 左侧视图按钮保持轻微内边距，避免贴边观感 */
   padding: 0 6px;
   overflow-x: hidden;
 }
@@ -420,7 +444,7 @@
   display: grid;
   grid-auto-rows: var(--slot-height);
   transform: translateY(0);
-  transition: transform var(--slot-duration) var(--slot-ease);
+  transition: transform var(--slot-duration, 220ms) var(--slot-ease, cubic-bezier(0.22, 0.8, 0.2, 1));
   will-change: transform;
 }
 
@@ -440,6 +464,14 @@
   gap: 6px;
 }
 
+.workbench-doc-actionbar-right .workbench-action-row {
+  display: grid;
+  grid-template-columns: repeat(4, 36px) 152px 36px 36px;
+  justify-content: end;
+  align-items: center;
+  gap: 6px;
+}
+
 .workbench-doc-actionbar .switch-chip:hover:not(:disabled),
 .workbench-doc-actionbar .switch-chip:active:not(:disabled),
 .workbench-doc-actionbar .toolbar-button:hover:not(:disabled),
@@ -456,8 +488,9 @@
 }
 
 .workbench-doc-actionbar-right .toolbar-button {
-  min-width: 132px;
-  padding: 0 14px;
+  min-width: 0;
+  inline-size: 100%;
+  padding: 0 12px;
   gap: 8px;
 }
 
@@ -466,36 +499,59 @@
   min-width: 152px;
 }
 
+.workbench-doc-primary-action {
+  inline-size: 152px;
+  min-width: 152px;
+}
+
 .workbench-action-row {
   display: flex;
+  inline-size: 100%;
+  min-block-size: var(--slot-height);
   align-items: center;
   justify-content: flex-end;
   gap: 8px;
   flex-wrap: nowrap;
+  opacity: 1;
+  transition:
+    opacity var(--slot-duration, 220ms) var(--slot-ease, cubic-bezier(0.22, 0.8, 0.2, 1)),
+    visibility 0s linear 0s;
 }
 
 .workbench-action-row.is-editor {
+  opacity: 0;
   visibility: hidden;
   pointer-events: none;
-  transition: visibility 0s linear var(--slot-duration);
+  transition:
+    opacity var(--slot-duration, 220ms) var(--slot-ease, cubic-bezier(0.22, 0.8, 0.2, 1)),
+    visibility 0s linear var(--slot-duration, 220ms);
 }
 
 .workbench-action-row.is-normal {
+  opacity: 1;
   visibility: visible;
   pointer-events: auto;
-  transition: visibility 0s linear 0s;
+  transition:
+    opacity var(--slot-duration, 220ms) var(--slot-ease, cubic-bezier(0.22, 0.8, 0.2, 1)),
+    visibility 0s linear 0s;
 }
 
 .workbench-action-reel.is-editor .workbench-action-row.is-normal {
+  opacity: 0;
   visibility: hidden;
   pointer-events: none;
-  transition: visibility 0s linear var(--slot-duration);
+  transition:
+    opacity var(--slot-duration, 220ms) var(--slot-ease, cubic-bezier(0.22, 0.8, 0.2, 1)),
+    visibility 0s linear var(--slot-duration, 220ms);
 }
 
 .workbench-action-reel.is-editor .workbench-action-row.is-editor {
+  opacity: 1;
   visibility: visible;
   pointer-events: auto;
-  transition: visibility 0s linear 0s;
+  transition:
+    opacity var(--slot-duration, 220ms) var(--slot-ease, cubic-bezier(0.22, 0.8, 0.2, 1)),
+    visibility 0s linear 0s;
 }
 
 .workbench-doc-actionbar-left .switch-chip {
@@ -504,9 +560,106 @@
   font-size: 0.82rem;
 }
 
+.workbench-doc-markers-toggle {
+  flex: 0 0 auto;
+  justify-self: center;
+}
+
+.workbench-doc-fixed-placeholder {
+  pointer-events: none;
+}
+
 .panel-body.workbench-center-body {
   overflow: hidden;
   padding: 10px 12px 12px;
+}
+
+.paper-content.workbench-mode-host {
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+}
+
+.workbench-mode-switch {
+  --mode-switch-duration: 220ms;
+  --mode-switch-ease: cubic-bezier(0.22, 0.8, 0.2, 1);
+  --mode-slide-distance: 20px;
+  position: relative;
+  flex: 1;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.workbench-mode-pane {
+  position: absolute;
+  inset: 0;
+  min-height: 0;
+  opacity: 1;
+  visibility: visible;
+  pointer-events: auto;
+  transition:
+    transform var(--mode-switch-duration) var(--mode-switch-ease),
+    opacity var(--mode-switch-duration) var(--mode-switch-ease),
+    visibility 0s linear 0s;
+}
+
+.workbench-mode-pane.is-normal {
+  transform: translateY(0);
+}
+
+.workbench-mode-pane.is-editor {
+  transform: translateY(var(--mode-slide-distance));
+  opacity: 0;
+  visibility: hidden;
+  pointer-events: none;
+  transition:
+    transform var(--mode-switch-duration) var(--mode-switch-ease),
+    opacity var(--mode-switch-duration) var(--mode-switch-ease),
+    visibility 0s linear var(--mode-switch-duration);
+}
+
+.workbench-mode-switch.is-editor .workbench-mode-pane.is-normal {
+  transform: translateY(calc(-1 * var(--mode-slide-distance)));
+  opacity: 0;
+  visibility: hidden;
+  pointer-events: none;
+  transition:
+    transform var(--mode-switch-duration) var(--mode-switch-ease),
+    opacity var(--mode-switch-duration) var(--mode-switch-ease),
+    visibility 0s linear var(--mode-switch-duration);
+}
+
+.workbench-mode-switch.is-editor .workbench-mode-pane.is-editor {
+  transform: translateY(0);
+  opacity: 1;
+  visibility: visible;
+  pointer-events: auto;
+  transition:
+    transform var(--mode-switch-duration) var(--mode-switch-ease),
+    opacity var(--mode-switch-duration) var(--mode-switch-ease),
+    visibility 0s linear 0s;
+}
+
+.workbench-mode-content {
+  block-size: 100%;
+  min-height: 0;
+}
+
+.workbench-doc-mode-content {
+  overflow-x: hidden;
+  overflow-y: auto;
+}
+
+.workbench-review-mode-switch {
+  --mode-slide-distance: 14px;
+  min-height: 0;
+}
+
+.workbench-review-mode-content {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  overflow: hidden;
 }
 
 .workbench-editor-paper {
@@ -550,6 +703,13 @@
   .workbench-action-reel.is-editor .workbench-action-row.is-normal {
     transition: none;
   }
+
+  .workbench-mode-pane,
+  .workbench-mode-pane.is-editor,
+  .workbench-mode-switch.is-editor .workbench-mode-pane.is-normal,
+  .workbench-mode-switch.is-editor .workbench-mode-pane.is-editor {
+    transition: none;
+  }
 }
 
 .workbench-tabbar .status-badge {
@@ -568,6 +728,10 @@
 
 .panel-body.workbench-review-body {
   overflow: hidden;
+}
+
+.panel-body.workbench-review-body > .workbench-mode-switch {
+  flex: 1;
 }
 
 .workbench-review-actionbar {

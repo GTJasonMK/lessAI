@@ -1,6 +1,7 @@
 import { memo } from "react";
 import type { DocumentSession, RewriteSuggestion, RewriteUnit } from "../../lib/types";
 import type { SessionStats } from "../../lib/helpers";
+import type { EditorSlotOverrides } from "../../lib/editorSlots";
 import { Panel } from "../../components/Panel";
 import { EditorReviewPane } from "./review/EditorReviewPane";
 import { ReviewActionBar } from "./review/ReviewActionBar";
@@ -19,6 +20,7 @@ interface ReviewPanelProps {
   busyAction: string | null;
   editorMode: boolean;
   editorText: string;
+  editorSlotOverrides: EditorSlotOverrides;
   editorDirty: boolean;
   orderedSuggestions: RewriteSuggestion[];
   onOpenSettings: () => void;
@@ -42,6 +44,7 @@ export const ReviewPanel = memo(function ReviewPanel({
   busyAction,
   editorMode,
   editorText,
+  editorSlotOverrides,
   editorDirty,
   orderedSuggestions,
   onOpenSettings,
@@ -74,33 +77,50 @@ export const ReviewPanel = memo(function ReviewPanel({
       }
     >
       {currentSession && currentStats ? (
-        editorMode ? (
-          <EditorReviewPane
-            currentSession={currentSession}
-            editorText={editorText}
-            editorDirty={editorDirty}
-            showMarkers={showMarkers}
-          />
-        ) : (
-          <SuggestionReviewPane
-            settingsReady={settingsReady}
-            currentSession={currentSession}
-            currentStats={currentStats}
-            activeRewriteUnit={activeRewriteUnit}
-            activeSuggestionId={activeSuggestionId}
-            orderedSuggestions={orderedSuggestions}
-            anyBusy={anyBusy}
-            busyAction={busyAction}
-            rewriteRunning={rewriteRunning ?? false}
-            rewritePaused={rewritePaused ?? false}
-            onSelectRewriteUnit={onSelectRewriteUnit}
-            onSelectSuggestion={onSelectSuggestion}
-            onApplySuggestion={onApplySuggestion}
-            onDismissSuggestion={onDismissSuggestion}
-            onDeleteSuggestion={onDeleteSuggestion}
-            onRetry={onRetry}
-          />
-        )
+        <div className={`workbench-mode-switch workbench-review-mode-switch ${editorMode ? "is-editor" : ""}`}>
+          <div
+            className="workbench-mode-pane is-normal"
+            aria-hidden={editorMode}
+            inert={editorMode}
+          >
+            <div className="workbench-mode-content workbench-review-mode-content">
+              <SuggestionReviewPane
+                settingsReady={settingsReady}
+                currentSession={currentSession}
+                currentStats={currentStats}
+                activeRewriteUnit={activeRewriteUnit}
+                activeSuggestionId={activeSuggestionId}
+                orderedSuggestions={orderedSuggestions}
+                anyBusy={anyBusy}
+                busyAction={busyAction}
+                rewriteRunning={rewriteRunning ?? false}
+                rewritePaused={rewritePaused ?? false}
+                onSelectRewriteUnit={onSelectRewriteUnit}
+                onSelectSuggestion={onSelectSuggestion}
+                onApplySuggestion={onApplySuggestion}
+                onDismissSuggestion={onDismissSuggestion}
+                onDeleteSuggestion={onDeleteSuggestion}
+                onRetry={onRetry}
+              />
+            </div>
+          </div>
+
+          <div
+            className="workbench-mode-pane is-editor"
+            aria-hidden={!editorMode}
+            inert={!editorMode}
+          >
+            <div className="workbench-mode-content workbench-review-mode-content">
+              <EditorReviewPane
+                currentSession={currentSession}
+                editorText={editorText}
+                editorSlotOverrides={editorSlotOverrides}
+                editorDirty={editorDirty}
+                showMarkers={showMarkers}
+              />
+            </div>
+          </div>
+        </div>
       ) : (
         <ReviewEmptyState
           settingsReady={settingsReady}

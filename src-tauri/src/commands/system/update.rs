@@ -5,6 +5,8 @@ use std::{
     time::Duration,
 };
 
+use base64::Engine;
+use minisign_verify::{PublicKey, Signature};
 use reqwest::{
     header::{ACCEPT, USER_AGENT},
     Client, Proxy, Url,
@@ -24,6 +26,7 @@ const GITHUB_RELEASE_BY_TAG_API_URL_TEMPLATE: &str =
 const RELEASE_MANIFEST_URL_TEMPLATE: &str =
     "https://github.com/GTJasonMK/lessAI/releases/download/{tag}/latest.json";
 const SYSTEM_PACKAGE_MANIFEST_ASSET_NAME: &str = "system-packages.json";
+const SYSTEM_PACKAGE_MANIFEST_SIGNATURE_ASSET_NAME: &str = "system-packages.json.sig";
 const RELEASES_USER_AGENT: &str = "LessAI-VersionManager/1.0";
 
 #[derive(Debug, Clone, Serialize)]
@@ -294,6 +297,56 @@ fn parse_system_packages_manifest(bytes: &[u8]) -> Result<SystemPackagesManifest
     Ok(manifest)
 }
 
+fn parse_updater_public_key(pubkey_b64: &str) -> Result<PublicKey, String> {
+    let encoded = pubkey_b64.trim();
+    if encoded.is_empty() {
+        return Err("更新公钥为空，无法校验系统安装清单签名。".to_string());
+    }
+
+    let decoded_bytes = base64::engine::general_purpose::STANDARD
+        .decode(encoded)
+        .map_err(|error| format!("解析更新公钥失败（base64）：{error}"))?;
+    let decoded_text = String::from_utf8(decoded_bytes)
+        .map_err(|error| format!("解析更新公钥失败（UTF-8）：{error}"))?;
+    let decoded_text = decoded_text.trim();
+
+    PublicKey::decode(decoded_text)
+        .or_else(|_| PublicKey::from_base64(decoded_text))
+        .map_err(|error| format!("解析更新公钥失败：{error}"))
+}
+
+fn updater_public_key_from_config(app: &AppHandle) -> Result<PublicKey, String> {
+    let updater_config = app
+        .config()
+        .plugins
+        .0
+        .get("updater")
+        .ok_or_else(|| "应用配置缺少 updater 插件配置，无法校验系统安装清单签名。".to_string())?;
+    let updater_object = updater_config
+        .as_object()
+        .ok_or_else(|| "应用配置中的 updater 插件格式无效，无法校验系统安装清单签名。".to_string())?;
+    let pubkey_b64 = updater_object
+        .get("pubkey")
+        .and_then(|value| value.as_str())
+        .ok_or_else(|| "应用配置缺少 updater.pubkey，无法校验系统安装清单签名。".to_string())?;
+    parse_updater_public_key(pubkey_b64)
+}
+
+fn verify_manifest_signature(
+    manifest_bytes: &[u8],
+    signature_bytes: &[u8],
+    public_key: &PublicKey,
+) -> Result<(), String> {
+    let signature_text = std::str::from_utf8(signature_bytes)
+        .map_err(|error| format!("system-packages.json.sig 不是合法 UTF-8 文本：{error}"))?;
+    let signature = Signature::decode(signature_text.trim())
+        .map_err(|error| format!("解析 system-packages.json.sig 失败：{error}"))?;
+    public_key
+        .verify(manifest_bytes, &signature, false)
+        .map_err(|error| format!("system-packages.json 签名校验失败：{error}"))?;
+    Ok(())
+}
+
 fn run_pkexec_install(kind: SystemPackageKind, package_path: &Path) -> Result<(), String> {
     if !command_exists("pkexec") {
         return Err(
@@ -510,7 +563,19 @@ pub async fn install_system_package_release(
                 "目标版本 {tag} 缺少 {SYSTEM_PACKAGE_MANIFEST_ASSET_NAME}，无法安全校验系统安装包。请手动下载并安装。"
             )
         })?;
+    let manifest_sig_asset = find_release_asset_by_name(
+        &release.assets,
+        SYSTEM_PACKAGE_MANIFEST_SIGNATURE_ASSET_NAME,
+    )
+    .ok_or_else(|| {
+        format!(
+            "目标版本 {tag} 缺少 {SYSTEM_PACKAGE_MANIFEST_SIGNATURE_ASSET_NAME}，无法验证系统包清单来源。请手动下载并安装。"
+        )
+    })?;
     let manifest_bytes = download_release_asset_bytes(&client, manifest_asset).await?;
+    let manifest_sig_bytes = download_release_asset_bytes(&client, manifest_sig_asset).await?;
+    let updater_public_key = updater_public_key_from_config(&app)?;
+    verify_manifest_signature(&manifest_bytes, &manifest_sig_bytes, &updater_public_key)?;
     let manifest = parse_system_packages_manifest(&manifest_bytes)?;
     let manifest_entry =
         pick_manifest_package_entry(&manifest, package_kind).ok_or_else(|| {
@@ -559,10 +624,13 @@ pub async fn install_system_package_release(
 #[cfg(test)]
 mod tests {
     use super::{
-        current_arch_aliases, normalize_release_tag, pick_manifest_package_entry,
-        sanitize_asset_file_name, sha256_hex, SystemPackageKind, SystemPackageManifestEntry,
+        current_arch_aliases, normalize_release_tag, parse_updater_public_key,
+        pick_manifest_package_entry, sanitize_asset_file_name, sha256_hex,
+        verify_manifest_signature, SystemPackageKind, SystemPackageManifestEntry,
         SystemPackagesManifest,
     };
+    use base64::Engine;
+    use minisign_verify::{PublicKey, Signature};
 
     #[test]
     fn normalize_release_tag_rejects_path_separator() {
@@ -626,5 +694,56 @@ mod tests {
             digest,
             "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad"
         );
+    }
+
+    #[test]
+    fn parse_updater_public_key_accepts_base64_wrapped_minisign_pub() {
+        let encoded = base64::engine::general_purpose::STANDARD.encode(
+            "untrusted comment: minisign public key E7620F1842B4E81F\nRWQf6LRCGA9i53mlYecO4IzT51TGPpvWucNSCh1CBM0QTaLn73Y7GFO3\n",
+        );
+        let parsed = parse_updater_public_key(&encoded).expect("expected updater pubkey parse");
+        let expected =
+            PublicKey::from_base64("RWQf6LRCGA9i53mlYecO4IzT51TGPpvWucNSCh1CBM0QTaLn73Y7GFO3")
+                .expect("public key");
+        let signature = Signature::decode(
+            "untrusted comment: signature from minisign secret key\n\
+             RUQf6LRCGA9i559r3g7V1qNyJDApGip8MfqcadIgT9CuhV3EMhHoN1mGTkUidF/z7SrlQgXdy8ofjb7bNJJylDOocrCo8KLzZwo=\n\
+             trusted comment: timestamp:1556193335\tfile:test\n\
+             y/rUw2y8/hOUYjZU71eHp/Wo1KZ40fGy2VJEDl34XMJM+TX48Ss/17u3IvIfbVR1FkZZSNCisQbuQY+bHwhEBg==",
+        )
+        .expect("signature");
+        parsed
+            .verify(b"test", &signature, false)
+            .expect("parsed key should verify signature");
+        expected
+            .verify(b"test", &signature, false)
+            .expect("expected key should verify signature");
+    }
+
+    #[test]
+    fn verify_manifest_signature_accepts_valid_signature() {
+        let public_key =
+            PublicKey::from_base64("RWQf6LRCGA9i53mlYecO4IzT51TGPpvWucNSCh1CBM0QTaLn73Y7GFO3")
+                .expect("public key");
+        let signature = r#"untrusted comment: signature from minisign secret key
+RUQf6LRCGA9i559r3g7V1qNyJDApGip8MfqcadIgT9CuhV3EMhHoN1mGTkUidF/z7SrlQgXdy8ofjb7bNJJylDOocrCo8KLzZwo=
+trusted comment: timestamp:1556193335	file:test
+y/rUw2y8/hOUYjZU71eHp/Wo1KZ40fGy2VJEDl34XMJM+TX48Ss/17u3IvIfbVR1FkZZSNCisQbuQY+bHwhEBg=="#;
+        verify_manifest_signature(b"test", signature.as_bytes(), &public_key)
+            .expect("signature should verify");
+    }
+
+    #[test]
+    fn verify_manifest_signature_rejects_tampered_bytes() {
+        let public_key =
+            PublicKey::from_base64("RWQf6LRCGA9i53mlYecO4IzT51TGPpvWucNSCh1CBM0QTaLn73Y7GFO3")
+                .expect("public key");
+        let signature = r#"untrusted comment: signature from minisign secret key
+RUQf6LRCGA9i559r3g7V1qNyJDApGip8MfqcadIgT9CuhV3EMhHoN1mGTkUidF/z7SrlQgXdy8ofjb7bNJJylDOocrCo8KLzZwo=
+trusted comment: timestamp:1556193335	file:test
+y/rUw2y8/hOUYjZU71eHp/Wo1KZ40fGy2VJEDl34XMJM+TX48Ss/17u3IvIfbVR1FkZZSNCisQbuQY+bHwhEBg=="#;
+        let error = verify_manifest_signature(b"test-tampered", signature.as_bytes(), &public_key)
+            .expect_err("signature should fail");
+        assert!(error.contains("签名校验失败"));
     }
 }

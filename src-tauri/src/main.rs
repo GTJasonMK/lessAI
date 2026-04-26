@@ -75,7 +75,12 @@ fn apply_linux_graphics_compat_env() {
                 (parsed, true)
             }
             Err(_) => {
-                if appimage_runtime {
+                let force_gpu = std::env::var("LESSAI_FORCE_GPU")
+                    .map(|value| value == "1")
+                    .unwrap_or(false);
+                if force_gpu {
+                    (GraphicsMode::Native, false)
+                } else if appimage_runtime {
                     (GraphicsMode::Safe, false)
                 } else {
                     (GraphicsMode::Auto, false)
