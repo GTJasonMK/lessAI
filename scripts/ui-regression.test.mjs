@@ -584,8 +584,9 @@ assertRule(part04, ".document-flow-status", "top", "0");
 assertRule(part04, ".document-flow-status", "right", "0");
 
 // 8) 文案切换时，“处理所选 / 开始批处理 / 暂停 / 继续”主按钮不能改变整排布局
-assertRule(part02, ".workbench-doc-actionbar-right .toolbar-button.is-run-action", "inline-size", "152px");
-assertRule(part02, ".workbench-doc-actionbar-right .toolbar-button.is-run-action", "min-width", "152px");
+// 使用统一变量，避免按钮宽度策略调整后与测试断言漂移。
+assertRule(part02, ".workbench-doc-actionbar-right .toolbar-button.is-run-action", "inline-size", "var(--doc-action-primary-width)");
+assertRule(part02, ".workbench-doc-actionbar-right .toolbar-button.is-run-action", "min-width", "var(--doc-action-primary-width)");
 
 // 9) TeX 的 \\texttt{...} 应被标成单个保护区
 const textttMarkup = renderTexMarkup(
